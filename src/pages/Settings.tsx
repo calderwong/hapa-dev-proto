@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 
 const Settings: React.FC = () => {
     const [geminiKey, setGeminiKey] = useState('');
+    const [openaiKey, setOpenaiKey] = useState('');
     const [firebaseConfig, setFirebaseConfig] = useState('');
+    const [revidKey, setRevidKey] = useState('');
     const [status, setStatus] = useState('');
 
     useEffect(() => {
@@ -10,7 +12,9 @@ const Settings: React.FC = () => {
             if (window.electronAPI) {
                 const settings = await window.electronAPI.getSettings();
                 setGeminiKey(settings.geminiKey);
+                setOpenaiKey(settings.openaiKey || '');
                 setFirebaseConfig(settings.firebaseConfig);
+                setRevidKey(settings.revidKey || '');
             }
         };
         loadSettings();
@@ -18,7 +22,7 @@ const Settings: React.FC = () => {
 
     const handleSave = async () => {
         if (window.electronAPI) {
-            await window.electronAPI.saveSettings({ geminiKey, firebaseConfig });
+            await window.electronAPI.saveSettings({ geminiKey, openaiKey, firebaseConfig, revidKey });
             setStatus('Settings saved!');
             setTimeout(() => setStatus(''), 3000);
         } else {
@@ -41,6 +45,38 @@ const Settings: React.FC = () => {
                             onChange={(e) => setGeminiKey(e.target.value)}
                             className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500 transition-colors"
                             placeholder="Enter your Gemini API Key"
+                        />
+                    </div>
+
+                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                    <h3 className="text-xl font-semibold mb-4 text-pink-400">Revid.ai</h3>
+                    <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-300">API Key</label>
+                        <input
+                            type="password"
+                            value={revidKey}
+                            onChange={(e) => setRevidKey(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-pink-500 transition-colors"
+                            placeholder="Enter your Revid API Key"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                            Get your API key from your Revid account. Calls consume credits based on your plan and
+                            options.
+                        </p>
+                    </div>
+                </div>
+                </div>
+
+                <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                    <h3 className="text-xl font-semibold mb-4 text-indigo-400">OpenAI</h3>
+                    <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-300">API Key</label>
+                        <input
+                            type="password"
+                            value={openaiKey}
+                            onChange={(e) => setOpenaiKey(e.target.value)}
+                            className="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500 transition-colors"
+                            placeholder="Enter your OpenAI API Key"
                         />
                     </div>
                 </div>

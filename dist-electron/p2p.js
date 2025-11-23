@@ -45,21 +45,57 @@ const hyperswarm_1 = __importDefault(require("hyperswarm"));
 const b4a = __importStar(require("b4a"));
 const cores = new Map();
 let swarm;
+let swarmInitialized = false;
+const joinedTopics = new Set();
 function initP2P() {
+    if (swarmInitialized)
+        return;
     swarm = new hyperswarm_1.default();
+    swarm.on('connection', (conn, info) => {
+        try {
+            const peerKey = (info && info.publicKey)
+                ? b4a.toString(info.publicKey, 'hex')
+                : undefined;
+            const topics = (info && Array.isArray(info.topics))
+                ? info.topics.map((t) => b4a.toString(t, 'hex'))
+                : undefined;
+            console.log('P2P connection established', {
+                peerPublicKey: peerKey,
+                topics,
+            });
+        }
+        catch {
+            // Logging only; ignore errors here
+        }
+        for (const core of cores.values()) {
+            const stream = core.replicate(conn);
+            stream.on('error', (err) => console.error('Replication error:', err));
+        }
+    });
+    swarmInitialized = true;
     console.log('P2P initialized');
 }
 async function createCore(name) {
-    const core = new hypercore_1.default('./storage/' + name);
+    if (!swarm) {
+        throw new Error('P2P swarm not initialized. Call initP2P() first.');
+    }
+    let core = cores.get(name);
+    if (!core) {
+        core = new hypercore_1.default('./storage/' + name);
+        cores.set(name, core);
+    }
     await core.ready();
-    cores.set(name, core);
-    swarm.on('connection', (conn, info) => {
-        const stream = core.replicate(conn);
-        stream.on('error', (err) => console.error('Replication error:', err));
-    });
-    swarm.join(core.discoveryKey);
-    await swarm.flush();
-    return { key: b4a.toString(core.key, 'hex'), length: core.length };
+    const topicHex = b4a.toString(core.discoveryKey, 'hex');
+    if (!joinedTopics.has(topicHex)) {
+        swarm.join(core.discoveryKey);
+        joinedTopics.add(topicHex);
+        await swarm.flush();
+    }
+    return {
+        key: b4a.toString(core.key, 'hex'),
+        discoveryKey: topicHex,
+        length: core.length,
+    };
 }
 async function appendToCore(name, data) {
     const core = cores.get(name);

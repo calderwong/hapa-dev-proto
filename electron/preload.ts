@@ -6,7 +6,48 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSettings: () => ipcRenderer.invoke('get-settings'),
     saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
     listGeminiModels: () => ipcRenderer.invoke('list-gemini-models'),
-    chatWithGemini: (data: { message: string; history: any[]; model?: string }) => ipcRenderer.invoke('chat-with-gemini', data),
+    listOpenAIModels: () => ipcRenderer.invoke('list-openai-models'),
+    listLlamaModels: () => ipcRenderer.invoke('list-llama-models'),
+    chatWithGemini: (data: { message: string; history: any[]; model?: string; attachments?: { mimeType: string; data: string }[] }) =>
+        ipcRenderer.invoke('chat-with-gemini', data),
+    chatWithOpenAI: (data: { message: string; history: any[]; model?: string; attachments?: { mimeType: string; data: string }[] }) =>
+        ipcRenderer.invoke('chat-with-openai', data),
+    chatWithLlama: (data: { message: string; history: any[]; model?: string; attachments?: { mimeType: string; data: string }[] }) =>
+        ipcRenderer.invoke('chat-with-llama', data),
+    getLlamaSettings: () => ipcRenderer.invoke('get-llama-settings'),
+    saveLlamaSettings: (settings: any) => ipcRenderer.invoke('save-llama-settings', settings),
+    getLlamaStatus: () => ipcRenderer.invoke('get-llama-status'),
+    startLlamaServer: () => ipcRenderer.invoke('start-llama-server'),
+    stopLlamaServer: () => ipcRenderer.invoke('stop-llama-server'),
+    listLlamaLocalModels: () => ipcRenderer.invoke('list-llama-local-models'),
+    hfSearchGGUFModels: (params: { query: string }) =>
+        ipcRenderer.invoke('hf-search-gguf-models', params),
+    deleteLlamaModel: (params: { path: string }) => ipcRenderer.invoke('delete-llama-model', params),
+    downloadLlamaModel: (params: { url: string; fileName?: string }) =>
+        ipcRenderer.invoke('download-llama-model', params),
+    geminiListRequests: () => ipcRenderer.invoke('gemini-list-requests'),
+    geminiSaveRequest: (entry: any) => ipcRenderer.invoke('gemini-save-request', entry),
+    getAdminSettings: () => ipcRenderer.invoke('get-admin-settings'),
+    saveAdminSettings: (settings: any) => ipcRenderer.invoke('save-admin-settings', settings),
+    onChatStream: (listener: (payload: any) => void) => {
+        ipcRenderer.on('chat-stream', (_event, payload) => listener(payload));
+    },
+    openaiStartAudioSession: () => ipcRenderer.invoke('openai-audio-start-session'),
+    openaiAppendAudioChunk: (params: { sessionId: string; base64: string; mimeType: string }) =>
+        ipcRenderer.invoke('openai-audio-append-chunk', params),
+    openaiStopAudioSession: (params: { sessionId: string }) =>
+        ipcRenderer.invoke('openai-audio-stop-session', params),
+    onAudioTranscriptStream: (listener: (payload: any) => void) => {
+        ipcRenderer.on('audio-transcript-stream', (_event, payload) => listener(payload));
+    },
+    revidEstimateCredits: (params: { creationParams: any }) =>
+        ipcRenderer.invoke('revid-estimate-credits', params),
+    revidRender: (params: any) =>
+        ipcRenderer.invoke('revid-render', params),
+    revidGetStatus: (params: { pid: string }) =>
+        ipcRenderer.invoke('revid-get-status', params),
+    revidListProjects: (params: { limit?: number }) =>
+        ipcRenderer.invoke('revid-list-projects', params),
     p2pCreateCore: (name: string) => ipcRenderer.invoke('p2p-create-core', name),
     p2pAppend: (data: { name: string; data: string }) => ipcRenderer.invoke('p2p-append', data),
     p2pRead: (name: string) => ipcRenderer.invoke('p2p-read', name),

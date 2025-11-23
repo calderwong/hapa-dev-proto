@@ -7,6 +7,11 @@ import Settings from './pages/Settings';
 import { initFirebase } from './firebase';
 
 import P2P from './pages/P2P';
+import Admin from './pages/Admin';
+import LocalLlama from './pages/LocalLlama';
+import Archives from './pages/Archives';
+import Revid from './pages/Revid';
+import CardLibrary from './pages/CardLibrary';
 
 function App() {
   useEffect(() => {
@@ -26,8 +31,13 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Chat />} />
+          <Route path="archives" element={<Archives />} />
           <Route path="p2p" element={<P2P />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="admin" element={<Admin />} />
+          <Route path="local-llama" element={<LocalLlama />} />
+          <Route path="revid" element={<Revid />} />
+          <Route path="cards" element={<CardLibrary />} />
         </Route>
       </Routes>
     </Router>
