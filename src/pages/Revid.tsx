@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { PrimaryButton, SecondaryButton } from '../components/Button';
 
 const Revid: React.FC = () => {
     const [inputText, setInputText] = useState('');
@@ -188,7 +189,7 @@ const Revid: React.FC = () => {
             {error && <p className="text-red-400 mb-4 text-sm">{error}</p>}
 
             {!hasRevidSupport && (
-                <p className="text-sm text-gray-400 mb-6">
+                <p className="text-sm text-gray-300 mb-6">
                     Revid integration is not available. Make sure you are running the Electron app and have updated
                     settings.
                 </p>
@@ -357,20 +358,22 @@ const Revid: React.FC = () => {
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 pt-2">
-                        <button
+                        <PrimaryButton
+                            type="button"
                             onClick={handleEstimateCredits}
                             disabled={estimateLoading || !hasRevidSupport}
-                            className="bg-purple-600 hover:bg-purple-500 disabled:bg-purple-900 text-white font-semibold py-2 px-4 rounded-lg text-sm"
+                            tone="purple"
                         >
                             {estimateLoading ? 'Estimating credits...' : 'Estimate credits'}
-                        </button>
-                        <button
+                        </PrimaryButton>
+                        <PrimaryButton
+                            type="button"
                             onClick={handleRender}
                             disabled={renderLoading || !hasRevidSupport}
-                            className="bg-pink-600 hover:bg-pink-500 disabled:bg-pink-900 text-white font-semibold py-2 px-4 rounded-lg text-sm"
+                            tone="pink"
                         >
                             {renderLoading ? 'Creating video...' : 'Create video'}
-                        </button>
+                        </PrimaryButton>
                         {estimateResult && (
                             <span className="text-xs text-gray-300">
                                 Estimate response received (see below).
@@ -380,7 +383,7 @@ const Revid: React.FC = () => {
                 </div>
 
                 <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 space-y-4">
-                    <h3 className="text-lg font-semibold mb-1 text-blue-300">Project status</h3>
+                    <h3 className="text-xl font-semibold mb-2 text-blue-300">Project status</h3>
                     <div className="flex flex-col md:flex-row md:items-end gap-3 text-sm">
                         <div className="flex-1">
                             <label className="block text-xs font-medium text-gray-300 mb-1">Project PID</label>
@@ -392,20 +395,20 @@ const Revid: React.FC = () => {
                                 placeholder="Paste pid from render response or /projects"
                             />
                         </div>
-                        <button
+                        <PrimaryButton
+                            type="button"
                             onClick={handleGetStatus}
                             disabled={statusLoading || !hasRevidSupport}
-                            className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white font-semibold py-2 px-4 rounded-lg text-sm"
                         >
                             {statusLoading ? 'Checking...' : 'Get status'}
-                        </button>
-                        <button
+                        </PrimaryButton>
+                        <SecondaryButton
+                            type="button"
                             onClick={handleListProjects}
                             disabled={projectsLoading || !hasRevidSupport}
-                            className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-900 text-white font-semibold py-2 px-4 rounded-lg text-sm"
                         >
                             {projectsLoading ? 'Loading projects...' : 'List recent projects'}
-                        </button>
+                        </SecondaryButton>
                     </div>
                     {statusResult && (
                         <div className="mt-3 text-xs text-gray-200 bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-auto">

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useNavigate } from 'react-router-dom';
+import { PrimaryButton, SecondaryButton } from '../components/Button';
 
 interface ChatAttachmentPreview {
     mimeType: string;
@@ -1092,14 +1093,15 @@ const Chat: React.FC = () => {
               <option value="request-response">Request/Response</option>
               <option value="realtime">Realtime (preview)</option>
             </select>
-            <button
+            <SecondaryButton
               type="button"
               onClick={handleArchive}
               disabled={messages.length === 0 || isLoading}
-              className="text-xs px-3 py-1 rounded-full border border-gray-700 text-gray-400 hover:text-gray-100 hover:border-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              rounded="full"
+              className="text-xs px-3 py-1"
             >
               Archive chat
-            </button>
+            </SecondaryButton>
           </div>
         </div>
       </header>
@@ -1515,13 +1517,14 @@ const Chat: React.FC = () => {
               </div>
             )}
           </div>
-          <button
+          <PrimaryButton
             type="button"
             onClick={isLoading ? handleStop : handleSend}
-            className="ml-3 px-4 py-2 rounded-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white font-semibold"
+            rounded="full"
+            className="ml-3"
           >
             {isLoading ? 'Stop' : 'Send'}
-          </button>
+          </PrimaryButton>
           </div>
         </div>
       </div>

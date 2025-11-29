@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import PageContainer from '../components/PageContainer';
+import { PrimaryButton } from '../components/Button';
 
 interface GeminiRequestEntry {
     id: string;
@@ -117,8 +119,9 @@ const Admin: React.FC = () => {
         : null;
 
     return (
-        <div className="flex h-full">
-            <div className="w-72 border-r border-gray-800 bg-gray-900 p-4 overflow-y-auto">
+        <PageContainer noPadding>
+            <div className="flex h-full">
+                <div className="w-72 border-r border-gray-800 bg-gray-900 p-4 overflow-y-auto">
                 <h2 className="text-xl font-semibold mb-4">Gemini Requests</h2>
                 {entries.length === 0 ? (
                     <p className="text-sm text-gray-500">No requests have been logged yet.</p>
@@ -190,14 +193,14 @@ const Admin: React.FC = () => {
                             </p>
                         )}
                     </div>
-                    <button
+                    <PrimaryButton
                         type="button"
                         onClick={handleSave}
                         disabled={isSaving || !editorValue}
-                        className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                        className="px-4 py-2 text-sm font-medium"
                     >
                         {isSaving ? 'Saving…' : 'Save'}
-                    </button>
+                    </PrimaryButton>
                 </div>
                 {error && (
                     <div className="mb-3 text-sm text-red-400">
@@ -216,6 +219,7 @@ const Admin: React.FC = () => {
                 </div>
             </div>
         </div>
+        </PageContainer>
     );
 };
 

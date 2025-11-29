@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { LlamaSettings, LlamaStatus, LocalLlamaModel, HfGGUFSearchResult } from '../types';
+import { PrimaryButton } from '../components/Button';
 
 const LocalLlama: React.FC = () => {
     const [settings, setSettings] = useState<LlamaSettings | null>(null);
@@ -269,7 +270,7 @@ const LocalLlama: React.FC = () => {
                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 flex flex-col gap-4">
                         <div className="flex items-center justify-between">
                             <div>
-                                <h3 className="text-xl font-semibold mb-1 text-green-400">Runtime status</h3>
+                                <h3 className="text-xl font-semibold mb-2 text-green-400">Runtime status</h3>
                                 <p className="text-sm text-gray-300">
                                     {running ? 'Llama server is running.' : 'Llama server is stopped.'}
                                 </p>
@@ -746,13 +747,13 @@ const LocalLlama: React.FC = () => {
                             </div>
                         </div>
                         <div className="pt-2 flex items-center justify-between">
-                            <button
+                            <PrimaryButton
                                 onClick={handleSave}
                                 disabled={saving}
-                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 text-white font-semibold py-2 px-6 rounded-lg transition-colors"
+                                className="px-6"
                             >
                                 {saving ? 'Saving...' : 'Save configuration'}
-                            </button>
+                            </PrimaryButton>
                             <button
                                 onClick={loadSettingsAndStatus}
                                 disabled={loading}

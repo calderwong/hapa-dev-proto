@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import PageContainer from '../components/PageContainer';
+import { SecondaryButton } from '../components/Button';
 
 interface ArchiveMessage {
     id: string;
@@ -131,130 +133,141 @@ const Archives: React.FC = () => {
         }
     };
 
+    const renderArchivesBody = () => {
+        if (archives.length === 0 && !loading) {
+            return (
+                <p className="text-gray-400 text-sm">No archived conversations yet.</p>
+            );
+        }
+
+        return (
+            <div className="flex gap-4 mt-2">
+                <div className="w-1/3 bg-gray-900 border border-gray-800 rounded-xl p-3 max-h-[480px] overflow-y-auto">
+                    {archives.map((archive) => {
+                        const active = archive.id === selectedId;
+                        const messageCount = archive.messages?.length ?? 0;
+                        const providerLabel = archive.providerSnapshot
+                            ? formatProviderLabel(archive.providerSnapshot)
+                            : 'Unknown provider';
+                        return (
+                            <button
+                                key={archive.id}
+                                type="button"
+                                onClick={() => setSelectedId(archive.id)}
+                                className={`w-full text-left px-3 py-2 rounded-lg mb-2 border text-xs transition-colors ${
+                                    active
+                                        ? 'bg-blue-600/20 border-blue-500 text-blue-100'
+                                        : 'bg-gray-800 border-gray-700 text-gray-200 hover:border-blue-500'
+                                }`}
+                            >
+                                <div className="flex justify-between items-center">
+                                    <span className="font-semibold truncate">
+                                        {new Date(archive.archivedAt).toLocaleString()}
+                                    </span>
+                                    <span className="ml-2 text-[10px] text-gray-400">
+                                        {messageCount} msg
+                                    </span>
+                                </div>
+                                <div className="mt-1 text-[11px] text-gray-300 truncate">
+                                    {providerLabel}
+                                    {archive.modelSnapshot ? ` · ${archive.modelSnapshot}` : ''}
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div className="flex-1 bg-gray-900 border border-gray-800 rounded-xl p-4 min-h-[260px]">
+                    {!selected ? (
+                        <p className="text-gray-400 text-sm mt-1">
+                            Select an archive on the left to view its contents.
+                        </p>
+                    ) : (
+                        <div className="flex flex-col h-full">
+                            <div className="flex items-center justify-between mb-3">
+                                <div>
+                                    <p className="font-semibold text-sm">
+                                        {new Date(selected.archivedAt).toLocaleString()}
+                                    </p>
+                                    <p className="text-[11px] text-gray-400 mt-0.5">
+                                        {selected.providerSnapshot
+                                            ? formatProviderLabel(selected.providerSnapshot)
+                                            : 'Unknown provider'}
+                                        {selected.modelSnapshot
+                                            ? ` · ${selected.modelSnapshot}`
+                                            : ''}
+                                    </p>
+                                </div>
+                                <SecondaryButton
+                                    type="button"
+                                    onClick={() => handleRestore(selected)}
+                                    disabled={restoringId === selected.id}
+                                    rounded="full"
+                                    className="text-xs px-3 py-1 border-blue-500 text-blue-100 hover:bg-blue-600/20"
+                                >
+                                    {restoringId === selected.id ? 'Restoring...' : 'Restore into Chat'}
+                                </SecondaryButton>
+                            </div>
+                            <div className="flex-1 border-t border-gray-800 mt-2 pt-3 space-y-3 max-h-[420px] overflow-y-auto">
+                                {selected.messages.map((msg) => (
+                                    <div
+                                        key={msg.id}
+                                        className={`flex ${
+                                            msg.role === 'user' ? 'justify-end' : 'justify-start'
+                                        }`}
+                                    >
+                                        <div
+                                            className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
+                                                msg.role === 'user'
+                                                    ? 'bg-blue-600 text-white'
+                                                    : 'bg-gray-800 text-gray-100 border border-gray-700'
+                                            }`}
+                                        >
+                                            {msg.role === 'model' && msg.provider && msg.model && (
+                                                <p className="text-[10px] text-gray-400 mb-1">
+                                                    {formatProviderLabel(msg.provider)} · {msg.model}
+                                                </p>
+                                            )}
+                                            <div className="prose prose-invert max-w-none break-words">
+                                                <ReactMarkdown
+                                                    remarkPlugins={[remarkGfm]}
+                                                    components={{
+                                                        p: ({ node, ...props }) => (
+                                                            // eslint-disable-next-line react/jsx-props-no-spreading
+                                                            <p {...props} className="mb-1 last:mb-0" />
+                                                        ),
+                                                    }}
+                                                >
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
     return (
-        <div className="p-8 max-w-5xl mx-auto w-full text-white">
-            <h2 className="text-3xl font-bold mb-2">Chat Archives</h2>
-            <p className="text-sm text-gray-300 mb-6">
-                Archived conversations are written to a local Hypercore ("chat-archives") and
-                mirrored in local storage. You can inspect them here and restore any archive back
-                into the main Chat view.
-            </p>
+        <PageContainer>
+            <div className="w-full text-white">
+                <h2 className="text-3xl font-bold mb-3">Chat Archives</h2>
+                <p className="text-sm text-gray-300 mb-6">
+                    Archived conversations are written to a local Hypercore ("chat-archives") and
+                    mirrored in local storage. You can inspect them here and restore any archive back
+                    into the main Chat view.
+                </p>
 
             {loading && <p className="text-gray-400 mb-4">Loading archives...</p>}
             {error && <p className="text-red-400 mb-4">{error}</p>}
 
-            {archives.length === 0 && !loading ? (
-                <p className="text-gray-400 text-sm">No archived conversations yet.</p>
-            ) : (
-                <div className="flex gap-4 mt-2">
-                    <div className="w-1/3 bg-gray-900 border border-gray-800 rounded-xl p-3 max-h-[480px] overflow-y-auto">
-                        {archives.map((archive) => {
-                            const active = archive.id === selectedId;
-                            const messageCount = archive.messages?.length ?? 0;
-                            const providerLabel = archive.providerSnapshot
-                                ? formatProviderLabel(archive.providerSnapshot)
-                                : 'Unknown provider';
-                            return (
-                                <button
-                                    key={archive.id}
-                                    type="button"
-                                    onClick={() => setSelectedId(archive.id)}
-                                    className={`w-full text-left px-3 py-2 rounded-lg mb-2 border text-xs transition-colors ${
-                                        active
-                                            ? 'bg-blue-600/20 border-blue-500 text-blue-100'
-                                            : 'bg-gray-800 border-gray-700 text-gray-200 hover:border-blue-500'
-                                    }`}
-                                >
-                                    <div className="flex justify-between items-center">
-                                        <span className="font-semibold truncate">
-                                            {new Date(archive.archivedAt).toLocaleString()}
-                                        </span>
-                                        <span className="ml-2 text-[10px] text-gray-400">
-                                            {messageCount} msg
-                                        </span>
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-gray-300 truncate">
-                                        {providerLabel}
-                                        {archive.modelSnapshot ? ` · ${archive.modelSnapshot}` : ''}
-                                    </div>
-                                </button>
-                            );
-                        })}
-                    </div>
-
-                    <div className="flex-1 bg-gray-900 border border-gray-800 rounded-xl p-4 min-h-[260px]">
-                        {!selected ? (
-                            <p className="text-gray-400 text-sm mt-1">
-                                Select an archive on the left to view its contents.
-                            </p>
-                        ) : (
-                            <div className="flex flex-col h-full">
-                                <div className="flex items-center justify-between mb-3">
-                                    <div>
-                                        <p className="font-semibold text-sm">
-                                            {new Date(selected.archivedAt).toLocaleString()}
-                                        </p>
-                                        <p className="text-[11px] text-gray-400 mt-0.5">
-                                            {selected.providerSnapshot
-                                                ? formatProviderLabel(selected.providerSnapshot)
-                                                : 'Unknown provider'}
-                                            {selected.modelSnapshot
-                                                ? ` · ${selected.modelSnapshot}`
-                                                : ''}
-                                        </p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleRestore(selected)}
-                                        disabled={restoringId === selected.id}
-                                        className="text-xs px-3 py-1 rounded-full border border-blue-500 text-blue-100 hover:bg-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        {restoringId === selected.id ? 'Restoring...' : 'Restore into Chat'}
-                                    </button>
-                                </div>
-                                <div className="flex-1 border-t border-gray-800 mt-2 pt-3 space-y-3 max-h-[420px] overflow-y-auto">
-                                    {selected.messages.map((msg) => (
-                                        <div
-                                            key={msg.id}
-                                            className={`flex ${
-                                                msg.role === 'user' ? 'justify-end' : 'justify-start'
-                                            }`}
-                                        >
-                                            <div
-                                                className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
-                                                    msg.role === 'user'
-                                                        ? 'bg-blue-600 text-white'
-                                                        : 'bg-gray-800 text-gray-100 border border-gray-700'
-                                                }`}
-                                            >
-                                                {msg.role === 'model' && msg.provider && msg.model && (
-                                                    <p className="text-[10px] text-gray-400 mb-1">
-                                                        {formatProviderLabel(msg.provider)} · {msg.model}
-                                                    </p>
-                                                )}
-                                                <div className="prose prose-invert max-w-none break-words">
-                                                    <ReactMarkdown
-                                                        remarkPlugins={[remarkGfm]}
-                                                        components={{
-                                                            p: ({ node, ...props }) => (
-                                                                // eslint-disable-next-line react/jsx-props-no-spreading
-                                                                <p {...props} className="mb-1 last:mb-0" />
-                                                            ),
-                                                        }}
-                                                    >
-                                                        {msg.content}
-                                                    </ReactMarkdown>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-        </div>
+            {renderArchivesBody()}
+            </div>
+        </PageContainer>
     );
 };
 

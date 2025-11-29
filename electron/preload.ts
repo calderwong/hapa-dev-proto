@@ -48,6 +48,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('revid-get-status', params),
     revidListProjects: (params: { limit?: number }) =>
         ipcRenderer.invoke('revid-list-projects', params),
+    revidSearchMedia: (params: { search?: string; mediaType?: string; topK?: number }) =>
+        ipcRenderer.invoke('revid-search-media', params),
+    revidDownloadMedia: (params: { mediaUrl: string; id: string; type?: string; fileType?: string }) =>
+        ipcRenderer.invoke('revid-download-media', params),
+    wormholeIngestContent: (params: any) =>
+        ipcRenderer.invoke('wormhole-ingest-content', params),
+    wormholeRunTranscription: (params: any) =>
+        ipcRenderer.invoke('wormhole-run-transcription', params),
+    wormholeRunSummarization: (params: any) =>
+        ipcRenderer.invoke('wormhole-run-summarization', params),
+    wormholeRunKeyTerms: (params: any) =>
+        ipcRenderer.invoke('wormhole-run-keyterms', params),
+    wormholeRunWikiUpdate: (params: any) =>
+        ipcRenderer.invoke('wormhole-run-wiki-update', params),
+    wormholeGetStatus: (params: any) =>
+        ipcRenderer.invoke('wormhole-get-status', params),
+    wormholeGetDerivedArtifacts: (params: { cardId: string }) =>
+        ipcRenderer.invoke('wormhole-get-derived-artifacts', params),
     p2pCreateCore: (name: string) => ipcRenderer.invoke('p2p-create-core', name),
     p2pAppend: (data: { name: string; data: string }) => ipcRenderer.invoke('p2p-append', data),
     p2pRead: (name: string) => ipcRenderer.invoke('p2p-read', name),

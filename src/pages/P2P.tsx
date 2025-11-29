@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import PageContainer from '../components/PageContainer';
+import { PrimaryButton } from '../components/Button';
 
 const P2P: React.FC = () => {
     const [coreName, setCoreName] = useState('');
@@ -33,10 +35,11 @@ const P2P: React.FC = () => {
     };
 
     return (
-        <div className="p-8 max-w-4xl mx-auto w-full text-white">
-            <h2 className="text-3xl font-bold mb-8">P2P Hypercore Manager</h2>
+        <PageContainer>
+            <div className="w-full text-white max-w-4xl">
+                <h2 className="text-3xl font-bold mb-6">P2P Hypercore Manager</h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-6">
                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
                         <h3 className="text-xl font-semibold mb-4 text-green-400">Create / Join Core</h3>
@@ -48,12 +51,14 @@ const P2P: React.FC = () => {
                                 className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500"
                                 placeholder="Core Name"
                             />
-                            <button
+                            <PrimaryButton
+                                type="button"
                                 onClick={handleCreate}
-                                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                                tone="green"
+                                className="px-4"
                             >
                                 Connect
-                            </button>
+                            </PrimaryButton>
                         </div>
                         {coreInfo && (
                             <div className="mt-4 p-4 bg-gray-900 rounded-lg text-xs font-mono break-all">
@@ -74,12 +79,13 @@ const P2P: React.FC = () => {
                                 className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500"
                                 placeholder="Data to append"
                             />
-                            <button
+                            <PrimaryButton
+                                type="button"
                                 onClick={handleAppend}
-                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                                className="px-4"
                             >
                                 Append
-                            </button>
+                            </PrimaryButton>
                         </div>
                     </div>
                 </div>
@@ -103,7 +109,8 @@ const P2P: React.FC = () => {
                     </div>
                 </div>
             </div>
-        </div>
+            </div>
+        </PageContainer>
     );
 };
 

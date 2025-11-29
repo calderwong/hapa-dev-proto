@@ -15,6 +15,9 @@ const GEMINI_REQUEST_LOG_KEY = 'geminiRequestLog';
 const GEMINI_REQUEST_LOG_MAX_ENTRIES = 200;
 const ADMIN_SETTINGS_KEY = 'adminSettings';
 const LLAMA_SETTINGS_KEY = 'llamaSettings';
+const WORMHOLE_SETTINGS_KEY = 'wormholeSettings';
+const CARD_LIBRARY_CORE_NAME = 'card-library';
+const WIKI_CORE_NAME = 'wormhole-wiki-entries';
 
 type AudioMode = 'transcribe' | 'realtime';
 
@@ -418,6 +421,22 @@ const OPENAI_CHAT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_TRANSCRIPT_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
 
 const REVID_API_BASE = 'https://www.revid.ai/api/public/v2';
+const REVID_MEDIA_BASE = 'https://revid.ai/api/public';
+
+type RevidMediaType = 'video' | 'image' | 'audio' | 'unknown';
+
+interface RevidMediaItemInternal {
+  id: string;
+  mid: string;
+  uid?: string;
+  prompt?: string;
+  mediaUrl: string;
+  imagePreview?: string;
+  fileType?: string;
+  type: RevidMediaType;
+  orientation?: string;
+  raw?: any;
+}
 
 const callRevidApi = async (
   endpoint: string,
@@ -459,6 +478,196 @@ const callRevidApi = async (
   }
 
   return data;
+};
+
+const normalizeRevidMediaType = (
+  rawType?: string,
+  fileType?: string,
+): RevidMediaType => {
+  const lowerRaw = (rawType || '').toLowerCase();
+  const lowerFile = (fileType || '').toLowerCase();
+
+  if (lowerRaw === 'video') return 'video';
+  if (lowerRaw === 'image') return 'image';
+  if (lowerRaw === 'audio') return 'audio';
+
+  if (lowerFile.startsWith('video/')) return 'video';
+  if (lowerFile.startsWith('image/')) return 'image';
+  if (lowerFile.startsWith('audio/')) return 'audio';
+
+  return 'unknown';
+};
+
+const normalizeRevidMediaItem = (raw: any): RevidMediaItemInternal | null => {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const idValue =
+    (typeof raw.id === 'string' && raw.id) ||
+    (typeof raw.mid === 'string' && raw.mid) ||
+    '';
+  const midValue =
+    (typeof raw.mid === 'string' && raw.mid) ||
+    (typeof raw.id === 'string' && raw.id) ||
+    '';
+  const mediaUrl = typeof raw.mediaUrl === 'string' ? raw.mediaUrl : '';
+
+  if (!idValue || !midValue || !mediaUrl) {
+    return null;
+  }
+
+  const fileType = typeof raw.fileType === 'string' ? raw.fileType : undefined;
+  const type = normalizeRevidMediaType(raw.type, fileType);
+
+  return {
+    id: String(idValue),
+    mid: String(midValue),
+    uid: typeof raw.uid === 'string' ? raw.uid : undefined,
+    prompt: typeof raw.prompt === 'string' ? raw.prompt : undefined,
+    mediaUrl,
+    imagePreview:
+      typeof raw.imagePreview === 'string' ? raw.imagePreview : undefined,
+    fileType,
+    type,
+    orientation:
+      typeof raw.orientation === 'string' ? raw.orientation : undefined,
+    raw,
+  };
+};
+
+const callRevidMediaApi = async (pathWithQuery: string): Promise<any> => {
+  const apiKey = store.get('revidKey') as string | undefined;
+  if (!apiKey) {
+    throw new Error('Revid API Key not found. Please configure it in Settings.');
+  }
+
+  const url = `${REVID_MEDIA_BASE}${pathWithQuery}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      key: apiKey,
+    },
+  });
+
+  let data: any = null;
+  try {
+    data = await response.json();
+  } catch {
+    // ignore JSON parse errors
+  }
+
+  if (!response.ok) {
+    console.error('Revid media API error for', pathWithQuery, data);
+    const message =
+      (data && (data.error?.message || data.message)) ||
+      `Revid media request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+};
+
+const downloadRevidMediaInternal = async (params: {
+  mediaUrl: string;
+  id: string;
+  type?: string;
+  fileType?: string;
+}): Promise<{
+  localPath: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+}> => {
+  const { mediaUrl, id, type, fileType } = params;
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(mediaUrl);
+  } catch {
+    throw new Error('Invalid Revid media URL.');
+  }
+
+  const lowerType = (type || '').toLowerCase();
+  const lowerFileType = (fileType || '').toLowerCase();
+
+  let category: 'video' | 'image' | 'audio' | 'other' = 'other';
+  if (lowerType === 'video' || lowerFileType.startsWith('video/')) {
+    category = 'video';
+  } else if (lowerType === 'image' || lowerFileType.startsWith('image/')) {
+    category = 'image';
+  } else if (lowerType === 'audio' || lowerFileType.startsWith('audio/')) {
+    category = 'audio';
+  }
+
+  const extFromType = lowerFileType.includes('/')
+    ? lowerFileType.split('/')[1]
+    : '';
+  const extFromPath = path.extname(parsedUrl.pathname).replace(/^\./, '');
+  const extension = extFromType || extFromPath || 'bin';
+
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '');
+  const fileName = `${safeId}.${extension}`;
+
+  const baseDir = path.join(app.getPath('userData'), 'revid-media');
+  const destDir =
+    category === 'other'
+      ? baseDir
+      : path.join(baseDir, category === 'video' ? 'video' : category === 'image' ? 'image' : 'audio');
+
+  await fs.promises.mkdir(destDir, { recursive: true });
+
+  const destPath = path.join(destDir, fileName);
+
+  try {
+    const existingStat = await fs.promises.stat(destPath);
+    return {
+      localPath: destPath,
+      fileName,
+      mimeType: fileType || '',
+      size: existingStat.size,
+    };
+  } catch {
+    // file does not exist; proceed to download
+  }
+
+  const client = parsedUrl.protocol === 'http:' ? http : https;
+
+  const size = await new Promise<number>((resolve, reject) => {
+    const request = client.get(parsedUrl, (response) => {
+      if (response.statusCode && response.statusCode >= 400) {
+        reject(new Error(`Download failed with status ${response.statusCode}`));
+        response.resume();
+        return;
+      }
+
+      const fileStream = fs.createWriteStream(destPath);
+      let bytes = 0;
+
+      response.on('data', (chunk: Buffer) => {
+        bytes += chunk.length;
+      });
+
+      response.pipe(fileStream);
+
+      fileStream.on('finish', () => {
+        fileStream.close(() => resolve(bytes));
+      });
+
+      fileStream.on('error', (err) => {
+        fileStream.close(() => reject(err));
+      });
+    });
+
+    request.on('error', (err) => {
+      reject(err);
+    });
+  });
+
+  return {
+    localPath: destPath,
+    fileName,
+    mimeType: fileType || '',
+    size,
+  };
 };
 
 // Base endpoint for a local llama.cpp server exposing an OpenAI-compatible API.
@@ -616,6 +825,118 @@ const transcribeAudioWithOpenAI = async (
   return (data.text as string) || '';
 };
 
+const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
+
+const resolveGeminiModelName = (modelName?: string): string => {
+  const trimmed = (modelName || '').toString().trim();
+  if (!trimmed || trimmed === 'gemini-pro' || trimmed === 'gemini-1.5-pro') {
+    return DEFAULT_GEMINI_MODEL;
+  }
+  return trimmed;
+};
+
+const summarizeTextWithGemini = async (
+  text: string,
+  modelName?: string,
+): Promise<{ short: string; medium: string; outline: string[]; model: string }> => {
+  const apiKey = store.get('geminiKey') as string | undefined;
+  if (!apiKey) {
+    throw new Error('Gemini API Key not found. Please configure it in Settings.');
+  }
+
+  const resolvedModel = resolveGeminiModelName(modelName);
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: resolvedModel });
+
+  const trimmed = text.length > 16000 ? text.slice(0, 16000) : text;
+  const prompt =
+    'Summarize the following content in 1-3 short paragraphs. Focus on the main ideas and important details. ' +
+    'Return a clear, readable summary in plain text.\n\n' +
+    trimmed;
+
+  const result = await model.generateContent([{ text: prompt } as any]);
+  const response = await result.response;
+  const summaryText = ((response as any).text?.() as string) || '';
+  const medium = (summaryText || '').trim();
+
+  if (!medium) {
+    return {
+      short: '',
+      medium: '',
+      outline: [],
+      model: resolvedModel,
+    };
+  }
+
+  const sentencePieces = medium.split(/(?<=[\.\!\?])\s+|\n+/).filter((p: string) => p.trim().length > 0);
+  const shortRaw = sentencePieces.slice(0, 3).join(' ');
+  const short = shortRaw.length > 400 ? shortRaw.slice(0, 397) + '…' : shortRaw;
+
+  const outlineLines = medium
+    .split(/\n+/)
+    .map((line: string) => line.trim())
+    .filter((line: string) => line.length > 0)
+    .slice(0, 10);
+
+  const outline = outlineLines.length > 0 ? outlineLines : [medium.slice(0, 200)];
+
+  return {
+    short,
+    medium,
+    outline,
+    model: resolvedModel,
+  };
+};
+
+const extractKeyTermsWithGemini = async (
+  text: string,
+  modelName?: string,
+): Promise<{ terms: { term: string; type?: string; confidence?: number }[]; model: string }> => {
+  const apiKey = store.get('geminiKey') as string | undefined;
+  if (!apiKey) {
+    throw new Error('Gemini API Key not found. Please configure it in Settings.');
+  }
+
+  const resolvedModel = resolveGeminiModelName(modelName);
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: resolvedModel });
+
+  const trimmed = text.length > 16000 ? text.slice(0, 16000) : text;
+  const prompt =
+    'Extract up to 30 key entities, concepts, or topics from the following content. ' +
+    'Return them as a plain text list, one item per line. ' +
+    'Optionally include a short type in parentheses, e.g. "Hapa AI (project)".\n\n' +
+    trimmed;
+
+  const result = await model.generateContent([{ text: prompt } as any]);
+  const response = await result.response;
+  const raw = (((response as any).text?.() as string) || '').trim();
+
+  if (!raw) {
+    return { terms: [], model: resolvedModel };
+  }
+
+  const lines = raw
+    .split(/\r?\n+/)
+    .map((line: string) => line.replace(/^[-*\d\.\)\s]+/, '').trim())
+    .filter((line: string) => line.length > 0);
+
+  const terms = lines.slice(0, 30).map((line: string) => {
+    let term = line;
+    let type: string | undefined;
+
+    const match = line.match(/^(.*?)[\s]*\(([^)]+)\)[\s]*$/);
+    if (match) {
+      term = match[1].trim();
+      type = match[2].trim();
+    }
+
+    return { term, type } as { term: string; type?: string; confidence?: number };
+  });
+
+  return { terms, model: resolvedModel };
+};
+
 const getAppIconPath = () => {
   const base = isDev ? '../public' : '../dist';
   return path.join(__dirname, base, 'hapa-cat.png');
@@ -644,11 +965,13 @@ function createWindow() {
 app.whenReady().then(() => {
   // Settings IPC handlers
   ipcMain.handle('get-settings', () => {
+    const wormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
     return {
       geminiKey: store.get('geminiKey', ''),
       openaiKey: store.get('openaiKey', ''),
       firebaseConfig: store.get('firebaseConfig', ''),
       revidKey: store.get('revidKey', ''),
+      wormhole,
     };
   });
 
@@ -656,12 +979,19 @@ app.whenReady().then(() => {
     'save-settings',
     (
       _event,
-      settings: { geminiKey: string; openaiKey: string; firebaseConfig: string; revidKey: string },
+      settings: {
+        geminiKey: string;
+        openaiKey: string;
+        firebaseConfig: string;
+        revidKey: string;
+        wormhole?: any;
+      },
     ) => {
       store.set('geminiKey', settings.geminiKey);
       store.set('openaiKey', settings.openaiKey);
       store.set('firebaseConfig', settings.firebaseConfig);
       store.set('revidKey', settings.revidKey);
+      store.set(WORMHOLE_SETTINGS_KEY, settings.wormhole || {});
       return true;
     },
   );
@@ -860,6 +1190,66 @@ app.whenReady().then(() => {
       const safeLimit =
         typeof limit === 'number' && limit > 0 && limit <= 50 ? limit : 10;
       return callRevidApi(`/projects?limit=${safeLimit}`, 'GET');
+    },
+  );
+
+  ipcMain.handle(
+    'revid-search-media',
+    async (
+      _event,
+      payload: {
+        search?: string;
+        mediaType?: string;
+        topK?: number;
+      },
+    ) => {
+      const { search, mediaType, topK } = payload || ({} as any);
+
+      const params = new URLSearchParams();
+      if (typeof search === 'string' && search.trim()) {
+        params.set('search', search.trim());
+      }
+      if (typeof mediaType === 'string' && mediaType && mediaType !== 'all') {
+        params.set('mediaType', mediaType);
+      }
+      const safeTopK =
+        typeof topK === 'number' && topK > 0
+          ? Math.min(Math.max(topK, 1), 100)
+          : 50;
+      params.set('topK', String(safeTopK));
+
+      const query = params.toString();
+      const pathWithQuery = query ? `/media-search?${query}` : '/media-search';
+      const data = await callRevidMediaApi(pathWithQuery);
+
+      const rawResults = Array.isArray(data?.results) ? data.results : [];
+      const normalized: RevidMediaItemInternal[] = [];
+      for (const raw of rawResults) {
+        const item = normalizeRevidMediaItem(raw);
+        if (item) normalized.push(item);
+      }
+
+      return {
+        results: normalized,
+        count: typeof data?.count === 'number' ? data.count : normalized.length,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    'revid-download-media',
+    async (
+      _event,
+      payload: { mediaUrl: string; id: string; type?: string; fileType?: string },
+    ) => {
+      const { mediaUrl, id, type, fileType } = payload || ({} as any);
+      if (!mediaUrl || typeof mediaUrl !== 'string') {
+        throw new Error('mediaUrl is required to download Revid media.');
+      }
+      if (!id || typeof id !== 'string') {
+        throw new Error('id is required to download Revid media.');
+      }
+      return downloadRevidMediaInternal({ mediaUrl, id, type, fileType });
     },
   );
 
@@ -1592,6 +1982,952 @@ app.whenReady().then(() => {
       }
 
       return fullText;
+    },
+  );
+
+  // Wormhole IPC handlers
+  ipcMain.handle(
+    'wormhole-ingest-content',
+    async (_event, payload: any) => {
+      const {
+        path: rawPath,
+        bytesBase64,
+        mediaType: providedMediaType,
+        ownerDid,
+        tags,
+        sourceLabel,
+        fileName: payloadFileName,
+        originalUrl,
+      } = payload || ({} as any);
+
+      let filePath: string | undefined =
+        typeof rawPath === 'string' && rawPath.trim().length > 0 ? rawPath.trim() : undefined;
+
+      const hasBytes = typeof bytesBase64 === 'string' && bytesBase64.length > 0;
+      const hasUrl = typeof originalUrl === 'string' && originalUrl.trim().length > 0;
+
+      if (!filePath && !hasBytes && !hasUrl) {
+        throw new Error('Wormhole ingestContent requires a file path, bytesBase64 content, or originalUrl.');
+      }
+
+      const contentId = `whc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const cardCoreName = `card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const createdAt = new Date().toISOString();
+
+      if (!filePath && hasBytes) {
+        const userDataDir = app.getPath('userData');
+        const wormholeDir = path.join(userDataDir, 'wormhole');
+        await fs.promises.mkdir(wormholeDir, { recursive: true });
+
+        const baseNameRaw =
+          typeof payloadFileName === 'string' && payloadFileName.trim().length > 0
+            ? payloadFileName.trim()
+            : `${contentId}.bin`;
+        const safeBaseName = baseNameRaw.replace(/[\\/:*?"<>|]+/g, '_');
+        const targetPath = path.join(wormholeDir, safeBaseName);
+
+        const buffer = Buffer.from(bytesBase64, 'base64');
+        await fs.promises.writeFile(targetPath, buffer);
+        filePath = targetPath;
+      } else if (!filePath && hasUrl) {
+        const url = (originalUrl as string).trim();
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          throw new Error('Wormhole originalUrl must start with http:// or https://');
+        }
+
+        const userDataDir = app.getPath('userData');
+        const wormholeDir = path.join(userDataDir, 'wormhole');
+        await fs.promises.mkdir(wormholeDir, { recursive: true });
+
+        let inferredName: string | undefined;
+        try {
+          const urlObj = new URL(url);
+          const base = path.basename(urlObj.pathname || '');
+          inferredName = base && base.length > 0 ? base : undefined;
+        } catch {
+          inferredName = undefined;
+        }
+
+        const baseNameRaw =
+          typeof payloadFileName === 'string' && payloadFileName.trim().length > 0
+            ? payloadFileName.trim()
+            : inferredName || `${contentId}.bin`;
+        const safeBaseName = baseNameRaw.replace(/[\\/:*?"<>|]+/g, '_');
+        const targetPath = path.join(wormholeDir, safeBaseName);
+
+        let buffer: Buffer;
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            const statusText = response.statusText || 'Request failed';
+            throw new Error(`Failed to download Wormhole URL (${response.status} ${statusText})`);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          buffer = Buffer.from(arrayBuffer);
+        } catch (error: any) {
+          console.error('Failed to download file for Wormhole ingest from URL:', url, error);
+          throw new Error(error?.message || 'Failed to download file from URL for Wormhole ingest.');
+        }
+
+        await fs.promises.writeFile(targetPath, buffer);
+        filePath = targetPath;
+      }
+
+      if (!filePath) {
+        throw new Error('Failed to resolve a local file path for Wormhole ingest.');
+      }
+
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) {
+        throw new Error('Wormhole ingestContent expects a file path to an existing file.');
+      }
+
+      const ext = path.extname(filePath || '').toLowerCase();
+      let inferredMediaType: 'text' | 'markdown' | 'pdf' | 'audio' | 'video' = 'text';
+      if (ext === '.md' || ext === '.markdown') {
+        inferredMediaType = 'markdown';
+      } else if (ext === '.pdf') {
+        inferredMediaType = 'pdf';
+      } else {
+        const audioExts = ['.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg'];
+        const videoExts = ['.mp4', '.mkv', '.webm', '.mov', '.avi'];
+        if (audioExts.includes(ext)) {
+          inferredMediaType = 'audio';
+        } else if (videoExts.includes(ext)) {
+          inferredMediaType = 'video';
+        }
+      }
+
+      const mediaType = (providedMediaType as any) || inferredMediaType;
+
+      const coreInfo = await createCore(cardCoreName);
+
+      let kind: 'document' | 'audio' | 'video' = 'document';
+      if (mediaType === 'audio') {
+        kind = 'audio';
+      } else if (mediaType === 'video') {
+        kind = 'video';
+      }
+
+      const fileName = path.basename(filePath);
+
+      const ingestInfo = {
+        contentId,
+        ownerDid: typeof ownerDid === 'string' ? ownerDid : undefined,
+        sourceLabel: typeof sourceLabel === 'string' ? sourceLabel : undefined,
+        toolId: 'wormhole:v1',
+        mediaType,
+        originalPath: filePath,
+        originalFileName:
+          typeof payloadFileName === 'string' && payloadFileName.trim().length > 0
+            ? payloadFileName.trim()
+            : fileName,
+        originalUrl: typeof originalUrl === 'string' ? originalUrl : undefined,
+        tags: Array.isArray(tags) ? tags : undefined,
+        startedAt: createdAt,
+        completedAt: createdAt,
+      };
+
+      const makePendingStep = () => ({
+        status: 'pending',
+        provider: undefined,
+        model: undefined,
+        startedAt: undefined,
+        completedAt: undefined,
+        error: undefined,
+      });
+
+      const processing: any = {
+        ingest: {
+          status: 'complete',
+          provider: 'none',
+          model: undefined,
+          startedAt: createdAt,
+          completedAt: createdAt,
+          error: undefined,
+        },
+        summarization: makePendingStep(),
+        keyTerms: makePendingStep(),
+        wikiUpdate: makePendingStep(),
+      };
+
+      if (mediaType === 'audio' || mediaType === 'video') {
+        processing.transcription = makePendingStep();
+      }
+
+      const cardRecord: any = {
+        type: 'card',
+        kind,
+        id: cardCoreName,
+        createdAt,
+        updatedAt: createdAt,
+        title: fileName,
+        mediaType,
+        source: 'wormhole',
+        provider: 'wormhole',
+        wormhole: {
+          ingest: ingestInfo,
+          processing,
+        },
+        core: {
+          name: cardCoreName,
+          key: coreInfo?.key,
+          discoveryKey: coreInfo?.discoveryKey,
+          length: coreInfo?.length,
+        },
+      };
+
+      if (mediaType === 'audio') {
+        cardRecord.audio = {
+          localPath: filePath,
+          remoteUrl: undefined,
+          mimeType: '',
+        };
+      } else if (mediaType === 'video') {
+        cardRecord.video = {
+          localPath: filePath,
+          remoteUrl: undefined,
+          mimeType: '',
+        };
+      }
+
+      await appendToCore(cardCoreName, JSON.stringify(cardRecord));
+
+      await createCore(CARD_LIBRARY_CORE_NAME);
+      const libraryEntry = {
+        type: 'card-index',
+        cardId: cardCoreName,
+        createdAt,
+        provider: 'wormhole',
+        model: undefined,
+        coreName: cardCoreName,
+        coreKey: coreInfo?.key,
+        coreDiscoveryKey: coreInfo?.discoveryKey,
+      } as any;
+
+      await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+
+      return {
+        contentId,
+        cardId: cardCoreName,
+        hypercoreKey: coreInfo?.key,
+        mediaType,
+        status: 'complete',
+      };
+    },
+  );
+
+  ipcMain.handle(
+    'wormhole-run-transcription',
+    async (
+      _event,
+      payload: { cardId: string; overrideProvider?: string; overrideModel?: string },
+    ) => {
+      const { cardId, overrideProvider, overrideModel } = payload || ({} as any);
+      if (!cardId || typeof cardId !== 'string') {
+        throw new Error('cardId is required for Wormhole transcription.');
+      }
+
+      const records = await readCore(cardId);
+      if (!Array.isArray(records) || records.length === 0) {
+        throw new Error('Card Hypercore is empty; cannot run transcription.');
+      }
+
+      let cardRecord: any = null;
+      for (let i = records.length - 1; i >= 0; i -= 1) {
+        const raw = records[i];
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.type === 'card') {
+            cardRecord = parsed;
+            break;
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      if (!cardRecord) {
+        throw new Error('Card record not found in Hypercore for Wormhole transcription.');
+      }
+
+      const mediaType = (cardRecord.mediaType || '').toString();
+      if (mediaType !== 'audio') {
+        throw new Error('Wormhole transcription currently supports audio cards only.');
+      }
+
+      const audioInfo = cardRecord.audio;
+      const localPath = audioInfo && typeof audioInfo.localPath === 'string' ? audioInfo.localPath : '';
+      if (!localPath) {
+        throw new Error('Audio card does not have a localPath for transcription.');
+      }
+
+      const globalWormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
+      let provider: 'gemini' | 'openai' | 'llama-local' | 'none' = 'openai';
+      if (overrideProvider && typeof overrideProvider === 'string') {
+        provider = overrideProvider as any;
+      } else if (
+        globalWormhole.transcription &&
+        typeof globalWormhole.transcription.provider === 'string' &&
+        globalWormhole.transcription.provider.trim().length > 0
+      ) {
+        provider = globalWormhole.transcription.provider as any;
+      }
+
+      const model: string | undefined =
+        (overrideModel && typeof overrideModel === 'string' && overrideModel) ||
+        (globalWormhole.transcription && typeof globalWormhole.transcription.model === 'string'
+          ? (globalWormhole.transcription.model as string)
+          : undefined);
+
+      if (provider !== 'openai') {
+        throw new Error('Wormhole transcription is currently implemented only for OpenAI provider.');
+      }
+
+      const apiKey = store.get('openaiKey') as string | undefined;
+      if (!apiKey) {
+        throw new Error('OpenAI API Key not found. Please configure it in Settings.');
+      }
+
+      const audioBuffer = await fs.promises.readFile(localPath);
+      const base64 = audioBuffer.toString('base64');
+
+      const ext = path.extname(localPath || '').toLowerCase();
+      let mimeType = 'audio/mpeg';
+      if (ext === '.wav') mimeType = 'audio/wav';
+      else if (ext === '.mp3') mimeType = 'audio/mpeg';
+      else if (ext === '.ogg') mimeType = 'audio/ogg';
+      else if (ext === '.flac') mimeType = 'audio/flac';
+      else if (ext === '.m4a') mimeType = 'audio/mp4';
+
+      const transcriptText = (await transcribeAudioWithOpenAI(base64, mimeType, apiKey)).trim();
+      if (!transcriptText) {
+        throw new Error('Transcription produced empty text.');
+      }
+
+      const now = new Date().toISOString();
+
+      const transcriptRecord = {
+        type: 'wormhole-transcript',
+        cardId,
+        createdAt: now,
+        provider: 'openai',
+        model: model || 'whisper-1',
+        mimeType,
+        text: transcriptText,
+      } as any;
+
+      await appendToCore(cardId, JSON.stringify(transcriptRecord));
+
+      const existingProcessing =
+        (cardRecord.wormhole && typeof cardRecord.wormhole === 'object' && cardRecord.wormhole.processing) || {};
+      const existingTranscription = (existingProcessing as any).transcription || {};
+
+      const nextProcessing = {
+        ...existingProcessing,
+        transcription: {
+          status: 'complete',
+          provider: 'openai',
+          model: model || 'whisper-1',
+          startedAt: existingTranscription.startedAt || now,
+          completedAt: now,
+          error: undefined,
+        },
+      } as any;
+
+      const nextCardRecord = {
+        ...cardRecord,
+        updatedAt: now,
+        transcriptAvailable: true,
+        wormhole: {
+          ...(cardRecord.wormhole || {}),
+          processing: nextProcessing,
+        },
+      } as any;
+
+      await appendToCore(cardId, JSON.stringify(nextCardRecord));
+
+      return {
+        cardId,
+        step: 'transcription',
+        status: nextProcessing.transcription,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    'wormhole-run-summarization',
+    async (
+      _event,
+      payload: { cardId: string; overrideProvider?: string; overrideModel?: string },
+    ) => {
+      const { cardId, overrideProvider, overrideModel } = payload || ({} as any);
+      if (!cardId || typeof cardId !== 'string') {
+        throw new Error('cardId is required for Wormhole summarization.');
+      }
+
+      const records = await readCore(cardId);
+      if (!Array.isArray(records) || records.length === 0) {
+        throw new Error('Card Hypercore is empty; cannot run summarization.');
+      }
+
+      let cardRecord: any = null;
+      const transcripts: any[] = [];
+
+      for (let i = 0; i < records.length; i += 1) {
+        const raw = records[i];
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.type === 'card') {
+            cardRecord = parsed;
+          } else if (parsed && parsed.type === 'wormhole-transcript') {
+            transcripts.push(parsed);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      if (!cardRecord) {
+        throw new Error('Card record not found in Hypercore for Wormhole summarization.');
+      }
+
+      const mediaType = (cardRecord.mediaType || '').toString();
+
+      let textSource = '';
+      if (transcripts.length > 0) {
+        const latest = transcripts[transcripts.length - 1];
+        if (latest && typeof latest.text === 'string') {
+          textSource = latest.text as string;
+        }
+      }
+
+      if (!textSource) {
+        const ingest = cardRecord.wormhole && cardRecord.wormhole.ingest;
+        const originalPath = ingest && typeof ingest.originalPath === 'string' ? ingest.originalPath : '';
+        if (originalPath && (mediaType === 'text' || mediaType === 'markdown')) {
+          try {
+            const buf = await fs.promises.readFile(originalPath, 'utf-8');
+            textSource = buf.toString();
+          } catch (error) {
+            console.error('Failed to read original text file for Wormhole summarization:', error);
+          }
+        }
+      }
+
+      const cleanedText = (textSource || '').trim();
+      if (!cleanedText) {
+        throw new Error('No text source available for Wormhole summarization. Run transcription or ingest text first.');
+      }
+
+      const globalWormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
+      let provider: 'gemini' | 'openai' | 'llama-local' | 'none' = 'gemini';
+      if (overrideProvider && typeof overrideProvider === 'string') {
+        provider = overrideProvider as any;
+      } else if (
+        globalWormhole.summarization &&
+        typeof globalWormhole.summarization.provider === 'string' &&
+        globalWormhole.summarization.provider.trim().length > 0
+      ) {
+        provider = globalWormhole.summarization.provider as any;
+      }
+
+      const configuredModel: string | undefined =
+        globalWormhole.summarization && typeof globalWormhole.summarization.model === 'string'
+          ? (globalWormhole.summarization.model as string)
+          : undefined;
+
+      const modelName =
+        (overrideModel && typeof overrideModel === 'string' && overrideModel) || configuredModel || 'gemini-pro';
+
+      if (provider !== 'gemini') {
+        throw new Error('Wormhole summarization is currently implemented only for Gemini provider.');
+      }
+
+      const { short, medium, outline, model } = await summarizeTextWithGemini(cleanedText, modelName);
+      if (!medium) {
+        throw new Error('Summarization produced empty text.');
+      }
+
+      const now = new Date().toISOString();
+      const baseId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const outlineText = outline.join('\n');
+
+      const existingSummaries =
+        (Array.isArray(cardRecord.summaries) ? (cardRecord.summaries as any[]) : []) || [];
+
+      const newSummaries = [
+        {
+          id: `${baseId}-short`,
+          kind: 'short',
+          text: short || medium,
+          provider: 'gemini',
+          model,
+          createdAt: now,
+          version: 'v1',
+        },
+        {
+          id: `${baseId}-medium`,
+          kind: 'medium',
+          text: medium,
+          provider: 'gemini',
+          model,
+          createdAt: now,
+          version: 'v1',
+        },
+        {
+          id: `${baseId}-outline`,
+          kind: 'outline',
+          text: outlineText,
+          provider: 'gemini',
+          model,
+          createdAt: now,
+          version: 'v1',
+        },
+      ];
+
+      const updatedSummaries = [...existingSummaries, ...newSummaries];
+
+      const existingProcessing =
+        (cardRecord.wormhole && typeof cardRecord.wormhole === 'object' && cardRecord.wormhole.processing) || {};
+      const existingSummarization = (existingProcessing as any).summarization || {};
+
+      const nextProcessing = {
+        ...existingProcessing,
+        summarization: {
+          status: 'complete',
+          provider: 'gemini',
+          model,
+          startedAt: existingSummarization.startedAt || now,
+          completedAt: now,
+          error: undefined,
+        },
+      } as any;
+
+      const nextCardRecord = {
+        ...cardRecord,
+        updatedAt: now,
+        summaries: updatedSummaries,
+        wormhole: {
+          ...(cardRecord.wormhole || {}),
+          processing: nextProcessing,
+        },
+      } as any;
+
+      await appendToCore(cardId, JSON.stringify(nextCardRecord));
+
+      return {
+        cardId,
+        step: 'summarization',
+        status: nextProcessing.summarization,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    'wormhole-run-keyterms',
+    async (
+      _event,
+      payload: { cardId: string; overrideProvider?: string; overrideModel?: string },
+    ) => {
+      const { cardId, overrideProvider, overrideModel } = payload || ({} as any);
+      if (!cardId || typeof cardId !== 'string') {
+        throw new Error('cardId is required for Wormhole key-term extraction.');
+      }
+
+      const records = await readCore(cardId);
+      if (!Array.isArray(records) || records.length === 0) {
+        throw new Error('Card Hypercore is empty; cannot run key-term extraction.');
+      }
+
+      let cardRecord: any = null;
+      const transcripts: any[] = [];
+
+      for (let i = 0; i < records.length; i += 1) {
+        const raw = records[i];
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.type === 'card') {
+            cardRecord = parsed;
+          } else if (parsed && parsed.type === 'wormhole-transcript') {
+            transcripts.push(parsed);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      if (!cardRecord) {
+        throw new Error('Card record not found in Hypercore for Wormhole key-term extraction.');
+      }
+
+      const mediaType = (cardRecord.mediaType || '').toString();
+
+      let textSource = '';
+      if (transcripts.length > 0) {
+        const latest = transcripts[transcripts.length - 1];
+        if (latest && typeof latest.text === 'string') {
+          textSource = latest.text as string;
+        }
+      }
+
+      if (!textSource) {
+        const ingest = cardRecord.wormhole && cardRecord.wormhole.ingest;
+        const originalPath = ingest && typeof ingest.originalPath === 'string' ? ingest.originalPath : '';
+        if (originalPath && (mediaType === 'text' || mediaType === 'markdown')) {
+          try {
+            const buf = await fs.promises.readFile(originalPath, 'utf-8');
+            textSource = buf.toString();
+          } catch (error) {
+            console.error('Failed to read original text file for Wormhole key-term extraction:', error);
+          }
+        }
+      }
+
+      const cleanedText = (textSource || '').trim();
+      if (!cleanedText) {
+        throw new Error('No text source available for Wormhole key-term extraction. Run transcription or ingest text first.');
+      }
+
+      const globalWormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
+      let provider: 'gemini' | 'openai' | 'llama-local' | 'none' = 'gemini';
+      if (overrideProvider && typeof overrideProvider === 'string') {
+        provider = overrideProvider as any;
+      } else if (
+        globalWormhole.keyTerms &&
+        typeof globalWormhole.keyTerms.provider === 'string' &&
+        globalWormhole.keyTerms.provider.trim().length > 0
+      ) {
+        provider = globalWormhole.keyTerms.provider as any;
+      }
+
+      const configuredModel: string | undefined =
+        globalWormhole.keyTerms && typeof globalWormhole.keyTerms.model === 'string'
+          ? (globalWormhole.keyTerms.model as string)
+          : undefined;
+
+      const modelName =
+        (overrideModel && typeof overrideModel === 'string' && overrideModel) || configuredModel || 'gemini-pro';
+
+      if (provider !== 'gemini') {
+        throw new Error('Wormhole key-term extraction is currently implemented only for Gemini provider.');
+      }
+
+      const { terms, model } = await extractKeyTermsWithGemini(cleanedText, modelName);
+      if (!terms || terms.length === 0) {
+        throw new Error('Key-term extraction produced no terms.');
+      }
+
+      const now = new Date().toISOString();
+      const existingKeyTerms =
+        (Array.isArray(cardRecord.keyTerms) ? (cardRecord.keyTerms as any[]) : []) || [];
+
+      const mergedKeyTerms = [...existingKeyTerms, ...terms];
+
+      const existingProcessing =
+        (cardRecord.wormhole && typeof cardRecord.wormhole === 'object' && cardRecord.wormhole.processing) || {};
+      const existingKeyTermsStep = (existingProcessing as any).keyTerms || {};
+
+      const nextProcessing = {
+        ...existingProcessing,
+        keyTerms: {
+          status: 'complete',
+          provider: 'gemini',
+          model,
+          startedAt: existingKeyTermsStep.startedAt || now,
+          completedAt: now,
+          error: undefined,
+        },
+      } as any;
+
+      const nextCardRecord = {
+        ...cardRecord,
+        updatedAt: now,
+        keyTerms: mergedKeyTerms,
+        wormhole: {
+          ...(cardRecord.wormhole || {}),
+          processing: nextProcessing,
+        },
+      } as any;
+
+      await appendToCore(cardId, JSON.stringify(nextCardRecord));
+
+      return {
+        cardId,
+        step: 'keyTerms',
+        status: nextProcessing.keyTerms,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    'wormhole-run-wiki-update',
+    async (
+      _event,
+      payload: { cardId: string; overrideProvider?: string; overrideModel?: string },
+    ) => {
+      const { cardId, overrideProvider, overrideModel } = payload || ({} as any);
+      if (!cardId || typeof cardId !== 'string') {
+        throw new Error('cardId is required for Wormhole wiki update.');
+      }
+
+      const records = await readCore(cardId);
+      if (!Array.isArray(records) || records.length === 0) {
+        throw new Error('Card Hypercore is empty; cannot run wiki update.');
+      }
+
+      let cardRecord: any = null;
+      for (let i = records.length - 1; i >= 0; i -= 1) {
+        const raw = records[i];
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.type === 'card') {
+            cardRecord = parsed;
+            break;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!cardRecord) {
+        throw new Error('Card record not found in Hypercore for Wormhole wiki update.');
+      }
+
+      const keyTerms = Array.isArray(cardRecord.keyTerms) ? (cardRecord.keyTerms as any[]) : [];
+      if (!keyTerms || keyTerms.length === 0) {
+        throw new Error('No key terms found on this card; run key-term extraction before wiki update.');
+      }
+
+      const globalWormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
+
+      let provider: 'gemini' | 'openai' | 'llama-local' | 'none' = 'none';
+      if (overrideProvider && typeof overrideProvider === 'string') {
+        provider = overrideProvider as any;
+      } else if (
+        globalWormhole.wikiUpdate &&
+        typeof globalWormhole.wikiUpdate.provider === 'string' &&
+        globalWormhole.wikiUpdate.provider.trim().length > 0
+      ) {
+        provider = globalWormhole.wikiUpdate.provider as any;
+      }
+
+      const configuredModel: string | undefined =
+        globalWormhole.wikiUpdate && typeof globalWormhole.wikiUpdate.model === 'string'
+          ? (globalWormhole.wikiUpdate.model as string)
+          : undefined;
+
+      const modelName =
+        (overrideModel && typeof overrideModel === 'string' && overrideModel) || configuredModel;
+
+      await createCore(WIKI_CORE_NAME);
+
+      const now = new Date().toISOString();
+      const wikiEntries: { term: string; wikiId: string; url?: string }[] = [];
+
+      for (const termObj of keyTerms) {
+        const rawTerm = termObj && typeof termObj.term === 'string' ? (termObj.term as string) : '';
+        const term = rawTerm.trim();
+        if (!term) continue;
+
+        const baseSlug = term
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 60);
+
+        const wikiId = `wiki-${baseSlug || 'term'}-${cardId.slice(0, 6)}`;
+
+        const record = {
+          type: 'wiki-entry',
+          wikiId,
+          term,
+          kind: termObj && typeof termObj.type === 'string' ? (termObj.type as string) : undefined,
+          createdAt: now,
+          sourceCardId: cardId,
+          source: 'wormhole',
+        } as any;
+
+        await appendToCore(WIKI_CORE_NAME, JSON.stringify(record));
+        wikiEntries.push({ term, wikiId });
+      }
+
+      if (wikiEntries.length === 0) {
+        throw new Error('Wiki update did not create any entries from key terms.');
+      }
+
+      const existingProcessing =
+        (cardRecord.wormhole && typeof cardRecord.wormhole === 'object' && cardRecord.wormhole.processing) || {};
+      const existingWikiStep = (existingProcessing as any).wikiUpdate || {};
+
+      const nextProcessing = {
+        ...existingProcessing,
+        wikiUpdate: {
+          status: 'complete',
+          provider,
+          model: modelName,
+          startedAt: existingWikiStep.startedAt || now,
+          completedAt: now,
+          error: undefined,
+        },
+      } as any;
+
+      const nextCardRecord = {
+        ...cardRecord,
+        updatedAt: now,
+        wormhole: {
+          ...(cardRecord.wormhole || {}),
+          processing: nextProcessing,
+          wikiEntries,
+        },
+      } as any;
+
+      await appendToCore(cardId, JSON.stringify(nextCardRecord));
+
+      return {
+        cardId,
+        step: 'wikiUpdate',
+        status: nextProcessing.wikiUpdate,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    'wormhole-get-status',
+    async (
+      _event,
+      payload: { cardId?: string; contentId?: string },
+    ) => {
+      const { cardId, contentId } = payload || ({} as any);
+
+      if (!cardId || typeof cardId !== 'string') {
+        throw new Error('cardId is required for Wormhole status at this time.');
+      }
+
+      const records = await readCore(cardId);
+      if (!Array.isArray(records) || records.length === 0) {
+        throw new Error('Card Hypercore is empty; cannot read Wormhole status.');
+      }
+
+      let cardRecord: any = null;
+      for (let i = records.length - 1; i >= 0; i -= 1) {
+        const raw = records[i];
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.type === 'card') {
+            cardRecord = parsed;
+            break;
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      if (!cardRecord || !cardRecord.wormhole) {
+        throw new Error('Wormhole metadata not found on this card.');
+      }
+
+      const ingest = cardRecord.wormhole.ingest || {};
+      const processing = (cardRecord.wormhole.processing || {}) as any;
+
+      const makeStep = (existing: any, fallbackStatus: string) => ({
+        status: (existing && existing.status) || fallbackStatus,
+        provider: existing && existing.provider,
+        model: existing && existing.model,
+        startedAt: existing && existing.startedAt,
+        completedAt: existing && existing.completedAt,
+        error: existing && existing.error,
+      });
+
+      const status = {
+        cardId,
+        contentId: ingest.contentId || contentId || '',
+        processing: {
+          ingest: makeStep(processing.ingest, 'complete'),
+          transcription: processing.transcription
+            ? makeStep(processing.transcription, 'pending')
+            : undefined,
+          summarization: processing.summarization
+            ? makeStep(processing.summarization, 'pending')
+            : undefined,
+          keyTerms: processing.keyTerms ? makeStep(processing.keyTerms, 'pending') : undefined,
+          wikiUpdate: processing.wikiUpdate
+            ? makeStep(processing.wikiUpdate, 'pending')
+            : undefined,
+        },
+      } as any;
+
+      return status;
+    },
+  );
+
+  ipcMain.handle(
+    'wormhole-get-derived-artifacts',
+    async (
+      _event,
+      payload: { cardId: string },
+    ) => {
+      const { cardId } = payload || ({} as any);
+      if (!cardId || typeof cardId !== 'string') {
+        throw new Error('cardId is required for Wormhole derived artifacts.');
+      }
+
+      const records = await readCore(cardId);
+      if (!Array.isArray(records) || records.length === 0) {
+        throw new Error('Card Hypercore is empty; no artifacts available.');
+      }
+
+      let cardRecord: any = null;
+      const transcripts: any[] = [];
+
+      for (let i = 0; i < records.length; i += 1) {
+        const raw = records[i];
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.type === 'card') {
+            cardRecord = parsed;
+          } else if (parsed && parsed.type === 'wormhole-transcript') {
+            transcripts.push({
+              id: parsed.id || String(i),
+              text: parsed.text || '',
+              createdAt: parsed.createdAt || '',
+              provider: parsed.provider || '',
+              model: parsed.model,
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!cardRecord || !cardRecord.wormhole) {
+        throw new Error('Wormhole metadata not found on this card.');
+      }
+
+      const ingest = cardRecord.wormhole.ingest || {};
+      const summaries = Array.isArray(cardRecord.summaries) ? (cardRecord.summaries as any[]) : [];
+      const keyTerms = Array.isArray(cardRecord.keyTerms) ? (cardRecord.keyTerms as any[]) : [];
+      const wikiEntries =
+        Array.isArray(cardRecord.wormhole.wikiEntries) && cardRecord.wormhole.wikiEntries.length > 0
+          ? (cardRecord.wormhole.wikiEntries as any[])
+          : [];
+
+      const result = {
+        cardId,
+        contentId: ingest.contentId || '',
+        transcripts,
+        summaries,
+        keyTerms,
+        wikiEntries,
+      } as any;
+
+      return result;
     },
   );
 

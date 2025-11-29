@@ -77,9 +77,14 @@ export async function appendToCore(name: string, data: string) {
 }
 
 export async function readCore(name: string) {
-    const core = cores.get(name);
+    let core = cores.get(name);
     if (!core) {
-        throw new Error(`Core ${name} not found`);
+        // Lazily open or create the core using the same path and swarm wiring as createCore.
+        const info = await createCore(name);
+        core = cores.get(name);
+        if (!core) {
+            throw new Error(`Core ${name} not found after create (key=${info?.key})`);
+        }
     }
 
     const entries: string[] = [];

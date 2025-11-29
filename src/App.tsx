@@ -11,7 +11,10 @@ import Admin from './pages/Admin';
 import LocalLlama from './pages/LocalLlama';
 import Archives from './pages/Archives';
 import Revid from './pages/Revid';
+import RevidMedia from './pages/RevidMedia';
 import CardLibrary from './pages/CardLibrary';
+import Wormhole from './pages/Wormhole';
+import Wiki from './pages/Wiki';
 
 function App() {
   useEffect(() => {
@@ -37,7 +40,10 @@ function App() {
           <Route path="admin" element={<Admin />} />
           <Route path="local-llama" element={<LocalLlama />} />
           <Route path="revid" element={<Revid />} />
+          <Route path="revid-media" element={<RevidMedia />} />
           <Route path="cards" element={<CardLibrary />} />
+          <Route path="wormhole" element={<Wormhole />} />
+          <Route path="wiki" element={<Wiki />} />
         </Route>
       </Routes>
     </Router>
