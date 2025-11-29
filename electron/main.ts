@@ -959,13 +959,19 @@ function createWindow() {
 
   if (isDev) {
     win.loadURL('http://localhost:5173');
-    win.webContents.openDevTools();
+    // win.webContents.openDevTools(); // Disabled automatic opening
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('toggle-dev-tools', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      win.webContents.toggleDevTools();
+    }
+  });
   // Settings IPC handlers
   ipcMain.handle('get-settings', () => {
     const wormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
@@ -3024,6 +3030,65 @@ app.whenReady().then(() => {
       return '';
     },
   );
+
+  ipcMain.handle('wormhole-get-wiki-index', async () => {
+    try {
+      const records = await readCore(WIKI_CORE_NAME);
+      const entryList: any[] = [];
+      const metaMap: Record<string, any> = {};
+
+      for (const raw of records) {
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const data = JSON.parse(raw);
+          if (!data || typeof data.type !== 'string') continue;
+
+          if (data.type === 'wiki-entry') {
+            entryList.push({
+              wikiId: String(data.wikiId || ''),
+              term: String(data.term || ''),
+              kind: typeof data.kind === 'string' ? data.kind : undefined,
+              createdAt: typeof data.createdAt === 'string' ? data.createdAt : undefined,
+              sourceCardId: typeof data.sourceCardId === 'string' ? data.sourceCardId : undefined,
+              raw: data,
+            });
+          } else if (data.type === 'wiki-term-meta') {
+            const term = (String(data.term || '').trim() || '(untitled term)');
+            const key = term.toLowerCase();
+            const updatedAt =
+              typeof data.updatedAt === 'string'
+                ? data.updatedAt
+                : typeof data.createdAt === 'string'
+                  ? data.createdAt
+                  : '';
+
+            const relatedTerms = Array.isArray(data.relatedTerms)
+              ? (data.relatedTerms as any[])
+                .filter((t) => typeof t === 'string' && t.trim().length > 0)
+                .map((t: string) => t.trim())
+              : undefined;
+
+            metaMap[key] = {
+              term,
+              slug: typeof data.slug === 'string' ? data.slug : undefined,
+              definition: typeof data.definition === 'string' ? data.definition : undefined,
+              relatedTerms,
+              updatedAt,
+              raw: data,
+            };
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      return { entryList, metaMap };
+    } catch (error: any) {
+      console.error('Failed to get wiki index:', error);
+      // Return empty if core doesn't exist yet or other error
+      return { entryList: [], metaMap: {} };
+    }
+  });
 
   // P2P IPC handlers
   ipcMain.handle('p2p-create-core', async (_event, name: string) => {

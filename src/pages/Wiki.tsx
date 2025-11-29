@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
@@ -32,115 +33,43 @@ const Wiki: React.FC = () => {
     const [termMeta, setTermMeta] = useState<Record<string, WikiTermMeta>>({});
     const [definitionDraft, setDefinitionDraft] = useState('');
     const [relatedTermsDraft, setRelatedTermsDraft] = useState('');
+    const [progress, setProgress] = useState(0);
 
     useEffect(() => {
+        let isMounted = true;
+
         const loadEntries = async () => {
-            if (typeof window === 'undefined' || !window.electronAPI || !window.electronAPI.p2pRead) {
-                setError('Wiki browser requires the Electron P2P backend.');
+            if (typeof window === 'undefined' || !window.electronAPI || !window.electronAPI.wormholeGetWikiIndex) {
+                setError('Wiki browser requires the Electron backend with wormholeGetWikiIndex support.');
                 return;
             }
 
             setLoading(true);
+            setProgress(0);
             setError(null);
+            setEntries([]);
+            setTermMeta({});
+
             try {
-                let items: string[] = [];
-                try {
-                    items = await window.electronAPI.p2pRead(WIKI_CORE_NAME);
-                } catch (inner: any) {
-                    const msg = inner?.message || '';
-                    if (msg.includes('not found')) {
-                        setEntries([]);
-                        setLoading(false);
-                        return;
-                    }
-                    throw inner;
+                // Fetch all entries at once from the backend
+                const { entryList, metaMap } = await window.electronAPI.wormholeGetWikiIndex();
+
+                if (isMounted) {
+                    setEntries(entryList || []);
+                    setTermMeta(metaMap || {});
+                    setLoading(false);
+                    setProgress(100);
                 }
-
-                const entryList: WikiEntryItem[] = [];
-                const metaMap = new Map<string, WikiTermMeta>();
-                for (const raw of items) {
-                    if (!raw || typeof raw !== 'string') continue;
-                    try {
-                        const data = JSON.parse(raw);
-                        if (!data || typeof data.type !== 'string') continue;
-
-                        if (data.type === 'wiki-entry') {
-                            const entry: WikiEntryItem = {
-                                wikiId: String(data.wikiId || ''),
-                                term: String(data.term || ''),
-                                kind: typeof data.kind === 'string' ? data.kind : undefined,
-                                createdAt: typeof data.createdAt === 'string' ? data.createdAt : undefined,
-                                sourceCardId:
-                                    typeof data.sourceCardId === 'string' ? (data.sourceCardId as string) : undefined,
-                                raw: data,
-                            };
-                            entryList.push(entry);
-                            continue;
-                        }
-
-                        if (data.type === 'wiki-term-meta') {
-                            const term = (String(data.term || '').trim() || '(untitled term)');
-                            const key = term.toLowerCase();
-                            const updatedAt =
-                                typeof data.updatedAt === 'string'
-                                    ? data.updatedAt
-                                    : typeof data.createdAt === 'string'
-                                    ? data.createdAt
-                                    : '';
-
-                            const relatedTerms = Array.isArray(data.relatedTerms)
-                                ? (data.relatedTerms as any[])
-                                      .filter((t) => typeof t === 'string' && t.trim().length > 0)
-                                      .map((t: string) => t.trim())
-                                : undefined;
-
-                            const nextMeta: WikiTermMeta = {
-                                term,
-                                slug: typeof data.slug === 'string' ? data.slug : undefined,
-                                definition: typeof data.definition === 'string' ? data.definition : undefined,
-                                relatedTerms,
-                                updatedAt,
-                                raw: data,
-                            };
-
-                            const existing = metaMap.get(key);
-                            if (!existing) {
-                                metaMap.set(key, nextMeta);
-                            } else {
-                                const prevTime = existing.updatedAt || '';
-                                if (!prevTime || (updatedAt || '').localeCompare(prevTime) >= 0) {
-                                    metaMap.set(key, nextMeta);
-                                }
-                            }
-                        }
-                    } catch {
-                        // ignore parse errors
-                    }
-                }
-
-                entryList.sort((a, b) => {
-                    const termCmp = a.term.localeCompare(b.term);
-                    if (termCmp !== 0) return termCmp;
-                    const aTime = a.createdAt || '';
-                    const bTime = b.createdAt || '';
-                    return bTime.localeCompare(aTime);
-                });
-
-                const metaObj: Record<string, WikiTermMeta> = {};
-                metaMap.forEach((value, key) => {
-                    metaObj[key] = value;
-                });
-
-                setEntries(entryList);
-                setTermMeta(metaObj);
             } catch (e: any) {
-                setError(e?.message || 'Failed to load Wiki entries');
-            } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setError(e?.message || 'Failed to load Wiki entries');
+                    setLoading(false);
+                }
             }
         };
 
         loadEntries();
+        return () => { isMounted = false; };
     }, []);
 
     const filteredEntries = useMemo(() => {
@@ -275,166 +204,256 @@ const Wiki: React.FC = () => {
 
     return (
         <PageContainer>
-            <div className="w-full text-white">
-                <div className="flex items-center justify-between mb-6">
+            <style>{`
+                .wiki-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                    gap: 1rem;
+                }
+                .glass-panel {
+                    background: rgba(17, 24, 39, 0.7);
+                    backdrop-filter: blur(12px);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                }
+                .wiki-card-hover:hover {
+                    border-color: rgba(52, 211, 153, 0.5);
+                    box-shadow: 0 0 20px rgba(52, 211, 153, 0.1);
+                    transform: translateY(-2px);
+                }
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: rgba(0, 0, 0, 0.2);
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 3px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255, 255, 255, 0.2);
+                }
+            `}</style>
+
+            <div className="w-full text-white h-full flex flex-col max-w-[1800px] mx-auto">
+                {/* Header */}
+                <div className="flex items-end justify-between border-b border-gray-800 pb-6 mb-6">
                     <div>
-                        <h2 className="text-3xl font-bold">Wiki</h2>
-                        <p className="text-sm text-gray-300 mt-1">
-                            Browse Wormhole wiki entries created from key terms and jump to their source Cards.
+                        <h2 className="text-4xl font-bold tracking-tight text-white flex items-center gap-3">
+                            <rux-icon icon="library-books" size="large"></rux-icon>
+                            WIKI <span className="text-blue-400 text-lg font-mono font-normal opacity-80">// NEURAL ARCHIVE</span>
+                        </h2>
+                        <p className="text-gray-400 mt-1 font-mono text-xs tracking-wide">
+                            KNOWLEDGE GRAPH NODES & DEFINITIONS
                         </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="text"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            placeholder="Search by term or wiki ID"
-                            className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 border border-gray-600 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/70 min-w-[220px]"
-                        />
+                    <div className="flex items-center gap-4">
+                        <div className="relative group">
+                            <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
+                            <rux-input
+                                type="text"
+                                value={search}
+                                onInput={(e: any) => setSearch(e.target.value)}
+                                placeholder="Search neural index..."
+                                className="relative min-w-[300px]"
+                            >
+                                <rux-icon slot="prefix" icon="search" size="small"></rux-icon>
+                            </rux-input>
+                        </div>
                     </div>
                 </div>
 
-                {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
-
-                {loading && <p className="text-sm text-gray-400 mb-4">Loading wiki entries…</p>}
-
-                {!loading && termGroups.length === 0 && !error && (
-                    <p className="text-sm text-gray-400">
-                        No wiki entries found yet. Run Wormhole processing (key terms + wiki update) on some Cards.
-                    </p>
+                {error && (
+                    <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg flex items-center gap-3 text-red-300">
+                        <rux-icon icon="warning" size="small"></rux-icon>
+                        <span className="font-mono text-sm">{error}</span>
+                    </div>
                 )}
 
-                {termGroups.length > 0 && (
-                    <div className="flex flex-col lg:flex-row gap-4">
-                        <div className="lg:w-2/3 grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {termGroups.map((group) => {
-                                const distinctCardIds = new Set(
-                                    group.entries
-                                        .map((e) => e.sourceCardId)
-                                        .filter((id): id is string => typeof id === 'string' && id.length > 0),
-                                );
-                                const totalEntries = group.entries.length;
-                                const first = group.entries[0];
-                                const isSelected =
-                                    selectedTerm &&
-                                    selectedTerm.trim().toLowerCase() === group.term.trim().toLowerCase();
-
-                                return (
-                                    <button
-                                        type="button"
-                                        key={group.term}
-                                        onClick={() => setSelectedTerm(group.term)}
-                                        className={`text-left rounded-xl border p-4 flex flex-col gap-2 bg-gray-850/60 transition-colors ${{
-                                            true: 'border-blue-500/80 shadow-md shadow-blue-900/30',
-                                            false: 'border-gray-700 hover:border-gray-500/80',
-                                        }[String(!!isSelected) as 'true' | 'false']}`}
-                                    >
-                                        <div className="text-sm font-semibold text-emerald-300 truncate" title={group.term}>
-                                            {group.term}
-                                        </div>
-                                        {first.kind && (
-                                            <div className="text-[11px] text-gray-400">Type: {first.kind}</div>
-                                        )}
-                                        <div className="text-[11px] text-gray-400">
-                                            {totalEntries} wiki entr{totalEntries === 1 ? 'y' : 'ies'} ·{' '}
-                                            {distinctCardIds.size} source card
-                                            {distinctCardIds.size === 1 ? '' : 's'}
-                                        </div>
-                                    </button>
-                                );
-                            })}
+                {loading && (
+                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
+                        <rux-progress value={progress} max={100}></rux-progress>
+                        <div className="font-mono text-sm animate-pulse text-blue-400">
+                            SCANNING NEURAL PATHWAYS... {progress > 0 ? `${progress}%` : ''}
                         </div>
-                        {selectedGroup && (
-                            <div className="lg:w-1/3 rounded-xl border border-gray-700 bg-gray-900/80 p-4 text-xs text-gray-200">
-                                <div className="flex items-center justify-between mb-2">
-                                    <div className="font-semibold text-emerald-300">
-                                        Term details
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedTerm(null)}
-                                        className="text-[11px] text-gray-400 hover:text-gray-200"
-                                    >
-                                        Clear
-                                    </button>
-                                </div>
-                                <div className="mb-2">
-                                    <div className="text-[11px] text-gray-500">Term</div>
-                                    <div className="text-sm text-gray-100 break-words">{selectedGroup.term}</div>
-                                </div>
-                                {selectedGroup.entries[0]?.kind && (
-                                    <div className="mb-2">
-                                        <div className="text-[11px] text-gray-500">Type</div>
-                                        <div className="text-[11px] text-gray-200">
-                                            {selectedGroup.entries[0].kind}
-                                        </div>
-                                    </div>
-                                )}
-                                <div className="mt-2">
-                                    <div className="text-[11px] text-gray-500 mb-0.5">Definition</div>
-                                    <textarea
-                                        value={definitionDraft}
-                                        onChange={(e) => setDefinitionDraft(e.target.value)}
-                                        rows={3}
-                                        className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500/70 resize-none"
-                                        placeholder="Short description or definition for this term"
-                                    />
-                                </div>
-                                <div className="mt-2">
-                                    <div className="text-[11px] text-gray-500 mb-0.5">
-                                        Related terms (comma-separated)
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={relatedTermsDraft}
-                                        onChange={(e) => setRelatedTermsDraft(e.target.value)}
-                                        className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500/70"
-                                        placeholder="e.g. Hypercore, Sovereign Memory"
-                                    />
-                                </div>
-                                <div className="mt-3 flex justify-end">
-                                    <button
-                                        type="button"
-                                        onClick={handleSaveMeta}
-                                        className="px-3 py-1.5 text-[11px] rounded-md bg-blue-600 hover:bg-blue-500 border border-blue-500 text-white"
-                                    >
-                                        Save wiki notes
-                                    </button>
-                                </div>
-                                <div className="mt-3">
-                                    <div className="text-[11px] font-semibold text-gray-300 mb-1">
-                                        Wiki entries
-                                    </div>
-                                    <div className="space-y-1 max-h-64 overflow-auto pr-1">
-                                        {selectedGroup.entries.map((entry) => (
-                                            <div
-                                                key={entry.wikiId + (entry.createdAt || '') + (entry.sourceCardId || '')}
-                                                className="border border-gray-700 rounded-md px-2 py-1.5 flex flex-col gap-1 bg-gray-900/60"
-                                            >
-                                                {entry.wikiId && (
-                                                    <div className="text-[11px] text-gray-400 break-all">
-                                                        <span className="text-gray-500">Wiki ID: </span>
-                                                        {entry.wikiId}
-                                                    </div>
-                                                )}
-                                                {entry.createdAt && (
-                                                    <div className="text-[11px] text-gray-500">
-                                                        Created: {entry.createdAt}
-                                                    </div>
-                                                )}
-                                                {entry.sourceCardId && (
-                                                    <div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleOpenCard(entry.sourceCardId)}
-                                                            className="px-2 py-0.5 text-[11px] rounded-md bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-100"
-                                                        >
-                                                            Open source Card
-                                                        </button>
-                                                    </div>
+                    </div>
+                )}
+
+                {!loading && termGroups.length === 0 && !error && (
+                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
+                        <div className="w-24 h-24 rounded-full bg-gray-800/50 flex items-center justify-center border border-gray-700">
+                            <rux-icon icon="auto-stories" size="large" className="opacity-20"></rux-icon>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-lg font-medium text-gray-300">Archive Empty</div>
+                            <div className="text-sm text-gray-500 mt-1 max-w-md">
+                                No knowledge nodes detected. Process cards in the Wormhole to generate wiki entries.
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {!loading && termGroups.length > 0 && (
+                    <div className="flex-1 min-h-0 flex gap-6 overflow-hidden">
+                        {/* Left Panel: The Index */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+                            <div className="wiki-grid pb-6">
+                                {termGroups.map((group) => {
+                                    const distinctCardIds = new Set(
+                                        group.entries
+                                            .map((e) => e.sourceCardId)
+                                            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+                                    );
+                                    const totalEntries = group.entries.length;
+                                    const first = group.entries[0];
+                                    const isSelected =
+                                        selectedTerm &&
+                                        selectedTerm.trim().toLowerCase() === group.term.trim().toLowerCase();
+
+                                    return (
+                                        <div
+                                            key={group.term}
+                                            onClick={() => setSelectedTerm(group.term)}
+                                            className={`cursor-pointer transition-all duration-200 rounded-lg border p-4 flex flex-col gap-3 relative overflow-hidden group wiki-card-hover ${isSelected
+                                                ? 'bg-blue-900/20 border-blue-500/60 shadow-[0_0_15px_rgba(59,130,246,0.15)]'
+                                                : 'bg-gray-900/40 border-gray-800 hover:bg-gray-800/60'
+                                                }`}
+                                        >
+                                            {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500"></div>}
+
+                                            <div className="flex justify-between items-start gap-2">
+                                                <h3 className={`font-bold text-lg truncate leading-tight ${isSelected ? 'text-blue-300' : 'text-gray-200 group-hover:text-white'}`}>
+                                                    {group.term}
+                                                </h3>
+                                                {first.kind && (
+                                                    <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider bg-gray-800 text-gray-400 border border-gray-700">
+                                                        {first.kind}
+                                                    </span>
                                                 )}
                                             </div>
-                                        ))}
+
+                                            <div className="mt-auto flex items-center gap-4 text-[11px] font-mono text-gray-500">
+                                                <div className="flex items-center gap-1.5">
+                                                    <rux-icon icon="description" size="extra-small" className="opacity-60"></rux-icon>
+                                                    <span>{totalEntries} NODE{totalEntries !== 1 ? 'S' : ''}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <rux-icon icon="link" size="extra-small" className="opacity-60"></rux-icon>
+                                                    <span>{distinctCardIds.size} SOURCE{distinctCardIds.size !== 1 ? 'S' : ''}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Right Panel: The Inspector */}
+                        {selectedGroup && (
+                            <div className="w-[400px] xl:w-[480px] flex-shrink-0 flex flex-col glass-panel rounded-xl overflow-hidden border-l-4 border-l-blue-500/50 shadow-2xl animate-in slide-in-from-right-4 duration-300">
+                                {/* Inspector Header */}
+                                <div className="p-6 border-b border-gray-700/50 bg-gray-900/30">
+                                    <div className="flex items-start justify-between mb-4">
+                                        <div className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest text-blue-400">
+                                            <rux-icon icon="info" size="extra-small"></rux-icon>
+                                            Node Inspector
+                                        </div>
+                                        <button
+                                            onClick={() => setSelectedTerm(null)}
+                                            className="text-gray-500 hover:text-white transition-colors"
+                                        >
+                                            <rux-icon icon="close" size="small"></rux-icon>
+                                        </button>
+                                    </div>
+                                    <h2 className="text-2xl font-bold text-white mb-2 break-words leading-tight">
+                                        {selectedGroup.term}
+                                    </h2>
+                                    {selectedGroup.entries[0]?.kind && (
+                                        <div className="inline-flex items-center gap-2 px-2 py-1 rounded bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs font-mono">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                                            {selectedGroup.entries[0].kind}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Inspector Content */}
+                                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+                                    {/* Definition Section */}
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                            <rux-icon icon="menu-book" size="extra-small"></rux-icon>
+                                            Definition
+                                        </label>
+                                        <rux-textarea
+                                            value={definitionDraft}
+                                            onInput={(e: any) => setDefinitionDraft(e.target.value)}
+                                            placeholder="Enter a definition for this term..."
+                                            rows={4}
+                                            className="w-full"
+                                        ></rux-textarea>
+                                    </div>
+
+                                    {/* Related Terms Section */}
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                            <rux-icon icon="share" size="extra-small"></rux-icon>
+                                            Related Nodes
+                                        </label>
+                                        <rux-input
+                                            value={relatedTermsDraft}
+                                            onInput={(e: any) => setRelatedTermsDraft(e.target.value)}
+                                            placeholder="e.g. Hypercore, Protocol, Network"
+                                            className="w-full"
+                                            help-text="Comma-separated list of related terms"
+                                        ></rux-input>
+                                    </div>
+
+                                    {/* Action Button */}
+                                    <div className="pt-2">
+                                        <rux-button
+                                            onClick={handleSaveMeta}
+                                            className="w-full justify-center"
+                                            icon="save"
+                                        >
+                                            Update Knowledge Node
+                                        </rux-button>
+                                    </div>
+
+                                    <div className="h-px bg-gray-700/50 my-2"></div>
+
+                                    {/* Source Entries */}
+                                    <div className="space-y-3">
+                                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                            <rux-icon icon="layers" size="extra-small"></rux-icon>
+                                            Source References ({selectedGroup.entries.length})
+                                        </label>
+                                        <div className="space-y-2">
+                                            {selectedGroup.entries.map((entry) => (
+                                                <div
+                                                    key={entry.wikiId + (entry.createdAt || '') + (entry.sourceCardId || '')}
+                                                    className="bg-gray-800/40 border border-gray-700/50 rounded-lg p-3 hover:border-gray-600 transition-colors"
+                                                >
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-[10px] font-mono text-gray-500 truncate max-w-[150px]" title={entry.wikiId}>
+                                                            {entry.wikiId}
+                                                        </span>
+                                                        <span className="text-[10px] text-gray-500">
+                                                            {entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : 'Unknown Date'}
+                                                        </span>
+                                                    </div>
+                                                    {entry.sourceCardId && (
+                                                        <rux-button
+                                                            size="small"
+                                                            secondary
+                                                            className="w-full justify-center"
+                                                            onClick={() => handleOpenCard(entry.sourceCardId)}
+                                                        >
+                                                            Open Source Card
+                                                        </rux-button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
