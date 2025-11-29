@@ -99,6 +99,16 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave }) 
                         </div>
                     )}
 
+                    {card.type === 'video' && (
+                        <div className="flex justify-center items-center h-full">
+                            <video
+                                src={card.data?.url}
+                                controls
+                                className="max-h-full max-w-full rounded-lg shadow-2xl border border-gray-800"
+                            />
+                        </div>
+                    )}
+
                     {card.type === 'text' && (
                         <div className="h-full">
                             {isEditing ? (

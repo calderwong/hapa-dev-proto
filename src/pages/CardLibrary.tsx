@@ -547,13 +547,15 @@ const CardLibrary: React.FC = () => {
 
         const workspaceCard = {
             id: activeWorkspaceCard.cardId,
-            type: activeWorkspaceCard.mediaKind === 'image' ? 'image' : 'text', // Simplified
+            type: (activeWorkspaceCard.mediaKind === 'image' || activeWorkspaceCard.mediaKind === 'video' || activeWorkspaceCard.mediaKind === 'audio')
+                ? activeWorkspaceCard.mediaKind
+                : 'text',
             timestamp: new Date(activeWorkspaceCard.createdAt).getTime(),
             data: {
                 title: activeWorkspaceCard.name,
                 text: textContent,
-                url: activeWorkspaceCard.mediaRemoteUrl || activeWorkspaceCard.mediaLocalPath,
-                imageUrl: activeWorkspaceCard.mediaRemoteUrl || activeWorkspaceCard.mediaLocalPath,
+                url: activeWorkspaceCard.mediaRemoteUrl || toFileUrl(activeWorkspaceCard.mediaLocalPath),
+                imageUrl: activeWorkspaceCard.mediaRemoteUrl || toFileUrl(activeWorkspaceCard.mediaLocalPath),
                 tags: activeWorkspaceCard.cardRecord?.tags || []
             }
         };
@@ -688,9 +690,42 @@ const CardLibrary: React.FC = () => {
                                         <span className="text-[10px] uppercase tracking-wider text-gray-600 font-bold">
                                             {card.provider || 'SYSTEM'}
                                         </span>
-                                        {card.mediaKind && (
-                                            <rux-icon icon={card.mediaKind === 'video' ? 'videocam' : card.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="extra-small" className="text-gray-600"></rux-icon>
-                                        )}
+                                        <div className="flex items-center gap-2">
+                                            {/* Badges */}
+                                            {(() => {
+                                                const summaryCount = card.cardRecord?.summaries?.length || 0;
+                                                const keyTermCount = card.cardRecord?.keyTerms?.length || 0;
+                                                const wikiCount = card.cardRecord?.wormhole?.wikiEntries?.length || 0;
+
+                                                if (summaryCount === 0 && keyTermCount === 0 && wikiCount === 0) return null;
+
+                                                return (
+                                                    <div className="flex items-center gap-2 mr-2 border-r border-gray-700 pr-2">
+                                                        {summaryCount > 0 && (
+                                                            <div className="flex items-center gap-1 text-cyan-400" title={`${summaryCount} Summaries`}>
+                                                                <rux-icon icon="subject" size="extra-small"></rux-icon>
+                                                                <span className="text-[10px] font-mono font-bold">{summaryCount}</span>
+                                                            </div>
+                                                        )}
+                                                        {keyTermCount > 0 && (
+                                                            <div className="flex items-center gap-1 text-purple-400" title={`${keyTermCount} Key Term Sets`}>
+                                                                <rux-icon icon="local-offer" size="extra-small"></rux-icon>
+                                                                <span className="text-[10px] font-mono font-bold">{keyTermCount}</span>
+                                                            </div>
+                                                        )}
+                                                        {wikiCount > 0 && (
+                                                            <div className="flex items-center gap-1 text-emerald-400" title={`${wikiCount} Wiki Entries`}>
+                                                                <rux-icon icon="public" size="extra-small"></rux-icon>
+                                                                <span className="text-[10px] font-mono font-bold">{wikiCount}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
+                                            {card.mediaKind && (
+                                                <rux-icon icon={card.mediaKind === 'video' ? 'videocam' : card.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="extra-small" className="text-gray-600"></rux-icon>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -806,6 +841,25 @@ const CardLibrary: React.FC = () => {
                                                     {renderWormholeStepBadge('Summarization', selectedWormholeProcessing.summarization)}
                                                     {renderWormholeStepBadge('Key terms', selectedWormholeProcessing.keyTerms)}
                                                     {renderWormholeStepBadge('Wiki update', selectedWormholeProcessing.wikiUpdate)}
+                                                </div>
+
+                                                {/* Run Stats */}
+                                                <div className="grid grid-cols-3 gap-4 mb-4 border-t border-gray-700/50 pt-4">
+                                                    <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
+                                                        <rux-icon icon="subject" size="small" className="text-cyan-400 mb-1"></rux-icon>
+                                                        <span className="text-2xl font-bold text-white">{selected.cardRecord?.summaries?.length || 0}</span>
+                                                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Summaries</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
+                                                        <rux-icon icon="local-offer" size="small" className="text-purple-400 mb-1"></rux-icon>
+                                                        <span className="text-2xl font-bold text-white">{selected.cardRecord?.keyTerms?.length || 0}</span>
+                                                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Key Terms</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
+                                                        <rux-icon icon="public" size="small" className="text-emerald-400 mb-1"></rux-icon>
+                                                        <span className="text-2xl font-bold text-white">{selected.cardRecord?.wormhole?.wikiEntries?.length || 0}</span>
+                                                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Wiki Entries</span>
+                                                    </div>
                                                 </div>
 
                                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
