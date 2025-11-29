@@ -7,7 +7,7 @@ import { spawn, ChildProcess } from 'child_process';
 import isDev from 'electron-is-dev';
 import Store from 'electron-store';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { initP2P, createCore, appendToCore, readCore } from './p2p';
+import { initP2P, createCore, appendToCore, readCore, getCoreLength } from './p2p';
 
 const store: any = new Store();
 
@@ -110,8 +110,8 @@ const startLlamaServerInternal = async (): Promise<LlamaStatusInternal> => {
     settings.defaultModel && path.isAbsolute(settings.defaultModel)
       ? settings.defaultModel
       : settings.defaultModel
-      ? path.join(settings.modelsDir, settings.defaultModel)
-      : '';
+        ? path.join(settings.modelsDir, settings.defaultModel)
+        : '';
 
   if (!modelPath) {
     const msg = 'Llama default model is not configured. Please set it in Local AI settings.';
@@ -339,14 +339,14 @@ const searchHfGGUFModelsInternal = async (
             typeof (detail as any)?.downloads === 'number'
               ? ((detail as any).downloads as number)
               : typeof (item as any).downloads === 'number'
-              ? ((item as any).downloads as number)
-              : undefined,
+                ? ((item as any).downloads as number)
+                : undefined,
           likes:
             typeof (detail as any)?.likes === 'number'
               ? ((detail as any).likes as number)
               : typeof (item as any).likes === 'number'
-              ? ((item as any).likes as number)
-              : undefined,
+                ? ((item as any).likes as number)
+                : undefined,
           tags:
             (Array.isArray((detail as any)?.tags) &&
               ((detail as any).tags as string[])) ||
@@ -375,11 +375,12 @@ const broadcastChatStream = (
   provider: 'gemini' | 'openai' | 'llama',
   delta: string,
   done?: boolean,
+  model?: string,
 ) => {
   const [win] = BrowserWindow.getAllWindows();
   if (!win) return;
   if (!delta && !done) return;
-  win.webContents.send('chat-stream', { provider, delta, done: !!done });
+  win.webContents.send('chat-stream', { provider, delta, done: !!done, model });
 };
 
 interface OpenAIAudioSession {
@@ -956,7 +957,7 @@ function createWindow() {
 
   if (isDev) {
     win.loadURL('http://localhost:5173');
-    // win.webContents.openDevTools();
+    win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
@@ -1361,13 +1362,15 @@ app.whenReady().then(() => {
       const data = await response.json();
 
       if (data.models && Array.isArray(data.models)) {
-        return data.models
+        const mapped = data.models
           .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
           .map((m: any) => ({
             name: (m.name as string).replace('models/', ''),
             displayName: m.displayName || (m.name as string).replace('models/', ''),
             description: m.description || '',
           }));
+        console.log('Available Gemini Models:', mapped);
+        return mapped;
       }
     } catch (error) {
       console.error('Error fetching models from API:', error);
@@ -1437,6 +1440,7 @@ app.whenReady().then(() => {
         attachments?: { mimeType: string; data: string }[];
       },
     ) => {
+      console.log('Chat with Gemini requested. Model:', modelName);
       const apiKey = store.get('geminiKey') as string | undefined;
       if (!apiKey) {
         throw new Error('Gemini API Key not found. Please configure it in Settings.');
@@ -1444,21 +1448,23 @@ app.whenReady().then(() => {
 
       try {
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: modelName || 'gemini-pro' });
+        const resolvedModel = (modelName || 'gemini-pro').toString();
+        const model = genAI.getGenerativeModel({ model: resolvedModel });
 
         const toContentHistory = (
           items: { role: string; content: string }[],
         ): any[] =>
-          items.map((item) => ({
-            role: item.role === 'model' ? 'model' : 'user',
-            parts: [{ text: item.content }],
-          }));
+          items
+            .filter((item) => item.content && item.content.trim().length > 0)
+            .map((item) => ({
+              role: item.role === 'model' ? 'model' : 'user',
+              parts: [{ text: item.content }],
+            }));
 
         const sendMessageWithRetry = async (
           currentHistory: { role: string; content: string }[],
-        ): Promise<string> => {
+        ): Promise<{ content: string; model: string; provider: string }> => {
           try {
-            const resolvedModel = (modelName || 'gemini-pro').toString();
             const lowerModel = resolvedModel.toLowerCase();
             const isImageModel =
               lowerModel.includes('image') || lowerModel.includes('nano-banana');
@@ -1548,7 +1554,11 @@ app.whenReady().then(() => {
                 combined.substring(0, 80) + '...',
               );
 
-              return combined || '';
+              return {
+                content: combined || '',
+                model: resolvedModel,
+                provider: 'gemini',
+              };
             }
 
             const geminiHistory = toContentHistory(currentHistory);
@@ -1575,7 +1585,7 @@ app.whenReady().then(() => {
             appendGeminiRequestLog({
               id: requestId,
               createdAt: new Date().toISOString(),
-              model: modelName || 'gemini-pro',
+              model: resolvedModel,
               payload: {
                 history: geminiHistory,
                 parts,
@@ -1583,7 +1593,7 @@ app.whenReady().then(() => {
             });
 
             console.log('Sending message to Gemini (stream):', {
-              model: modelName,
+              model: resolvedModel,
               partsCount: parts.length,
               historyLength: currentHistory.length,
             });
@@ -1596,7 +1606,7 @@ app.whenReady().then(() => {
                 const chunkText = (chunk as any).text?.() ?? '';
                 if (typeof chunkText === 'string' && chunkText.trim().length > 0) {
                   accumulatedText += chunkText;
-                  broadcastChatStream('gemini', chunkText, false);
+                  broadcastChatStream('gemini', chunkText, false, resolvedModel);
                 }
               } catch (error) {
                 console.error('Failed to process Gemini stream chunk:', error);
@@ -1613,8 +1623,12 @@ app.whenReady().then(() => {
                 'Received response from Gemini (stream, text-only):',
                 accumulatedText.substring(0, 50) + '...',
               );
-              broadcastChatStream('gemini', '', true);
-              return accumulatedText || (response as any).text?.() || '';
+              broadcastChatStream('gemini', '', true, resolvedModel);
+              return {
+                content: accumulatedText || (response as any).text?.() || '',
+                model: resolvedModel,
+                provider: 'gemini',
+              };
             }
 
             const responseParts = first.content.parts as any[];
@@ -1637,8 +1651,12 @@ app.whenReady().then(() => {
               combined.substring(0, 50) + '...',
             );
 
-            broadcastChatStream('gemini', '', true);
-            return combined || (response as any).text?.() || '';
+            broadcastChatStream('gemini', '', true, resolvedModel);
+            return {
+              content: combined || (response as any).text?.() || '',
+              model: resolvedModel,
+              provider: 'gemini',
+            };
           } catch (error: any) {
             console.error('Gemini attempt failed:', error);
             if (error?.message?.includes('thought_signature') && currentHistory.length > 0) {
@@ -1707,6 +1725,7 @@ app.whenReady().then(() => {
       }
 
       const adminSettings = getAdminSettings();
+      const resolvedModel = modelName || 'gpt-4.1-mini';
 
       const mappedHistory = history.map((item) => ({
         role: item.role === 'model' ? 'assistant' : 'user',
@@ -1770,9 +1789,8 @@ app.whenReady().then(() => {
         }
 
         if (videoAttachments.length > 0) {
-          textContent = `${textContent}\n\n[Note] ${
-            videoAttachments.length
-          } video attachment(s) were provided. OpenAI chat does not directly consume raw video files in this app; please describe the relevant frames in text.`;
+          textContent = `${textContent}\n\n[Note] ${videoAttachments.length
+            } video attachment(s) were provided. OpenAI chat does not directly consume raw video files in this app; please describe the relevant frames in text.`;
         }
 
         parts.push({
@@ -1784,7 +1802,7 @@ app.whenReady().then(() => {
       }
 
       const openaiPayload = {
-        model: modelName || 'gpt-4.1-mini',
+        model: resolvedModel,
         messages: [
           ...mappedHistory,
           {
@@ -1837,7 +1855,7 @@ app.whenReady().then(() => {
             if (!trimmed.startsWith('data:')) continue;
             const dataStr = trimmed.slice('data:'.length).trim();
             if (dataStr === '[DONE]') {
-              broadcastChatStream('openai', '', true);
+              broadcastChatStream('openai', '', true, resolvedModel);
               continue;
             }
             try {
@@ -1863,7 +1881,7 @@ app.whenReady().then(() => {
                 continue;
               }
 
-              broadcastChatStream('openai', deltaText, false);
+              broadcastChatStream('openai', deltaText, false, resolvedModel);
             } catch (error) {
               console.error('Failed to parse OpenAI stream chunk:', error, dataStr);
             }
@@ -1871,7 +1889,11 @@ app.whenReady().then(() => {
         }
       }
 
-      return fullText;
+      return {
+        content: fullText,
+        model: resolvedModel,
+        provider: 'openai',
+      };
     },
   );
 
@@ -1894,6 +1916,8 @@ app.whenReady().then(() => {
         role: item.role === 'model' ? 'assistant' : 'user',
         content: item.content,
       }));
+
+      const resolvedModel = modelName || 'local-model';
 
       const llamaPayload = {
         model: modelName || undefined,
@@ -1948,7 +1972,7 @@ app.whenReady().then(() => {
             if (!trimmed.startsWith('data:')) continue;
             const dataStr = trimmed.slice('data:'.length).trim();
             if (dataStr === '[DONE]') {
-              broadcastChatStream('llama', '', true);
+              broadcastChatStream('llama', '', true, resolvedModel);
               continue;
             }
             try {
@@ -1973,7 +1997,7 @@ app.whenReady().then(() => {
                 continue;
               }
 
-              broadcastChatStream('llama', deltaText, false);
+              broadcastChatStream('llama', deltaText, false, resolvedModel);
             } catch (error) {
               console.error('Failed to parse Llama stream chunk:', error, dataStr);
             }
@@ -1981,7 +2005,11 @@ app.whenReady().then(() => {
         }
       }
 
-      return fullText;
+      return {
+        content: fullText,
+        model: resolvedModel,
+        provider: 'llama',
+      };
     },
   );
 
@@ -2931,6 +2959,70 @@ app.whenReady().then(() => {
     },
   );
 
+  ipcMain.handle(
+    'wormhole-get-card-text',
+    async (
+      _event,
+      payload: { cardId: string },
+    ) => {
+      const { cardId } = payload || ({} as any);
+      if (!cardId || typeof cardId !== 'string') {
+        throw new Error('cardId is required to get card text.');
+      }
+
+      const records = await readCore(cardId);
+      if (!Array.isArray(records) || records.length === 0) {
+        throw new Error('Card Hypercore is empty.');
+      }
+
+      let cardRecord: any = null;
+      for (let i = records.length - 1; i >= 0; i -= 1) {
+        const raw = records[i];
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.type === 'card') {
+            cardRecord = parsed;
+            break;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!cardRecord) {
+        throw new Error('Card record not found.');
+      }
+
+      // Check for direct text content first
+      if (typeof cardRecord.text === 'string' && cardRecord.text.length > 0) {
+        return cardRecord.text;
+      }
+      if (typeof cardRecord.content === 'string' && cardRecord.content.length > 0) {
+        return cardRecord.content;
+      }
+      if (cardRecord.data && typeof cardRecord.data.text === 'string' && cardRecord.data.text.length > 0) {
+        return cardRecord.data.text;
+      }
+
+      // Fallback to reading from originalPath if available
+      const ingest = cardRecord.wormhole && cardRecord.wormhole.ingest;
+      const originalPath = ingest && typeof ingest.originalPath === 'string' ? ingest.originalPath : '';
+
+      if (originalPath) {
+        try {
+          const buf = await fs.promises.readFile(originalPath, 'utf-8');
+          return buf.toString();
+        } catch (error) {
+          console.error('Failed to read original text file:', error);
+          return '';
+        }
+      }
+
+      return '';
+    },
+  );
+
   // P2P IPC handlers
   ipcMain.handle('p2p-create-core', async (_event, name: string) => {
     return createCore(name);
@@ -2946,8 +3038,12 @@ app.whenReady().then(() => {
     },
   );
 
-  ipcMain.handle('p2p-read', async (_event, name: string) => {
-    return readCore(name);
+  ipcMain.handle('p2p-read', async (_event, name: string, options: any) => {
+    return readCore(name, options);
+  });
+
+  ipcMain.handle('p2p-get-length', async (_event, name: string) => {
+    return getCoreLength(name);
   });
 
   // Initialize P2P and optionally auto-start local llama.cpp server, then open the window

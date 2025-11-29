@@ -66,9 +66,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('wormhole-get-status', params),
     wormholeGetDerivedArtifacts: (params: { cardId: string }) =>
         ipcRenderer.invoke('wormhole-get-derived-artifacts', params),
+    wormholeGetCardText: (params: { cardId: string }) =>
+        ipcRenderer.invoke('wormhole-get-card-text', params),
     p2pCreateCore: (name: string) => ipcRenderer.invoke('p2p-create-core', name),
     p2pAppend: (data: { name: string; data: string }) => ipcRenderer.invoke('p2p-append', data),
-    p2pRead: (name: string) => ipcRenderer.invoke('p2p-read', name),
+    p2pRead: (name: string, options?: any) => ipcRenderer.invoke('p2p-read', name, options),
+    p2pGetLength: (name: string) => ipcRenderer.invoke('p2p-get-length', name),
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

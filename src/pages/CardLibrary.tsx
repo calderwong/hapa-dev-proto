@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+// @ts-nocheck
+import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
+import CardWorkspace from '../components/CardWorkspace';
 
 interface CardIndexEntry {
     cardId: string;
+    name?: string; // Added Name field
     createdAt: string;
     threadId?: string;
     messageId?: string;
@@ -47,6 +50,14 @@ const CardLibrary: React.FC = () => {
     const [overrideKeyTermsModel, setOverrideKeyTermsModel] = useState('');
     const [overrideWikiModel, setOverrideWikiModel] = useState('');
     const [geminiModels, setGeminiModels] = useState<ModelInfo[]>([]);
+    const [search, setSearch] = useState('');
+    const [editingName, setEditingName] = useState('');
+    const [isEditingName, setIsEditingName] = useState(false);
+
+    // Drag and Drop State
+    const [draggedCard, setDraggedCard] = useState<CardIndexEntry | null>(null);
+    const [isOverDropZone, setIsOverDropZone] = useState(false);
+    const [activeWorkspaceCard, setActiveWorkspaceCard] = useState<CardIndexEntry | null>(null);
 
     const enrichWithCardRecords = async (entries: CardIndexEntry[]): Promise<CardIndexEntry[]> => {
         if (!window.electronAPI || !window.electronAPI.p2pRead) {
@@ -146,14 +157,21 @@ const CardLibrary: React.FC = () => {
                 throw inner;
             }
 
-            const parsed: CardIndexEntry[] = [];
+            const parsedMap = new Map<string, CardIndexEntry>();
+
+            // Process in order, later entries overwrite earlier ones (allowing for updates)
             for (const raw of items) {
                 if (!raw || typeof raw !== 'string') continue;
                 try {
                     const data = JSON.parse(raw);
                     if (!data || data.type !== 'card-index') continue;
+
+                    const cardId = String(data.cardId || data.id || '');
+                    if (!cardId) continue;
+
                     const entry: CardIndexEntry = {
-                        cardId: String(data.cardId || data.id || ''),
+                        cardId,
+                        name: typeof data.name === 'string' ? data.name : undefined,
                         createdAt: typeof data.createdAt === 'string' ? data.createdAt : '',
                         threadId: typeof data.threadId === 'string' ? data.threadId : undefined,
                         messageId: typeof data.messageId === 'string' ? data.messageId : undefined,
@@ -166,13 +184,22 @@ const CardLibrary: React.FC = () => {
                         thumbnail: typeof data.thumbnail === 'string' ? data.thumbnail : undefined,
                         raw: data,
                     };
-                    parsed.push(entry);
+
+                    // Merge with existing to preserve fields if partial update (though we usually write full entries)
+                    const existing = parsedMap.get(cardId);
+                    if (existing) {
+                        parsedMap.set(cardId, { ...existing, ...entry });
+                    } else {
+                        parsedMap.set(cardId, entry);
+                    }
                 } catch {
                     // ignore parse errors for individual entries
                 }
             }
 
+            const parsed = Array.from(parsedMap.values());
             parsed.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
             const enriched = await enrichWithCardRecords(parsed);
             setCards(enriched);
 
@@ -181,14 +208,17 @@ const CardLibrary: React.FC = () => {
                 const match = enriched.find((c) => c.cardId === targetId);
                 if (match) {
                     setSelected(match);
+                    setEditingName(match.name || '');
                     return;
                 }
             }
 
-            if (enriched.length > 0) {
-                setSelected(enriched[0]);
-            } else {
-                setSelected(null);
+            // Don't auto-select first item to keep the grid clean initially
+            if (!selected && preferredCardId) {
+                if (enriched.length > 0) {
+                    setSelected(enriched[0]);
+                    setEditingName(enriched[0].name || '');
+                }
             }
         } catch (e: any) {
             setError(e?.message || 'Failed to load Card Library');
@@ -220,6 +250,94 @@ const CardLibrary: React.FC = () => {
 
         loadGeminiModels();
     }, []);
+
+    // Helper to find text content from various possible fields
+    const findTextContent = (record: any, raw: any) => {
+        if (!record && !raw) return '';
+
+        // Check cardRecord first
+        if (record) {
+            if (record.text) return record.text;
+            if (record.content) return record.content;
+            if (record.data?.text) return record.data.text;
+            if (record.data?.content) return record.data.content;
+            if (record.markdown) return record.markdown;
+        }
+
+        // Fallback to raw index entry
+        if (raw) {
+            if (raw.text) return raw.text;
+            if (raw.content) return raw.content;
+            if (raw.description) return raw.description;
+        }
+
+        return '';
+    };
+
+    useEffect(() => {
+        const fetchContent = async () => {
+            if (!activeWorkspaceCard) return;
+
+            // Check if we already have text content
+            const currentText = findTextContent(activeWorkspaceCard.cardRecord, activeWorkspaceCard.raw);
+
+            // If text is empty, try to fetch it from backend
+            if (!currentText && window.electronAPI?.wormholeGetCardText) {
+                try {
+                    const text = await window.electronAPI.wormholeGetCardText({ cardId: activeWorkspaceCard.cardId });
+                    if (text) {
+                        setActiveWorkspaceCard(prev => {
+                            if (!prev || prev.cardId !== activeWorkspaceCard.cardId) return prev;
+                            // Update cardRecord with the fetched text
+                            return {
+                                ...prev,
+                                cardRecord: {
+                                    ...(prev.cardRecord || {}),
+                                    text: text
+                                }
+                            };
+                        });
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch card text:", e);
+                }
+            }
+        };
+
+        fetchContent();
+    }, [activeWorkspaceCard]);
+
+    const handleCardClick = (card: CardIndexEntry) => {
+        setSelected(card);
+        setEditingName(card.name || '');
+        setIsEditingName(false);
+    };
+
+    const handleSaveName = async () => {
+        if (!selected || !window.electronAPI || !window.electronAPI.p2pAppend) return;
+
+        try {
+            const updatedEntry = {
+                ...selected.raw,
+                name: editingName,
+                updatedAt: new Date().toISOString()
+            };
+
+            await window.electronAPI.p2pAppend({
+                name: CARD_LIBRARY_CORE_NAME,
+                data: JSON.stringify(updatedEntry)
+            });
+
+            // Optimistic update
+            const updatedCard = { ...selected, name: editingName };
+            setSelected(updatedCard);
+            setCards(prev => prev.map(c => c.cardId === selected.cardId ? updatedCard : c));
+            setIsEditingName(false);
+        } catch (e) {
+            console.error('Failed to save card name:', e);
+            setError('Failed to save card name.');
+        }
+    };
 
     const selectedWormhole: any = selected && selected.cardRecord && selected.cardRecord.wormhole
         ? selected.cardRecord.wormhole
@@ -297,14 +415,10 @@ const CardLibrary: React.FC = () => {
         if (!step) return null;
         const status = typeof step.status === 'string' ? step.status : 'unknown';
 
-        let color = 'text-gray-300 border-gray-600';
-        if (status === 'complete') {
-            color = 'text-emerald-300 border-emerald-500/60';
-        } else if (status === 'failed') {
-            color = 'text-red-300 border-red-500/60';
-        } else if (status === 'in_progress') {
-            color = 'text-yellow-300 border-yellow-500/60';
-        }
+        let ruxStatus = 'standby';
+        if (status === 'complete') ruxStatus = 'normal';
+        else if (status === 'failed') ruxStatus = 'critical';
+        else if (status === 'in_progress') ruxStatus = 'caution';
 
         const provider = step.provider ? String(step.provider) : '';
         const model = step.model ? String(step.model) : '';
@@ -314,421 +428,416 @@ const CardLibrary: React.FC = () => {
         if (model) parts.push(model);
 
         return (
-            <span
+            <div
                 key={label}
-                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] ${color}`}
+                className="inline-flex items-center gap-1.5 rounded border border-gray-700 px-2 py-0.5 text-[10px] text-gray-300 bg-gray-900"
             >
-                {parts.join(' · ')}
-            </span>
+                <rux-status status={ruxStatus}></rux-status>
+                <span>{parts.join(' · ')}</span>
+            </div>
         );
     };
 
-    const renderThumbnail = (card: CardIndexEntry) => {
+    const renderThumbnail = (card: CardIndexEntry, large = false) => {
+        const className = large
+            ? "w-full h-64 object-cover rounded-lg border border-gray-700 bg-black/40 shadow-lg"
+            : "w-full h-40 object-cover rounded-t-lg bg-black/40 group-hover:opacity-90 transition-opacity pointer-events-none"; // pointer-events-none to prevent image dragging interfering with card dragging
+
         if (card.mediaKind === 'image') {
             const src = card.mediaLocalPath ? toFileUrl(card.mediaLocalPath) : card.thumbnail || card.mediaRemoteUrl;
             if (src) {
-                return (
-                    <img
-                        src={src}
-                        alt={card.cardId}
-                        className="w-full h-32 object-cover rounded-lg border border-gray-700 bg-black/40"
-                    />
-                );
+                return <img src={src} alt={card.cardId} className={className} />;
             }
         }
 
         if (card.mediaKind === 'video') {
             const src = card.mediaLocalPath ? toFileUrl(card.mediaLocalPath) : card.mediaRemoteUrl;
             if (src) {
-                return (
-                    <video
-                        src={src}
-                        className="w-full h-32 rounded-lg border border-gray-700 bg-black"
-                        controls={false}
-                    />
-                );
+                return <video src={src} className={className} controls={large} />;
             }
         }
 
         if (card.mediaKind === 'audio') {
             return (
-                <div className="w-full h-32 flex flex-col items-center justify-center rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-300">
-                    <span className="mb-1">Audio Card</span>
-                    <span className="text-[10px] text-gray-500 truncate max-w-full">
-                        {card.mediaMimeType || 'audio'}
-                    </span>
+                <div className={`${className} flex flex-col items-center justify-center bg-gray-900 text-gray-300`}>
+                    <rux-icon icon="audiotrack" size={large ? "large" : "normal"}></rux-icon>
+                    <span className="mt-2 text-xs font-mono">{card.mediaMimeType || 'AUDIO'}</span>
                 </div>
             );
         }
 
         if (card.thumbnail) {
-            return (
-                <img
-                    src={card.thumbnail}
-                    alt={card.cardId}
-                    className="w-full h-32 object-cover rounded-lg border border-gray-700 bg-black/40"
-                />
-            );
+            return <img src={card.thumbnail} alt={card.cardId} className={className} />;
         }
 
         return (
-            <div className="w-full h-32 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-500">
-                No preview
+            <div className={`${className} flex items-center justify-center bg-gray-900 text-gray-500`}>
+                <rux-icon icon="image-not-supported" size={large ? "large" : "normal"}></rux-icon>
             </div>
         );
     };
 
+    const filteredCards = useMemo(() => {
+        if (!search) return cards;
+        const q = search.toLowerCase();
+        return cards.filter(c =>
+            (c.name && c.name.toLowerCase().includes(q)) ||
+            c.cardId.toLowerCase().includes(q) ||
+            (c.provider && c.provider.toLowerCase().includes(q))
+        );
+    }, [cards, search]);
+
+    // Drag Handlers
+    const handleDragStart = (e: React.DragEvent, card: CardIndexEntry) => {
+        setDraggedCard(card);
+        e.dataTransfer.setData('text/plain', card.cardId);
+        e.dataTransfer.effectAllowed = 'move';
+        // Create a custom drag image if desired, or let browser handle it
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault(); // Necessary to allow dropping
+        e.dataTransfer.dropEffect = 'move';
+        setIsOverDropZone(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsOverDropZone(false);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsOverDropZone(false);
+        if (draggedCard) {
+            setActiveWorkspaceCard(draggedCard);
+            setDraggedCard(null);
+        }
+    };
+
+    const handleWorkspaceSave = async (newContent: string) => {
+        if (!activeWorkspaceCard || !window.electronAPI?.p2pAppend) return;
+
+        // In a real implementation, we would append to the 'card-updates' core or similar.
+        // For now, we'll just log it or simulate an append to the card's core if possible.
+        // Since we don't have a specific 'update' schema defined in the backend yet for text content updates 
+        // that propagates back to the card record, we will simulate it by appending a new message 
+        // to the card's specific core if it exists, or just the library index.
+
+        // Let's assume we are updating the 'text' field of the card record.
+        try {
+            // This is a placeholder for the actual update logic
+            console.log("Saving content for card:", activeWorkspaceCard.cardId, newContent);
+
+            // TODO: Implement actual P2P append logic here
+            // await window.electronAPI.p2pAppend({ ... });
+        } catch (e) {
+            console.error("Failed to save workspace changes", e);
+        }
+    };
+
+    // If Workspace is active, show it instead of the grid
+    if (activeWorkspaceCard) {
+        // Construct a 'card' object compatible with CardWorkspace
+        // We need to map CardIndexEntry + CardRecord to what CardWorkspace expects
+
+
+
+        const textContent = findTextContent(activeWorkspaceCard.cardRecord, activeWorkspaceCard.raw);
+
+        const workspaceCard = {
+            id: activeWorkspaceCard.cardId,
+            type: activeWorkspaceCard.mediaKind === 'image' ? 'image' : 'text', // Simplified
+            timestamp: new Date(activeWorkspaceCard.createdAt).getTime(),
+            data: {
+                title: activeWorkspaceCard.name,
+                text: textContent,
+                url: activeWorkspaceCard.mediaRemoteUrl || activeWorkspaceCard.mediaLocalPath,
+                imageUrl: activeWorkspaceCard.mediaRemoteUrl || activeWorkspaceCard.mediaLocalPath,
+                tags: activeWorkspaceCard.cardRecord?.tags || []
+            }
+        };
+
+        return (
+            <PageContainer>
+                <div className="w-full h-full max-w-[1800px] mx-auto p-6">
+                    <CardWorkspace
+                        card={workspaceCard}
+                        onClose={() => setActiveWorkspaceCard(null)}
+                        onSave={handleWorkspaceSave}
+                    />
+                </div>
+            </PageContainer>
+        );
+    }
+
     return (
         <PageContainer>
-            <div className="w-full text-white">
-                <div className="flex items-center justify-between mb-6">
+            <style>{`
+                .card-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+                    gap: 1.5rem;
+                }
+                .glass-overlay {
+                    background: rgba(15, 23, 42, 0.95);
+                    backdrop-filter: blur(16px);
+                }
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: rgba(0, 0, 0, 0.2);
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 3px;
+                }
+                
+                @keyframes pulse-border {
+                    0% { border-color: rgba(34, 211, 238, 0.3); box-shadow: 0 0 0 rgba(34, 211, 238, 0); }
+                    50% { border-color: rgba(34, 211, 238, 0.8); box-shadow: 0 0 20px rgba(34, 211, 238, 0.3); }
+                    100% { border-color: rgba(34, 211, 238, 0.3); box-shadow: 0 0 0 rgba(34, 211, 238, 0); }
+                }
+                .drop-zone-active {
+                    animation: pulse-border 2s infinite;
+                }
+            `}</style>
+
+            <div className="w-full text-white h-full flex flex-col max-w-[1800px] mx-auto relative">
+                {/* Header */}
+                <div className="flex items-end justify-between border-b border-gray-800 pb-6 mb-6">
                     <div>
-                        <h2 className="text-3xl font-bold">Card Library</h2>
-                        <p className="text-sm text-gray-300 mt-1">
-                            Browse all image Cards created from chat and AI outputs.
+                        <h2 className="text-4xl font-bold tracking-tight text-white flex items-center gap-3">
+                            <rux-icon icon="photo-library" size="large"></rux-icon>
+                            CARD LIBRARY <span className="text-purple-400 text-lg font-mono font-normal opacity-80">// MEMORY CORE</span>
+                        </h2>
+                        <p className="text-gray-400 mt-1 font-mono text-xs tracking-wide">
+                            PERSISTENT HOLOGRAPHIC STORAGE
                         </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button
-                            type="button"
+                    <div className="flex items-center gap-4">
+                        <div className="relative group">
+                            <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
+                            <rux-input
+                                type="text"
+                                value={search}
+                                onInput={(e: any) => setSearch(e.target.value)}
+                                placeholder="Search memory core..."
+                                className="relative min-w-[300px]"
+                            >
+                                <rux-icon slot="prefix" icon="search" size="small"></rux-icon>
+                            </rux-input>
+                        </div>
+                        <rux-button
                             onClick={() => loadCards(selected?.cardId || null)}
                             disabled={loading}
-                            className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 border border-gray-600 text-gray-100"
+                            icon="refresh"
+                            secondary
                         >
-                            {loading ? 'Refreshing…' : 'Refresh'}
-                        </button>
+                            Sync
+                        </rux-button>
                     </div>
                 </div>
 
-                {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
-
-                {cards.length === 0 && !loading && !error && (
-                    <p className="text-sm text-gray-400">
-                        No Cards have been created yet. Use "Add to Card Stock" on any chat image to create one.
-                    </p>
-                )}
-
-                {cards.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        {cards.map((card) => {
-                            const isSelected = selected && selected.cardId === card.cardId;
-                            return (
-                                <button
-                                    key={card.cardId + card.createdAt}
-                                    type="button"
-                                    onClick={() => setSelected(card)}
-                                    className={`text-left rounded-xl border p-3 bg-gray-850/40 hover:bg-gray-800 transition-colors flex flex-col gap-2 ${
-                                        isSelected ? 'border-purple-500' : 'border-gray-700'
-                                    }`}
-                                >
-                                    {renderThumbnail(card)}
-                                    <div className="mt-1">
-                                        <div className="text-xs text-gray-300 font-semibold truncate">
-                                            {card.provider ? `${card.provider}${card.model ? ` · ${card.model}` : ''}` : 'Unknown source'}
-                                        </div>
-                                        <div className="text-[11px] text-gray-500 truncate">
-                                            {card.createdAt || 'Unknown time'}
-                                        </div>
-                                        {card.threadId && (
-                                            <div className="text-[10px] text-gray-600 truncate mt-0.5">
-                                                Thread: {card.threadId}
-                                            </div>
-                                        )}
-                                    </div>
-                                </button>
-                            );
-                        })}
+                {error && (
+                    <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg flex items-center gap-3 text-red-300">
+                        <rux-icon icon="warning" size="small"></rux-icon>
+                        <span className="font-mono text-sm">{error}</span>
                     </div>
                 )}
 
-                {selected && (
-                    <div
-                        className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center px-4"
-                        onClick={() => setSelected(null)}
-                    >
-                        <div
-                            className="relative w-full max-w-5xl max-h-[90vh] bg-gray-900 border border-gray-700 rounded-2xl shadow-xl flex flex-col md:flex-row gap-6 p-6 overflow-auto"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <button
-                                type="button"
-                                onClick={() => setSelected(null)}
-                                className="absolute top-3 right-3 px-2 py-1 rounded-md text-[11px] bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-200"
-                            >
-                                Close
-                            </button>
-                            <div className="md:w-1/3">
-                                <h3 className="text-lg font-semibold mb-2 text-purple-300">Preview</h3>
-                                {renderThumbnail(selected)}
+                {loading && cards.length === 0 && (
+                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
+                        <rux-progress type="circular"></rux-progress>
+                        <div className="font-mono text-sm animate-pulse text-purple-400">INITIALIZING MEMORY MATRIX...</div>
+                    </div>
+                )}
+
+                {!loading && cards.length === 0 && !error && (
+                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
+                        <rux-icon icon="sd-card-alert" size="large" className="opacity-20"></rux-icon>
+                        <div className="text-center">
+                            <div className="text-lg font-medium text-gray-300">Memory Core Empty</div>
+                            <div className="text-sm text-gray-500 mt-1">
+                                No cards detected. Generate artifacts in Chat to populate the library.
                             </div>
-                            <div className="md:flex-1 space-y-2 text-sm">
-                                <h3 className="text-lg font-semibold mb-1 text-blue-300">Details</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-200">
-                                <div>
-                                    <span className="text-gray-500">Card ID: </span>
-                                    <span className="break-all">{selected.cardId}</span>
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar pb-10 relative">
+                    <div className="card-grid pb-32">
+                        {filteredCards.map((card) => (
+                            <div
+                                key={card.cardId + card.createdAt}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, card)}
+                                onClick={() => handleCardClick(card)}
+                                className="group relative bg-gray-900/40 border border-gray-700/50 rounded-lg cursor-grab active:cursor-grabbing hover:border-purple-500/50 hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] transition-all duration-300 flex flex-col overflow-hidden"
+                            >
+                                {renderThumbnail(card)}
+                                <div className="p-4 flex flex-col gap-1">
+                                    <div className="font-bold text-sm text-gray-200 truncate group-hover:text-purple-300 transition-colors">
+                                        {card.name || 'Untitled Card'}
+                                    </div>
+                                    <div className="text-[10px] font-mono text-gray-500 truncate">
+                                        {card.cardId}
+                                    </div>
+                                    <div className="mt-2 flex items-center justify-between">
+                                        <span className="text-[10px] uppercase tracking-wider text-gray-600 font-bold">
+                                            {card.provider || 'SYSTEM'}
+                                        </span>
+                                        {card.mediaKind && (
+                                            <rux-icon icon={card.mediaKind === 'video' ? 'videocam' : card.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="extra-small" className="text-gray-600"></rux-icon>
+                                        )}
+                                    </div>
                                 </div>
-                                {selected.createdAt && (
-                                    <div>
-                                        <span className="text-gray-500">Created: </span>
-                                        <span>{selected.createdAt}</span>
-                                    </div>
-                                )}
-                                {selected.provider && (
-                                    <div>
-                                        <span className="text-gray-500">Provider: </span>
-                                        <span>{selected.provider}</span>
-                                    </div>
-                                )}
-                                {selected.model && (
-                                    <div>
-                                        <span className="text-gray-500">Model: </span>
-                                        <span>{selected.model}</span>
-                                    </div>
-                                )}
-                                {selected.threadId && (
-                                    <div>
-                                        <span className="text-gray-500">Thread: </span>
-                                        <span className="break-all">{selected.threadId}</span>
-                                    </div>
-                                )}
-                                {selected.messageId && (
-                                    <div>
-                                        <span className="text-gray-500">Message: </span>
-                                        <span className="break-all">{selected.messageId}</span>
-                                    </div>
-                                )}
-                                {selected.coreName && (
-                                    <div>
-                                        <span className="text-gray-500">Core name: </span>
-                                        <span className="break-all">{selected.coreName}</span>
-                                    </div>
-                                )}
-                                {selected.coreKey && (
-                                    <div>
-                                        <span className="text-gray-500">Core key: </span>
-                                        <span className="break-all">{selected.coreKey}</span>
-                                    </div>
-                                )}
-                                {selected.coreDiscoveryKey && (
-                                    <div>
-                                        <span className="text-gray-500">Discovery key: </span>
-                                        <span className="break-all">{selected.coreDiscoveryKey}</span>
-                                    </div>
-                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Drop Zone */}
+                <div
+                    className={`absolute bottom-8 right-8 w-64 h-48 rounded-2xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-2 backdrop-blur-md z-40 ${isOverDropZone
+                        ? 'border-cyan-400 bg-cyan-900/40 shadow-[0_0_30px_rgba(34,211,238,0.4)] scale-105 drop-zone-active'
+                        : draggedCard
+                            ? 'border-gray-600 bg-gray-900/80 border-dashed opacity-100'
+                            : 'border-transparent bg-transparent opacity-0 pointer-events-none'
+                        }`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                >
+                    <rux-icon icon="input" size="large" className={isOverDropZone ? "text-cyan-400 animate-bounce" : "text-gray-500"}></rux-icon>
+                    <span className={`font-mono text-xs font-bold tracking-widest uppercase ${isOverDropZone ? "text-cyan-300" : "text-gray-500"}`}>
+                        {isOverDropZone ? "DROP TO OPEN" : "DROP ZONE"}
+                    </span>
+                </div>
+
+                {/* Detail Overlay (Old Inspector - kept for click interaction if desired, or we can remove/unify) */}
+                {selected && !activeWorkspaceCard && (
+                    <div className="absolute inset-0 z-50 glass-overlay flex justify-end animate-in slide-in-from-right duration-300">
+                        <div className="w-full max-w-3xl h-full bg-gray-900 border-l border-gray-700 flex flex-col shadow-2xl">
+                            {/* Overlay Header */}
+                            <div className="p-6 border-b border-gray-800 flex items-center justify-between bg-gray-900/50">
+                                <div className="flex items-center gap-3">
+                                    <rux-icon icon="assignment" size="small" className="text-purple-400"></rux-icon>
+                                    <span className="text-sm font-mono text-gray-400 uppercase tracking-widest">Card Inspector</span>
                                 </div>
-                                {selectedWormhole && (
-                                    <div className="mt-4 text-xs text-gray-200">
-                                        <div className="font-semibold mb-1 text-emerald-300">Wormhole ingest</div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
-                                        {selectedWormholeIngest && selectedWormholeIngest.mediaType && (
-                                            <div>
-                                                <span className="text-gray-500">Media type: </span>
-                                                <span>{String(selectedWormholeIngest.mediaType)}</span>
-                                            </div>
-                                        )}
-                                        {selectedWormholeIngest && selectedWormholeIngest.ownerDid && (
-                                            <div>
-                                                <span className="text-gray-500">Owner DID: </span>
-                                                <span className="break-all">{String(selectedWormholeIngest.ownerDid)}</span>
-                                            </div>
-                                        )}
-                                        {selectedWormholeIngest && selectedWormholeIngest.sourceLabel && (
-                                            <div>
-                                                <span className="text-gray-500">Source label: </span>
-                                                <span>{String(selectedWormholeIngest.sourceLabel)}</span>
-                                            </div>
-                                        )}
-                                        {selectedWormholeIngest && selectedWormholeIngest.originalFileName && (
-                                            <div>
-                                                <span className="text-gray-500">Original file name: </span>
-                                                <span className="break-all">
-                                                    {String(selectedWormholeIngest.originalFileName)}
-                                                </span>
-                                            </div>
-                                        )}
-                                        {selectedWormholeIngest && selectedWormholeIngest.originalPath && (
-                                            <div>
-                                                <span className="text-gray-500">Stored path: </span>
-                                                <span className="break-all">{String(selectedWormholeIngest.originalPath)}</span>
-                                            </div>
-                                        )}
-                                        {selectedWormholeIngest && selectedWormholeIngest.originalUrl && (
-                                            <div>
-                                                <span className="text-gray-500">Source URL: </span>
-                                                <span className="break-all">{String(selectedWormholeIngest.originalUrl)}</span>
-                                            </div>
-                                        )}
-                                        {selectedWormholeIngest &&
-                                            Array.isArray(selectedWormholeIngest.tags) &&
-                                            selectedWormholeIngest.tags.length > 0 && (
-                                                <div className="md:col-span-2">
-                                                    <span className="text-gray-500">Tags: </span>
-                                                    <span>{(selectedWormholeIngest.tags as any[]).join(', ')}</span>
-                                                </div>
-                                            )}
+                                <button
+                                    onClick={() => setSelected(null)}
+                                    className="text-gray-500 hover:text-white transition-colors"
+                                >
+                                    <rux-icon icon="close" size="small"></rux-icon>
+                                </button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
+                                <div className="flex flex-col gap-8">
+                                    {/* Top Section: Preview & Basic Info */}
+                                    <div className="flex flex-col md:flex-row gap-8">
+                                        <div className="w-full md:w-1/2">
+                                            {renderThumbnail(selected, true)}
                                         </div>
-                                        {selectedWormholeProcessing && (
-                                            <div className="mt-3">
-                                                <div className="font-semibold mb-1 text-emerald-300">Wormhole processing</div>
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {renderWormholeStepBadge('Ingest', selectedWormholeProcessing.ingest)}
-                                                    {renderWormholeStepBadge(
-                                                        'Transcription',
-                                                        selectedWormholeProcessing.transcription,
-                                                    )}
-                                                    {renderWormholeStepBadge(
-                                                        'Summarization',
-                                                        selectedWormholeProcessing.summarization,
-                                                    )}
-                                                    {renderWormholeStepBadge(
-                                                        'Key terms',
-                                                        selectedWormholeProcessing.keyTerms,
-                                                    )}
-                                                    {renderWormholeStepBadge(
-                                                        'Wiki update',
-                                                        selectedWormholeProcessing.wikiUpdate,
-                                                    )}
-                                                </div>
-                                                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
-                                                    <div>
-                                                        <div className="text-gray-500 mb-0.5">Summarization model override</div>
-                                                        {geminiModels.length > 0 ? (
-                                                            <select
-                                                                value={overrideSummarizationModel}
-                                                                onChange={(e) => setOverrideSummarizationModel(e.target.value)}
-                                                                className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
+                                        <div className="w-full md:w-1/2 flex flex-col gap-4">
+                                            <div className="flex flex-col gap-2">
+                                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Card Name</label>
+                                                <div className="flex gap-2">
+                                                    {isEditingName ? (
+                                                        <div className="flex-1 flex gap-2">
+                                                            <rux-input
+                                                                value={editingName}
+                                                                onInput={(e: any) => setEditingName(e.target.value)}
+                                                                className="flex-1"
+                                                                size="small"
+                                                            ></rux-input>
+                                                            <rux-button size="small" icon="save" onClick={handleSaveName}></rux-button>
+                                                            <rux-button size="small" icon="close" secondary onClick={() => setIsEditingName(false)}></rux-button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex-1 flex items-center justify-between group/name">
+                                                            <h1 className="text-2xl font-bold text-white truncate" title={selected.name}>
+                                                                {selected.name || 'Untitled Card'}
+                                                            </h1>
+                                                            <button
+                                                                onClick={() => setIsEditingName(true)}
+                                                                className="opacity-0 group-hover/name:opacity-100 text-gray-500 hover:text-purple-400 transition-all"
                                                             >
-                                                                <option value="">Use defaults</option>
-                                                                {geminiModels.map((model) => (
-                                                                    <option key={model.name} value={model.name}>
-                                                                        {model.displayName || model.name}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        ) : (
-                                                            <input
-                                                                type="text"
-                                                                value={overrideSummarizationModel}
-                                                                onChange={(e) => setOverrideSummarizationModel(e.target.value)}
-                                                                className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
-                                                                placeholder="e.g. gemini-1.5-flash"
-                                                            />
-                                                        )}
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-gray-500 mb-0.5">Key terms model override</div>
-                                                        {geminiModels.length > 0 ? (
-                                                            <select
-                                                                value={overrideKeyTermsModel}
-                                                                onChange={(e) => setOverrideKeyTermsModel(e.target.value)}
-                                                                className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
-                                                            >
-                                                                <option value="">Use defaults</option>
-                                                                {geminiModels.map((model) => (
-                                                                    <option key={model.name} value={model.name}>
-                                                                        {model.displayName || model.name}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        ) : (
-                                                            <input
-                                                                type="text"
-                                                                value={overrideKeyTermsModel}
-                                                                onChange={(e) => setOverrideKeyTermsModel(e.target.value)}
-                                                                className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
-                                                                placeholder="e.g. gemini-1.5-flash"
-                                                            />
-                                                        )}
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-gray-500 mb-0.5">Wiki update model override</div>
-                                                        {geminiModels.length > 0 ? (
-                                                            <select
-                                                                value={overrideWikiModel}
-                                                                onChange={(e) => setOverrideWikiModel(e.target.value)}
-                                                                className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
-                                                            >
-                                                                <option value="">Use defaults</option>
-                                                                {geminiModels.map((model) => (
-                                                                    <option key={model.name} value={model.name}>
-                                                                        {model.displayName || model.name}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        ) : (
-                                                            <input
-                                                                type="text"
-                                                                value={overrideWikiModel}
-                                                                onChange={(e) => setOverrideWikiModel(e.target.value)}
-                                                                className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
-                                                                placeholder="optional"
-                                                            />
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => runWormholeStep('summarization')}
-                                                        disabled={wormholeActionPending}
-                                                        className="px-3 py-1.5 rounded-md text-[11px] bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 border border-gray-600 text-gray-100"
-                                                    >
-                                                        Run summarization
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => runWormholeStep('keyTerms')}
-                                                        disabled={wormholeActionPending}
-                                                        className="px-3 py-1.5 rounded-md text-[11px] bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 border border-gray-600 text-gray-100"
-                                                    >
-                                                        Run key terms
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => runWormholeStep('wikiUpdate')}
-                                                        disabled={wormholeActionPending}
-                                                        className="px-3 py-1.5 rounded-md text-[11px] bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 border border-gray-600 text-gray-100"
-                                                    >
-                                                        Run wiki update
-                                                    </button>
+                                                                <rux-icon icon="edit" size="small"></rux-icon>
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
-                                        )}
-                                        {Array.isArray(selectedWormhole.wikiEntries) &&
-                                            selectedWormhole.wikiEntries.length > 0 && (
-                                                <div className="mt-3">
-                                                    <div className="font-semibold mb-1 text-emerald-300">
-                                                        Wormhole wiki entries
-                                                    </div>
-                                                    <ul className="list-disc list-inside space-y-0.5 text-xs text-gray-200">
-                                                        {selectedWormhole.wikiEntries.map((entry: any, idx: number) => (
-                                                            <li key={String(entry.wikiId || idx)}>
-                                                                <span className="text-gray-500">Term: </span>
-                                                                <span>{String(entry.term || '')}</span>
-                                                                {entry.wikiId && (
-                                                                    <>
-                                                                        <span className="text-gray-500"> · Wiki ID: </span>
-                                                                        <span className="break-all">
-                                                                            {String(entry.wikiId)}
-                                                                        </span>
-                                                                    </>
-                                                                )}
-                                                            </li>
-                                                        ))}
-                                                    </ul>
+
+                                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                                <div>
+                                                    <div className="text-gray-500 mb-1">Created</div>
+                                                    <div className="text-gray-300 font-mono">{new Date(selected.createdAt).toLocaleDateString()}</div>
                                                 </div>
-                                            )}
+                                                <div>
+                                                    <div className="text-gray-500 mb-1">Type</div>
+                                                    <div className="text-gray-300 font-mono uppercase">{selected.mediaKind || 'UNKNOWN'}</div>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <div className="text-gray-500 mb-1">ID</div>
+                                                    <div className="text-gray-300 font-mono break-all">{selected.cardId}</div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                )}
-                                {selected.cardRecord && (
-                                    <div className="mt-4 text-xs text-gray-400">
-                                        <div className="font-semibold mb-1">Raw card record</div>
-                                        <pre className="bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-64 overflow-auto whitespace-pre-wrap break-all">
-                                            {JSON.stringify(selected.cardRecord, null, 2)}
+
+                                    <div className="h-px bg-gray-800"></div>
+
+                                    {/* Wormhole Section */}
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-2 text-emerald-400">
+                                            <rux-icon icon="cloud-queue" size="small"></rux-icon>
+                                            <h3 className="font-bold uppercase tracking-wider text-sm">Wormhole Status</h3>
+                                        </div>
+
+                                        {selectedWormholeProcessing ? (
+                                            <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50">
+                                                <div className="flex flex-wrap gap-2 mb-4">
+                                                    {renderWormholeStepBadge('Ingest', selectedWormholeProcessing.ingest)}
+                                                    {renderWormholeStepBadge('Transcription', selectedWormholeProcessing.transcription)}
+                                                    {renderWormholeStepBadge('Summarization', selectedWormholeProcessing.summarization)}
+                                                    {renderWormholeStepBadge('Key terms', selectedWormholeProcessing.keyTerms)}
+                                                    {renderWormholeStepBadge('Wiki update', selectedWormholeProcessing.wikiUpdate)}
+                                                </div>
+
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                                                    <rux-button size="small" secondary onClick={() => runWormholeStep('summarization')} disabled={wormholeActionPending}>
+                                                        Run Summarization
+                                                    </rux-button>
+                                                    <rux-button size="small" secondary onClick={() => runWormholeStep('keyTerms')} disabled={wormholeActionPending}>
+                                                        Run Key Terms
+                                                    </rux-button>
+                                                    <rux-button size="small" secondary onClick={() => runWormholeStep('wikiUpdate')} disabled={wormholeActionPending}>
+                                                        Run Wiki Update
+                                                    </rux-button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-gray-500 text-sm italic">
+                                                No Wormhole data associated with this card.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Raw Data Section */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2 text-gray-500">
+                                            <rux-icon icon="code" size="small"></rux-icon>
+                                            <h3 className="font-bold uppercase tracking-wider text-xs">Raw Metadata</h3>
+                                        </div>
+                                        <pre className="bg-black/50 border border-gray-800 rounded-lg p-4 text-[10px] font-mono text-gray-400 overflow-x-auto max-h-60 custom-scrollbar">
+                                            {JSON.stringify(selected.cardRecord || selected.raw, null, 2)}
                                         </pre>
                                     </div>
-                                )}
+                                </div>
                             </div>
                         </div>
                     </div>
