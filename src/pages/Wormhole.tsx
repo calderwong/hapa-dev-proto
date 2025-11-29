@@ -475,6 +475,7 @@ const Wormhole: React.FC = () => {
                             <div className="text-gray-500 mb-0.5">Summarization model</div>
                             {geminiModels.length > 0 ? (
                                 <select
+                                    aria-label="Wormhole summarization model override"
                                     value={overrideSummarizationModel}
                                     onChange={(e) => setOverrideSummarizationModel(e.target.value)}
                                     className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
@@ -500,6 +501,7 @@ const Wormhole: React.FC = () => {
                             <div className="text-gray-500 mb-0.5">Key terms model</div>
                             {geminiModels.length > 0 ? (
                                 <select
+                                    aria-label="Wormhole key terms model override"
                                     value={overrideKeyTermsModel}
                                     onChange={(e) => setOverrideKeyTermsModel(e.target.value)}
                                     className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"
@@ -525,6 +527,7 @@ const Wormhole: React.FC = () => {
                             <div className="text-gray-500 mb-0.5">Wiki update model</div>
                             {geminiModels.length > 0 ? (
                                 <select
+                                    aria-label="Wormhole wiki update model override"
                                     value={overrideWikiModel}
                                     onChange={(e) => setOverrideWikiModel(e.target.value)}
                                     className="w-full rounded-md bg-gray-900 border border-gray-700 px-2 py-1 text-[11px] text-gray-100 focus:outline-none focus:ring-1 focus:ring-emerald-500/70"

@@ -13,7 +13,8 @@ import Archives from './pages/Archives';
 import Revid from './pages/Revid';
 import RevidMedia from './pages/RevidMedia';
 import CardLibrary from './pages/CardLibrary';
-import Wormhole from './pages/Wormhole';
+
+import WormholeAstro from './pages/WormholeAstro';
 import Wiki from './pages/Wiki';
 
 function App() {
@@ -42,7 +43,7 @@ function App() {
           <Route path="revid" element={<Revid />} />
           <Route path="revid-media" element={<RevidMedia />} />
           <Route path="cards" element={<CardLibrary />} />
-          <Route path="wormhole" element={<Wormhole />} />
+          <Route path="wormhole" element={<WormholeAstro />} />
           <Route path="wiki" element={<Wiki />} />
         </Route>
       </Routes>

@@ -56,7 +56,8 @@ export async function createCore(name: string) {
     if (!joinedTopics.has(topicHex)) {
         swarm.join(core.discoveryKey);
         joinedTopics.add(topicHex);
-        await swarm.flush();
+        // Do not await flush; let discovery happen in background
+        swarm.flush().catch((err: any) => console.error('Swarm flush error:', err));
     }
 
     return {
@@ -76,7 +77,19 @@ export async function appendToCore(name: string, data: string) {
     return { length: core.length };
 }
 
-export async function readCore(name: string) {
+export async function getCoreLength(name: string) {
+    let core = cores.get(name);
+    if (!core) {
+        const info = await createCore(name);
+        core = cores.get(name);
+        if (!core) {
+            throw new Error(`Core ${name} not found after create (key=${info?.key})`);
+        }
+    }
+    return core.length;
+}
+
+export async function readCore(name: string, options: { start?: number; end?: number; reverse?: boolean; limit?: number } = {}) {
     let core = cores.get(name);
     if (!core) {
         // Lazily open or create the core using the same path and swarm wiring as createCore.
@@ -87,9 +100,34 @@ export async function readCore(name: string) {
         }
     }
 
+    const length = core.length;
+    let { start, end, reverse, limit } = options;
+
+    // If limit is provided but no end, calculate end
+    if (limit !== undefined && end === undefined) {
+        if (reverse) {
+            // Reading backwards
+            // If start is not provided, start from end (length)
+            const from = start !== undefined ? start : length;
+            const to = Math.max(0, from - limit);
+            start = to;
+            end = from;
+        } else {
+            // Reading forwards
+            const from = start !== undefined ? start : 0;
+            end = from + limit;
+            start = from;
+        }
+    }
+
+    const stream = core.createReadStream({
+        start,
+        end,
+        reverse
+    });
+
     const entries: string[] = [];
-    for (let i = 0; i < core.length; i++) {
-        const block = await core.get(i);
+    for await (const block of stream) {
         entries.push(b4a.toString(block));
     }
 
