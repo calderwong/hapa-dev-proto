@@ -3,6 +3,8 @@
 Hapa AG is a desktop Electron application that combines:
 
 - **Multi-provider Chat** – a rich chat UI for Google Gemini, OpenAI, and local llama.cpp models with Markdown rendering, media attachments, and streaming.
+- **Card Library & Wormhole** – a knowledge management system where "Cards" are processed through a "Wormhole" pipeline to generate summaries, key terms, and wiki entries.
+- **Wiki Browser** – a neural archive of knowledge nodes generated from your cards.
 - **Settings** – a simple place to configure and persist your Gemini and OpenAI API keys and Firebase configuration.
 - **Local AI (llama.cpp)** – an in-app control panel for configuring, starting/stopping, and managing local llama.cpp models.
 - **P2P Hypercore Manager** – an experimental UI for creating/joining Hypercore logs and syncing them over Hyperswarm.
@@ -19,6 +21,18 @@ The app is built with **Electron**, **React + TypeScript**, and **Vite**.
   - Send text messages with streaming-style UI feedback.
   - Render responses as GitHub-flavored Markdown (code blocks, lists, links, images).
   - Attach image / video / audio files via file picker or drag-and-drop (converted to Base64 for the backend).
+
+- **Card Library & Wormhole**
+  - **Drag & Drop Import**: Easily import text, images, and videos as cards.
+  - **Wormhole Pipeline**: Process cards to automatically generate summaries, extract key terms, and create wiki entries.
+  - **Status Badges**: Visual indicators on cards show which artifacts have been generated.
+  - **Video Playback**: Native support for playing local video files directly within the workspace.
+  - **Run Stats**: Inspect the generation counts for any card.
+
+- **Wiki Browser**
+  - **Neural Index**: Browse a graph of terms and definitions generated from your content.
+  - **Optimized Loading**: Fast, backend-aggregated loading of thousands of wiki entries.
+  - **Search & Filter**: Quickly find terms or related concepts.
 
 - **Settings**
   - Store a Gemini API key.
@@ -138,6 +152,8 @@ Use this feature only on networks and with data you are comfortable experimentin
   - `App.tsx` – Router + top-level routes.
   - `components/Layout.tsx` – Sidebar layout and navigation (Chat, P2P, Local AI, Settings, Admin).
   - `pages/Chat.tsx` – Multi-provider chat UI (Gemini, OpenAI, local llama.cpp) with streaming and attachments.
+  - `pages/CardLibrary.tsx` – Card management, drag & drop, and Wormhole status.
+  - `pages/Wiki.tsx` – Wiki browser with optimized backend loading.
   - `pages/Settings.tsx` – Settings UI for Gemini/OpenAI keys and Firebase config.
   - `pages/LocalLlama.tsx` – Local AI (llama.cpp) runtime and model management UI.
   - `pages/P2P.tsx` – P2P Hypercore Manager UI.

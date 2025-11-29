@@ -71,3 +71,20 @@
 
 **Tags:** #feature #llm #llama #local #infrastructure
 **Est. Avg. Human Dev Time:** 3.0 hours
+
+## Entry 7 – Card Library Enhancements & Wiki Optimization
+**Prompt:** "Card Run States Badges", "Video cards are being treated as text", "Can we get rid of this top bar", "Wiki still seems to be loading excessively slow"
+
+**Summary of actions:**
+- **Card Library:**
+    - Implemented visual badges on card thumbnails to show Wormhole run states (Summaries, Key Terms, Wiki Entries) with counts.
+    - Added a "Run Stats" section to the Card Inspector.
+    - Fixed video card playback by correctly identifying media types and using `file://` URLs with `webSecurity: false` in Electron.
+- **Wiki:**
+    - Optimized Wiki loading by moving aggregation logic to the backend (`wormhole-get-wiki-index`), replacing hundreds of P2P requests with a single IPC call.
+- **Electron/UI:**
+    - Hidden the default Electron menu bar (`autoHideMenuBar: true`).
+    - Disabled automatic DevTools opening and added a manual toggle button in the UI layout.
+
+**Tags:** #feature #ui #optimization #electron #wormhole
+**Est. Avg. Human Dev Time:** 2.5 hours
