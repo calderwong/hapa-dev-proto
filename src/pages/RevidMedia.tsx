@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
-import { PrimaryButton, SecondaryButton } from '../components/Button';
 import type { RevidMediaItem } from '../types';
 
 const RevidMedia: React.FC = () => {
@@ -242,7 +241,7 @@ const RevidMedia: React.FC = () => {
                 <img
                     src={src}
                     alt={item.prompt || item.id}
-                    className="w-full h-40 object-cover rounded-lg bg-black/40"
+                    className="w-full h-48 object-cover bg-black/40 transition-transform duration-500 group-hover:scale-110"
                 />
             );
         }
@@ -251,97 +250,151 @@ const RevidMedia: React.FC = () => {
                 <video
                     src={item.mediaUrl}
                     controls
-                    className="w-full h-40 rounded-lg bg-black"
+                    className="w-full h-48 object-cover bg-black"
                 />
             );
         }
         if (item.type === 'audio') {
             return (
-                <div className="w-full h-40 flex flex-col items-center justify-center rounded-lg bg-gray-900 border border-gray-700 px-3">
-                    <div className="w-full mb-2 text-xs text-gray-300 text-center truncate">
-                        {item.prompt || 'Audio from Revid'}
+                <div className="w-full h-48 flex flex-col items-center justify-center bg-gray-900 border-b border-gray-800 px-4">
+                    <div className="w-full mb-3 text-xs text-gray-300 text-center truncate font-mono">
+                        {item.prompt || 'AUDIO ASSET'}
                     </div>
-                    <audio controls src={item.mediaUrl} className="w-full" />
+                    <audio controls src={item.mediaUrl} className="w-full h-8" />
                 </div>
             );
         }
         return (
-            <div className="w-full h-40 flex items-center justify-center rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-500">
-                No preview
+            <div className="w-full h-48 flex items-center justify-center bg-gray-900 text-xs text-gray-500 font-mono">
+                NO PREVIEW
             </div>
         );
     };
 
     return (
         <PageContainer>
-            <div className="w-full text-white">
-                <div className="flex items-center justify-between mb-6">
+            <style>{`
+                .glass-panel {
+                    background: rgba(17, 24, 39, 0.6);
+                    backdrop-filter: blur(12px);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                }
+                .glass-panel:hover {
+                    border-color: rgba(255, 255, 255, 0.15);
+                }
+                .section-label {
+                    font-size: 0.7rem;
+                    letter-spacing: 0.1em;
+                    text-transform: uppercase;
+                    color: rgba(156, 163, 175, 0.8);
+                    font-family: monospace;
+                    margin-bottom: 0.5rem;
+                }
+                .input-base {
+                    background: rgba(17, 24, 39, 0.4);
+                    border: 1px solid rgba(75, 85, 99, 0.5);
+                    color: white;
+                    transition: all 0.2s;
+                }
+                .input-base:focus {
+                    border-color: rgba(59, 130, 246, 0.5);
+                    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.1);
+                    outline: none;
+                }
+                .btn-primary {
+                    background: rgba(147, 51, 234, 0.2);
+                    border: 1px solid rgba(147, 51, 234, 0.4);
+                    color: #d8b4fe;
+                    transition: all 0.2s;
+                }
+                .btn-primary:hover {
+                    background: rgba(147, 51, 234, 0.3);
+                    border-color: rgba(147, 51, 234, 0.6);
+                    color: #e9d5ff;
+                }
+                .btn-secondary {
+                    background: rgba(59, 130, 246, 0.2);
+                    border: 1px solid rgba(59, 130, 246, 0.4);
+                    color: #60a5fa;
+                    transition: all 0.2s;
+                }
+                .btn-secondary:hover {
+                    background: rgba(59, 130, 246, 0.3);
+                    border-color: rgba(59, 130, 246, 0.6);
+                    color: #93c5fd;
+                }
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: rgba(0, 0, 0, 0.2);
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 3px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255, 255, 255, 0.2);
+                }
+            `}</style>
+
+            <div className="w-full max-w-[1600px] mx-auto pb-24">
+                {/* Header */}
+                <div className="flex items-end justify-between border-b border-gray-800 pb-6 mb-8">
                     <div>
-                        <h2 className="text-3xl font-bold">Revid Media</h2>
-                        <p className="text-sm text-gray-300 mt-1 max-w-2xl">
-                            Search your Revid media library, preview results, download assets, and turn them into Cards in the Hapa Card Library.
+                        <h2 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+                            <rux-icon icon="perm-media" size="large"></rux-icon>
+                            REVID MEDIA <span className="text-purple-400 text-lg font-mono font-normal opacity-80">// ASSET LIBRARY</span>
+                        </h2>
+                        <p className="text-gray-400 mt-2 font-mono text-xs tracking-wide pl-12">
+                            SEARCH, PREVIEW, AND TRANSFORM MEDIA ASSETS INTO CARDS
                         </p>
                     </div>
                 </div>
 
                 {!hasRevidSupport && (
-                    <p className="text-sm text-red-400 mb-4">
-                        Revid media integration is not available. Make sure you are running the Electron app and have configured your Revid API key in Settings.
-                    </p>
+                    <div className="bg-red-900/20 border border-red-500/50 text-red-200 p-4 rounded-lg mb-8 flex items-center gap-3">
+                        <rux-icon icon="error" size="small"></rux-icon>
+                        <span className="text-sm font-mono">REVID INTEGRATION UNAVAILABLE. CHECK ELECTRON SETTINGS.</span>
+                    </div>
                 )}
 
-                {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
-                {lastCreatedCardId && (
-                    <p className="text-sm text-green-400 mb-4">
-                        Card {lastCreatedCardId} created from Revid media. It is now available in the Card Library.
-                    </p>
-                )}
-
-                <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 mb-6 space-y-4">
-                    <div className="flex flex-col md:flex-row md:items-end gap-4">
-                        <div className="flex-1">
-                            <label
-                                htmlFor="revid-media-search-query"
-                                className="block text-xs font-medium text-gray-300 mb-1"
-                            >
-                                Search query
-                            </label>
-                            <input
-                                type="text"
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                                id="revid-media-search-query"
-                                placeholder="Search your Revid media (e.g. 'cat video')"
-                            />
+                {/* Search & Controls */}
+                <div className="glass-panel p-6 rounded-xl mb-8 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-purple-500 opacity-60"></div>
+                    <div className="flex flex-col md:flex-row gap-6 items-end">
+                        <div className="flex-1 w-full">
+                            <label className="section-label">Search Query</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                    className="w-full rounded-lg pl-10 pr-4 py-3 input-base font-mono text-sm"
+                                    placeholder="Search your Revid media (e.g. 'cyberpunk city')..."
+                                />
+                                <rux-icon icon="search" size="small" className="absolute left-3 top-3 text-gray-500"></rux-icon>
+                            </div>
                         </div>
-                        <div className="flex flex-row gap-3">
-                            <div>
-                                <label
-                                    htmlFor="revid-media-type"
-                                    className="block text-xs font-medium text-gray-300 mb-1"
-                                >
-                                    Media type
-                                </label>
+
+                        <div className="flex gap-4 w-full md:w-auto">
+                            <div className="w-32">
+                                <label className="section-label">Media Type</label>
                                 <select
                                     value={mediaType}
                                     onChange={(e) => setMediaType(e.target.value as any)}
-                                    id="revid-media-type"
-                                    className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-sm"
+                                    className="w-full rounded-lg px-3 py-3 input-base font-mono text-xs appearance-none"
                                 >
-                                    <option value="all">All</option>
-                                    <option value="video">Video</option>
-                                    <option value="image">Image</option>
-                                    <option value="audio">Audio</option>
+                                    <option value="all">ALL</option>
+                                    <option value="video">VIDEO</option>
+                                    <option value="image">IMAGE</option>
+                                    <option value="audio">AUDIO</option>
                                 </select>
                             </div>
-                            <div>
-                                <label
-                                    htmlFor="revid-media-topk"
-                                    className="block text-xs font-medium text-gray-300 mb-1"
-                                >
-                                    Max results
-                                </label>
+                            <div className="w-24">
+                                <label className="section-label">Limit</label>
                                 <input
                                     type="number"
                                     min={1}
@@ -352,22 +405,21 @@ const RevidMedia: React.FC = () => {
                                         const clamped = Math.min(Math.max(value, 1), 100);
                                         setTopK(clamped);
                                     }}
-                                    id="revid-media-topk"
-                                    className="w-20 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-sm"
+                                    className="w-full rounded-lg px-3 py-3 input-base font-mono text-xs text-center"
                                 />
                             </div>
                         </div>
-                        <div className="flex flex-row gap-2">
-                            <PrimaryButton
-                                type="button"
-                                tone="blue"
+
+                        <div className="flex gap-2 w-full md:w-auto">
+                            <button
                                 onClick={handleSearch}
                                 disabled={loading || !hasRevidSupport}
+                                className="btn-primary px-6 py-3 rounded-lg font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-50 flex-1 md:flex-none"
                             >
-                                {loading ? 'Searching…' : 'Search'}
-                            </PrimaryButton>
-                            <SecondaryButton
-                                type="button"
+                                {loading ? <rux-icon icon="refresh" size="small" className="animate-spin"></rux-icon> : <rux-icon icon="search" size="small"></rux-icon>}
+                                {loading ? 'SEARCHING...' : 'SEARCH'}
+                            </button>
+                            <button
                                 onClick={() => {
                                     setQuery('');
                                     setResults([]);
@@ -375,107 +427,121 @@ const RevidMedia: React.FC = () => {
                                     setLastCreatedCardId(null);
                                 }}
                                 disabled={loading}
+                                className="px-4 py-3 rounded-lg border border-gray-700 hover:bg-gray-800 text-gray-400 hover:text-white transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50"
                             >
-                                Clear
-                            </SecondaryButton>
+                                CLEAR
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                {results.length === 0 && !loading && !error && (
-                    <p className="text-sm text-gray-400">
-                        No media loaded yet. Run a search to see your Revid assets.
-                    </p>
+                {/* Status Messages */}
+                {error && (
+                    <div className="bg-red-900/20 border border-red-500/50 text-red-200 p-4 rounded-lg mb-8 font-mono text-xs">
+                        ERROR: {error}
+                    </div>
+                )}
+                {lastCreatedCardId && (
+                    <div className="bg-green-900/20 border border-green-500/50 text-green-200 p-4 rounded-lg mb-8 font-mono text-xs flex items-center justify-between">
+                        <span>CARD CREATED SUCCESSFULLY: {lastCreatedCardId}</span>
+                        <button
+                            onClick={() => handleOpenCard(lastCreatedCardId)}
+                            className="text-green-400 hover:text-white underline"
+                        >
+                            VIEW CARD
+                        </button>
+                    </div>
                 )}
 
-                {results.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {/* Results Grid */}
+                {results.length === 0 && !loading && !error ? (
+                    <div className="flex flex-col items-center justify-center py-24 text-gray-600 opacity-50">
+                        <rux-icon icon="image-search" size="large" className="mb-4"></rux-icon>
+                        <p className="font-mono text-sm">NO MEDIA LOADED. INITIATE A SEARCH.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {results.map((item) => {
                             const isDownloaded = !!downloaded[item.id];
                             const isCreatingCard = creatingCardId === item.id;
                             const cardIdForItem = createdCards[item.id];
                             const hasCard = !!cardIdForItem;
-                            const label =
-                                item.type === 'video'
-                                    ? 'Video'
-                                    : item.type === 'image'
-                                    ? 'Image'
-                                    : item.type === 'audio'
-                                    ? 'Audio'
-                                    : 'Unknown';
+
                             return (
-                                <div
-                                    key={item.id}
-                                    className="rounded-xl border border-gray-700 bg-gray-850/40 p-3 flex flex-col gap-2"
-                                >
-                                    <div className="relative">
+                                <div key={item.id} className="glass-panel rounded-xl overflow-hidden group hover:border-purple-500/30 transition-all duration-300 flex flex-col">
+                                    <div className="relative overflow-hidden">
                                         {renderPreview(item)}
-                                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[10px] uppercase tracking-wide text-gray-100">
-                                            {label}
-                                        </div>
-                                        {(isDownloaded || hasCard) && (
-                                            <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
-                                                {isDownloaded && (
-                                                    <div className="px-2 py-0.5 rounded-full bg-green-600/80 text-[10px] text-white">
-                                                        Downloaded
-                                                    </div>
-                                                )}
-                                                {hasCard && cardIdForItem && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleOpenCard(cardIdForItem)}
-                                                        className="px-2 py-0.5 rounded-full bg-purple-600/90 text-[10px] text-white hover:bg-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-300"
-                                                    >
-                                                        View Card
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="mt-1 space-y-1">
-                                        <div className="text-xs text-gray-200 font-semibold truncate" title={item.prompt || ''}>
-                                            {item.prompt || 'Untitled media'}
-                                        </div>
-                                        <div className="text-[11px] text-gray-500 flex flex-wrap gap-2">
+
+                                        {/* Overlay Badges */}
+                                        <div className="absolute top-2 left-2 flex gap-1">
+                                            <span className="px-2 py-1 rounded bg-black/60 backdrop-blur text-[10px] font-mono uppercase text-white border border-white/10">
+                                                {item.type}
+                                            </span>
                                             {item.fileType && (
-                                                <span className="px-1.5 py-0.5 rounded-full bg-gray-800 border border-gray-700">
+                                                <span className="px-2 py-1 rounded bg-black/60 backdrop-blur text-[10px] font-mono uppercase text-gray-300 border border-white/10">
                                                     {item.fileType}
                                                 </span>
                                             )}
-                                            {item.orientation && (
-                                                <span className="px-1.5 py-0.5 rounded-full bg-gray-800 border border-gray-700">
-                                                    {item.orientation}
+                                        </div>
+
+                                        {/* Status Indicators */}
+                                        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                                            {isDownloaded && (
+                                                <span className="px-2 py-1 rounded bg-green-500/80 backdrop-blur text-[10px] font-mono uppercase text-white shadow-lg flex items-center gap-1">
+                                                    <rux-icon icon="check" size="extra-small"></rux-icon> SAVED
+                                                </span>
+                                            )}
+                                            {hasCard && (
+                                                <span className="px-2 py-1 rounded bg-purple-500/80 backdrop-blur text-[10px] font-mono uppercase text-white shadow-lg flex items-center gap-1">
+                                                    <rux-icon icon="style" size="extra-small"></rux-icon> CARD
                                                 </span>
                                             )}
                                         </div>
                                     </div>
-                                    <div className="mt-2 flex flex-row gap-2">
-                                        <SecondaryButton
-                                            type="button"
-                                            onClick={() => handleDownload(item)}
-                                            disabled={loading}
-                                        >
-                                            {isDownloaded ? 'Re-download' : 'Download'}
-                                        </SecondaryButton>
-                                        {hasCard && cardIdForItem ? (
-                                            <PrimaryButton
-                                                type="button"
-                                                tone="purple"
-                                                onClick={() => handleOpenCard(cardIdForItem)}
+
+                                    <div className="p-4 flex-1 flex flex-col">
+                                        <div className="mb-4 flex-1">
+                                            <p className="text-xs text-gray-300 font-medium line-clamp-2 leading-relaxed" title={item.prompt || ''}>
+                                                {item.prompt || 'Untitled Asset'}
+                                            </p>
+                                            <div className="mt-2 text-[10px] text-gray-500 font-mono">
+                                                ID: {item.id.substring(0, 8)}...
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-800/50">
+                                            <button
+                                                onClick={() => handleDownload(item)}
                                                 disabled={loading}
+                                                className="px-3 py-2 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-[10px] font-mono uppercase tracking-wide transition-colors flex items-center justify-center gap-1"
                                             >
-                                                Open Card
-                                            </PrimaryButton>
-                                        ) : (
-                                            <PrimaryButton
-                                                type="button"
-                                                tone="purple"
-                                                onClick={() => handleCreateCard(item)}
-                                                disabled={loading || isCreatingCard}
-                                            >
-                                                {isCreatingCard ? 'Creating…' : 'Create Card'}
-                                            </PrimaryButton>
-                                        )}
+                                                <rux-icon icon="download" size="extra-small"></rux-icon>
+                                                {isDownloaded ? 'AGAIN' : 'SAVE'}
+                                            </button>
+
+                                            {hasCard && cardIdForItem ? (
+                                                <button
+                                                    onClick={() => handleOpenCard(cardIdForItem)}
+                                                    className="px-3 py-2 rounded bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 text-[10px] font-mono uppercase tracking-wide transition-colors flex items-center justify-center gap-1"
+                                                >
+                                                    <rux-icon icon="visibility" size="extra-small"></rux-icon>
+                                                    VIEW
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleCreateCard(item)}
+                                                    disabled={loading || isCreatingCard}
+                                                    className="px-3 py-2 rounded bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-mono uppercase tracking-wide transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+                                                >
+                                                    {isCreatingCard ? (
+                                                        <rux-icon icon="refresh" size="extra-small" className="animate-spin"></rux-icon>
+                                                    ) : (
+                                                        <rux-icon icon="add" size="extra-small"></rux-icon>
+                                                    )}
+                                                    {isCreatingCard ? '...' : 'CARD'}
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             );
