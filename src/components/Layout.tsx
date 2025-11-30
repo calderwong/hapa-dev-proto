@@ -37,8 +37,52 @@ const SystemClock = () => {
     );
 };
 
+const useWormholeActivity = () => {
+    const [state, setState] = React.useState<{ count: number; lastStep?: string | null }>(
+        {
+            count: 0,
+            lastStep: null,
+        },
+    );
+
+    React.useEffect(() => {
+        const handleStart = (event: any) => {
+            const step = event?.detail?.step || null;
+            setState((prev) => ({
+                count: prev.count + 1,
+                lastStep: step || prev.lastStep || null,
+            }));
+        };
+
+        const handleEnd = () => {
+            setState((prev) => ({
+                ...prev,
+                count: Math.max(0, prev.count - 1),
+            }));
+        };
+
+        window.addEventListener('wormhole-run-start', handleStart as EventListener);
+        window.addEventListener('wormhole-run-end', handleEnd as EventListener);
+
+        return () => {
+            window.removeEventListener('wormhole-run-start', handleStart as EventListener);
+            window.removeEventListener('wormhole-run-end', handleEnd as EventListener);
+        };
+    }, []);
+
+    return {
+        busy: state.count > 0,
+        lastStep: state.lastStep,
+    };
+};
+
 const Layout: React.FC = () => {
     const location = useLocation();
+    const wormholeActivity = useWormholeActivity();
+    const wormholeBusy = wormholeActivity.busy;
+    const wormholeLabel = wormholeBusy
+        ? `WH:${String(wormholeActivity.lastStep || 'RUN').toUpperCase()}`
+        : 'WH:IDLE';
 
     return (
         <div className="flex h-screen bg-gray-900 text-white font-sans overflow-hidden">
@@ -53,7 +97,7 @@ const Layout: React.FC = () => {
                         <div className="relative flex-shrink-0">
                             <div className="absolute inset-0 bg-astro-primary blur-md opacity-20 rounded-lg group-hover:opacity-40 transition-opacity duration-500"></div>
                             <img
-                                src="/hapa-cat.png"
+                                src="hapa-cat.png"
                                 alt="Hapa logo"
                                 className="relative w-12 h-12 rounded-lg object-cover border border-gray-600 shadow-xl ring-1 ring-white/10"
                             />
@@ -104,6 +148,16 @@ const Layout: React.FC = () => {
                             <div className="flex items-center gap-1.5" title="Network Status">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]"></span>
                                 <span className="tracking-wider">NET:ONLINE</span>
+                            </div>
+                            <div className="flex items-center gap-1.5" title="Wormhole Activity">
+                                <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                        wormholeBusy
+                                            ? 'bg-emerald-400 animate-pulse shadow-[0_0_4px_rgba(16,185,129,0.7)]'
+                                            : 'bg-gray-600'
+                                    }`}
+                                ></span>
+                                <span className="tracking-wider">{wormholeLabel}</span>
                             </div>
                             <div className="flex items-center gap-1.5" title="System Status">
                                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_4px_rgba(59,130,246,0.5)]"></span>
@@ -159,8 +213,8 @@ const SidebarNavItem: React.FC<SidebarNavItemProps> = ({ to, label, icon, active
         >
             <div
                 className={`${active
-                    ? 'text-white'
-                    : 'text-gray-500 group-hover:text-gray-300'
+                    ? 'text-white animate-neon-breathe'
+                    : 'text-gray-500 group-hover:text-gray-300 group-hover:animate-neon-breathe'
                     } transition-colors flex-shrink-0 flex items-center justify-center`}
             >
                 <rux-icon icon={icon} size="small"></rux-icon>

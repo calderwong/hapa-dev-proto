@@ -44,6 +44,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [isRecording, setIsRecording] = useState(false);
     const [liveTranscript, setLiveTranscript] = useState('');
+    const [isDragOver, setIsDragOver] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const recordedChunksRef = useRef<Blob[]>([]);
@@ -89,41 +90,48 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             },
         ]);
     };
+    const processFiles = async (fileList: FileList | File[]) => {
+        if (!fileList || (fileList as any).length === 0) return;
+
+        const newAttachments: Attachment[] = [];
+
+        for (let i = 0; i < (fileList as any).length; i++) {
+            const file = (fileList as any)[i] as File;
+            const isImage = file.type.startsWith('image/');
+            const isVideo = file.type.startsWith('video/');
+            const isAudio = file.type.startsWith('audio/');
+
+            if (!isImage && !isVideo && !isAudio) {
+                alert(`File type ${file.type} not supported. Only images, video, and audio are supported.`);
+                continue;
+            }
+
+            const base64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const result = reader.result as string;
+                    const base64Data = result.split(',')[1];
+                    resolve(base64Data);
+                };
+                reader.readAsDataURL(file);
+            });
+
+            newAttachments.push({
+                file,
+                preview: URL.createObjectURL(file),
+                base64,
+                mimeType: file.type,
+            });
+        }
+
+        if (newAttachments.length > 0) {
+            setAttachments((prev) => [...prev, ...newAttachments]);
+        }
+    };
 
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
-            const newAttachments: Attachment[] = [];
-
-            for (let i = 0; i < e.target.files.length; i++) {
-                const file = e.target.files[i];
-                const isImage = file.type.startsWith('image/');
-                const isVideo = file.type.startsWith('video/');
-                const isAudio = file.type.startsWith('audio/');
-
-                if (!isImage && !isVideo && !isAudio) {
-                    alert(`File type ${file.type} not supported. Only images, video, and audio are supported.`);
-                    continue;
-                }
-
-                const base64 = await new Promise<string>((resolve) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        const result = reader.result as string;
-                        const base64Data = result.split(',')[1];
-                        resolve(base64Data);
-                    };
-                    reader.readAsDataURL(file);
-                });
-
-                newAttachments.push({
-                    file,
-                    preview: URL.createObjectURL(file),
-                    base64,
-                    mimeType: file.type,
-                });
-            }
-
-            setAttachments((prev) => [...prev, ...newAttachments]);
+            await processFiles(e.target.files);
         }
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
@@ -259,6 +267,93 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         }
     };
 
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isDragOver) {
+            setIsDragOver(true);
+        }
+    };
+
+    const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setIsDragOver(false);
+        }
+    };
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        console.log('ChatInput: Attaching global capture-phase drag listeners');
+
+        let dragCounter = 0;
+
+        const handleWindowDragEnter = (event: DragEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = 'copy';
+                if (Array.from(event.dataTransfer.types || []).includes('Files')) {
+                    dragCounter += 1;
+                    if (!isDragOver) {
+                        setIsDragOver(true);
+                    }
+                }
+            }
+        };
+
+        const handleWindowDragOver = (event: DragEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = 'copy';
+                if (Array.from(event.dataTransfer.types || []).includes('Files') && !isDragOver) {
+                    setIsDragOver(true);
+                }
+            }
+        };
+
+        const handleWindowDragLeave = (event: DragEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (Array.from(event.dataTransfer?.types || []).includes('Files')) {
+                dragCounter = Math.max(dragCounter - 1, 0);
+                if (dragCounter === 0) {
+                    setIsDragOver(false);
+                }
+            }
+        };
+
+        const handleWindowDrop = async (event: DragEvent) => {
+            console.log('Global drop detected (capture)', event.dataTransfer?.files);
+            event.preventDefault();
+            event.stopPropagation();
+
+            const dt = event.dataTransfer;
+            if (!dt || !dt.files || dt.files.length === 0) {
+                return;
+            }
+
+            dragCounter = 0;
+            setIsDragOver(false);
+            await processFiles(dt.files as any);
+        };
+
+        // Use capture phase (true) to intercept events before they hit elements
+        window.addEventListener('dragenter', handleWindowDragEnter, true);
+        window.addEventListener('dragover', handleWindowDragOver, true);
+        window.addEventListener('dragleave', handleWindowDragLeave, true);
+        window.addEventListener('drop', handleWindowDrop, true);
+
+        return () => {
+            window.removeEventListener('dragenter', handleWindowDragEnter, true);
+            window.removeEventListener('dragover', handleWindowDragOver, true);
+            window.removeEventListener('dragleave', handleWindowDragLeave, true);
+            window.removeEventListener('drop', handleWindowDrop, true);
+        };
+    }, [isDragOver, processFiles]);
+
     return (
         <div className="flex-none p-4 bg-gray-900/95 backdrop-blur border-t border-astro-border relative z-10">
             {/* Decorative top glow */}
@@ -294,6 +389,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                                 <button
                                     onClick={() => removeAttachment(index)}
                                     className="absolute -top-2 -right-2 bg-astro-critical text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm border border-black/50"
+                                    title="Remove attachment"
                                 >
                                     <rux-icon icon="close" size="extra-small"></rux-icon>
                                 </button>
@@ -303,7 +399,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 )}
 
                 {/* Main Input Deck */}
-                <div className="relative group bg-gray-800/50 rounded-xl border border-astro-border p-2 flex items-end gap-2 transition-all duration-300 focus-within:border-astro-primary/70 focus-within:shadow-[0_0_20px_rgba(77,182,172,0.1)] focus-within:bg-gray-800/80">
+                <div
+                    className={`relative group bg-gray-800/50 rounded-xl border ${isDragOver ? 'border-astro-primary shadow-[0_0_20px_rgba(77,182,172,0.35)] bg-gray-800/80' : 'border-astro-border'} p-2 flex items-end gap-2 transition-all duration-300 focus-within:border-astro-primary/70 focus-within:shadow-[0_0_20px_rgba(77,182,172,0.1)] focus-within:bg-gray-800/80`}
+                    onDragOver={handleDragOver}
+                    onDragEnter={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                >
+
+                    {isDragOver && (
+                        <div className="pointer-events-none absolute inset-0 rounded-xl border-2 border-dashed border-astro-primary/60 bg-astro-primary/10 backdrop-blur-sm flex flex-col items-center justify-center gap-3 text-astro-primary transition-opacity duration-200 animate-pulse px-6">
+                            <div className="flex items-center gap-3 text-[11px] font-mono uppercase tracking-[0.35em] leading-none">
+                                <rux-icon icon="cloud-upload" size="medium"></rux-icon>
+                                <span>Drop to Attach</span>
+                            </div>
+                            <span className="text-[10px] font-mono tracking-[0.4em] opacity-80 whitespace-nowrap">Images · Video · Audio</span>
+                        </div>
+                    )}
 
                     {/* Hidden File Input */}
                     <input
@@ -313,6 +424,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                         className="hidden"
                         multiple
                         accept="image/*,video/*,audio/*"
+                        title="Attach media file"
                     />
 
                     {/* Left Actions */}

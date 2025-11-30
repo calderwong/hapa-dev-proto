@@ -80,3 +80,19 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Neon Icon Animation */
+@keyframes neon-breathe {
+  0%, 100% {
+    opacity: 0.8;
+    filter: drop-shadow(0 0 1px currentColor) drop-shadow(0 0 2px currentColor);
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 6px currentColor);
+  }
+}
+
+.animate-neon-breathe {
+  animation: neon-breathe 3s ease-in-out infinite;
+}
