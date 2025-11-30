@@ -76,13 +76,125 @@ const useWormholeActivity = () => {
     };
 };
 
+import {
+    playHoverSound,
+    playClickSound,
+    toggleMute,
+    getMuteState,
+    playDropdownOpenSound,
+    playDropdownHoverSound,
+    playDropdownSelectSound,
+} from '../utils/audio';
+
 const Layout: React.FC = () => {
     const location = useLocation();
     const wormholeActivity = useWormholeActivity();
+    const [isMuted, setIsMuted] = React.useState(getMuteState());
     const wormholeBusy = wormholeActivity.busy;
     const wormholeLabel = wormholeBusy
         ? `WH:${String(wormholeActivity.lastStep || 'RUN').toUpperCase()}`
         : 'WH:IDLE';
+
+    const handleMuteToggle = () => {
+        const newState = toggleMute();
+        setIsMuted(newState);
+    };
+
+    // Sound Effects integration
+    React.useEffect(() => {
+        let lastHovered: Element | null = null;
+        let dropdownHoverOption: Element | null = null;
+        let dropdownActiveSelect: HTMLElement | null = null;
+
+        const findInPath = (event: Event, predicate: (node: HTMLElement) => boolean) => {
+            const path = event.composedPath ? event.composedPath() : [];
+            return path.find((node) => node instanceof HTMLElement && predicate(node as HTMLElement)) as HTMLElement | undefined;
+        };
+
+        const handlePointerOver = (event: PointerEvent) => {
+            const interactive = findInPath(event, (el) =>
+                el.matches('button, a, [role="button"], input[type="submit"], input[type="button"], .interactive'),
+            );
+
+            if (interactive) {
+                if (interactive !== lastHovered) {
+                    playHoverSound();
+                    lastHovered = interactive;
+                }
+            } else {
+                lastHovered = null;
+            }
+        };
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const select = findInPath(event, (el) => el.tagName === 'RUX-SELECT');
+            if (select && dropdownActiveSelect !== select) {
+                dropdownActiveSelect = select;
+                dropdownHoverOption = null;
+                playDropdownOpenSound();
+            } else if (!select) {
+                dropdownActiveSelect = null;
+                dropdownHoverOption = null;
+            }
+        };
+
+        const handlePointerMove = (event: PointerEvent) => {
+            if (!dropdownActiveSelect) return;
+            const element = document.elementFromPoint(event.clientX, event.clientY);
+            if (!element) {
+                dropdownHoverOption = null;
+                return;
+            }
+            const option = element.closest('.rux-select__option');
+            if (option && option !== dropdownHoverOption) {
+                playDropdownHoverSound();
+                dropdownHoverOption = option;
+            } else if (!option) {
+                dropdownHoverOption = null;
+            }
+        };
+
+        const handleClick = (event: MouseEvent) => {
+            const interactive = findInPath(event, (el) =>
+                el.matches('button, a, [role="button"], input[type="submit"], input[type="button"], .interactive'),
+            );
+            if (interactive) {
+                playClickSound();
+            }
+        };
+
+        const handleDropdownSelect = (event: Event) => {
+            const select = findInPath(event, (el) => el.tagName === 'RUX-SELECT');
+            if (select && dropdownActiveSelect === select) {
+                playDropdownSelectSound();
+                dropdownHoverOption = null;
+                dropdownActiveSelect = null;
+            }
+        };
+
+        const handleKeydown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                dropdownHoverOption = null;
+                dropdownActiveSelect = null;
+            }
+        };
+
+        window.addEventListener('pointerover', handlePointerOver, true);
+        window.addEventListener('pointerdown', handlePointerDown, true);
+        window.addEventListener('pointermove', handlePointerMove, true);
+        window.addEventListener('click', handleClick, true);
+        window.addEventListener('ruxchange', handleDropdownSelect as EventListener, true);
+        window.addEventListener('keydown', handleKeydown, true);
+
+        return () => {
+            window.removeEventListener('pointerover', handlePointerOver, true);
+            window.removeEventListener('pointerdown', handlePointerDown, true);
+            window.removeEventListener('pointermove', handlePointerMove, true);
+            window.removeEventListener('click', handleClick, true);
+            window.removeEventListener('ruxchange', handleDropdownSelect as EventListener, true);
+            window.removeEventListener('keydown', handleKeydown, true);
+        };
+    }, []);
 
     return (
         <div className="flex h-screen bg-gray-900 text-white font-sans overflow-hidden">
@@ -167,6 +279,18 @@ const Layout: React.FC = () => {
                                 <rux-icon icon="memory" size="extra-small" className="text-gray-500"></rux-icon>
                                 <span className="tracking-wider">MEM:32%</span>
                             </div>
+                            <button
+                                onClick={handleMuteToggle}
+                                className="flex items-center gap-1.5 hover:text-white transition-colors"
+                                title={isMuted ? "Unmute Audio" : "Mute Audio"}
+                            >
+                                <rux-icon 
+                                    key={isMuted ? 'mute' : 'vol'}
+                                    icon={isMuted ? "volume-mute" : "volume-up"} 
+                                    size="extra-small" 
+                                    className={`transition-colors ${isMuted ? 'text-gray-600' : 'text-astro-primary'}`}
+                                ></rux-icon>
+                            </button>
                             <button
                                 onClick={() => window.electronAPI?.toggleDevTools()}
                                 className="flex items-center gap-1.5 hover:text-white transition-colors"

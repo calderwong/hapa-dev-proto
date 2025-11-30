@@ -88,3 +88,14 @@
 
 **Tags:** #feature #ui #optimization #electron #wormhole
 **Est. Avg. Human Dev Time:** 2.5 hours
+
+## Entry 8 – Dropdown audio cues for Astro selects
+**Prompt:** "Add Dropdown Audio Feedback"
+
+**Summary of actions:**
+- Inspected Astro `rux-select` implementation to confirm available custom events and shadow DOM structure.
+- Augmented global sound effect hook to detect dropdown open, option hover, and selection using pointer events and composed paths.
+- Wired new Web Audio helpers for dropdown open/hover/select tones, respecting the existing mute toggle.
+
+**Tags:** #feature #audio #ux
+**Est. Avg. Human Dev Time:** 0.75 hours
