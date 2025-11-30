@@ -51,6 +51,7 @@ You are working in TypeScript on both Electron and React sides.
   - Provides shell: sidebar navigation + main content area.
   - **Important:** Sidebar now uses **Astro `rux-icon`** instead of Lucide.
   - Top of main content uses **`<rux-global-status-bar appname="Hapa AI" />`**.
+  - Hosts global Web Audio hooks: hover/click tones for interactive controls, Astro dropdown open/hover/select cues, and a persistent mute toggle synced to `localStorage`.
 
 ### 2.2 Electron / backend
 
@@ -81,6 +82,7 @@ You are working in TypeScript on both Electron and React sides.
   - **Wormhole types**: `WormholeSettings`, `WormholeStepConfig`, `WormholeIngestParams`, `WormholeRunStepParams`, `WormholeStatus`, `WormholeDerivedArtifacts`, etc.
   - `ElectronAPI` interface – all IPC methods exposed to the renderer.
 - `electron/preload.ts` – exposes `window.electronAPI` matching `ElectronAPI`.
+- `src/utils/audio.ts` – Web Audio helpers for hover/click/dropdown tones plus mute-state persistence (key: `hapa-audio-muted`).
 
 ---
 
@@ -257,10 +259,11 @@ If you’re asked to continue work without specific direction, here are safe, us
      - LLM backend availability (Gemini/OpenAI/llama).
      - Wormhole ingest/processing queue health.
    - Use non‑intrusive indicators, following Astro’s guidance for global status.
+   - Keep new audio cues subtle; always respect the mute toggle and ensure sounds only play on intentional interaction.
 
 4. **Accessibility and robustness**
    - Ensure all selects and important controls have `aria-label`s (some are already added).
-   - Verify keyboard navigation and focus management in Astro‑based pages.
+   - Verify keyboard navigation and focus management in Astro-based pages.
 
 5. **Testing and logging**
    - Add or improve logging around Wormhole IPC handlers (noisy but extremely useful).

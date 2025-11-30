@@ -21,6 +21,7 @@ The app is built with **Electron**, **React + TypeScript**, and **Vite**.
   - Send text messages with streaming-style UI feedback.
   - Render responses as GitHub-flavored Markdown (code blocks, lists, links, images).
   - Attach image / video / audio files via file picker or drag-and-drop (converted to Base64 for the backend).
+  - Global neon-inspired UX polish with hover/click tones, dropdown audio feedback, and a mute toggle persisted to local storage.
 
 - **Card Library & Wormhole**
   - **Drag & Drop Import**: Easily import text, images, and videos as cards.
@@ -151,6 +152,7 @@ Use this feature only on networks and with data you are comfortable experimentin
   - `main.tsx` – React entrypoint.
   - `App.tsx` – Router + top-level routes.
   - `components/Layout.tsx` – Sidebar layout and navigation (Chat, P2P, Local AI, Settings, Admin).
+    - Hosts global sound effect listeners (buttons + Astro dropdowns) and the audio mute toggle.
   - `pages/Chat.tsx` – Multi-provider chat UI (Gemini, OpenAI, local llama.cpp) with streaming and attachments.
   - `pages/CardLibrary.tsx` – Card management, drag & drop, and Wormhole status.
   - `pages/Wiki.tsx` – Wiki browser with optimized backend loading.
