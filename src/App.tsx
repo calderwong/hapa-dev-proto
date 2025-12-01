@@ -16,6 +16,8 @@ import CardLibrary from './pages/CardLibrary';
 
 import WormholeAstro from './pages/WormholeAstro';
 import Wiki from './pages/Wiki';
+import Profile from './pages/Profile';
+import Pets from './pages/Pets';
 
 function App() {
   useEffect(() => {
@@ -45,6 +47,8 @@ function App() {
           <Route path="cards" element={<CardLibrary />} />
           <Route path="wormhole" element={<WormholeAstro />} />
           <Route path="wiki" element={<Wiki />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="pets" element={<Pets />} />
         </Route>
       </Routes>
     </Router>

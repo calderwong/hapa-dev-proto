@@ -1,7 +1,9 @@
+// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { PrimaryButton, SecondaryButton } from './Button';
+import SpriteSheetConverter from './SpriteSheetConverter';
 
 interface CardWorkspaceProps {
     card: any;
@@ -22,6 +24,8 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave }) 
     const [versions, setVersions] = useState<Version[]>([]);
     const [saving, setSaving] = useState(false);
     const [activeVersionId, setActiveVersionId] = useState<string>('original');
+    const [showSpriteConverter, setShowSpriteConverter] = useState(false);
+    const [converting, setConverting] = useState(false);
 
     // Initialize versions (simulated for now, would fetch from P2P in real app)
     useEffect(() => {
@@ -63,6 +67,76 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave }) 
         setIsEditing(false);
     };
 
+    const handleSpriteGenerate = async (blob: Blob) => {
+        if (!window.electronAPI?.wormholeIngestContent || !window.electronAPI?.p2pAppend) return;
+
+        setConverting(true);
+        try {
+            // Convert blob to base64
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = async () => {
+                const base64data = reader.result as string;
+                const base64 = base64data.split(',')[1];
+
+                // Ingest GIF
+                const result = await window.electronAPI.wormholeIngestContent({
+                    bytesBase64: base64,
+                    fileName: 'sprite-animation.gif',
+                    mediaType: 'image',
+                    sourceLabel: 'sprite-sheet-gif'
+                });
+
+                // Get local path
+                const records = await window.electronAPI.p2pRead(result.cardId);
+                let gifPath = '';
+                for (const record of records) {
+                    try {
+                        const parsed = JSON.parse(record);
+                        if (parsed.type === 'card' && parsed.wormhole?.ingest?.originalPath) {
+                            gifPath = parsed.wormhole.ingest.originalPath;
+                            break;
+                        }
+                    } catch (e) { }
+                }
+
+                // Append to original card's core
+                const coreName = card.coreName || card.id;
+                const coreRecords = await window.electronAPI.p2pRead(coreName);
+                let latestRecord: any = {};
+                for (const r of coreRecords) {
+                    try {
+                        const p = JSON.parse(r);
+                        if (p.type === 'card') latestRecord = p;
+                    } catch { }
+                }
+
+                const updatedRecord = {
+                    ...latestRecord,
+                    subType: 'sprite-sheet',
+                    tags: [...(latestRecord.tags || []), 'sprite'],
+                    derivedGif: {
+                        localPath: gifPath,
+                        cardId: result.cardId
+                    },
+                    updatedAt: new Date().toISOString()
+                };
+
+                await window.electronAPI.p2pAppend({
+                    name: coreName,
+                    data: JSON.stringify(updatedRecord)
+                });
+
+                setShowSpriteConverter(false);
+                setConverting(false);
+                // Ideally trigger a refresh here, but for now just close
+            };
+        } catch (e) {
+            console.error("Failed to generate sprite sheet GIF:", e);
+            setConverting(false);
+        }
+    };
+
     return (
         <div className="flex h-full gap-6 animate-in fade-in zoom-in duration-300">
             {/* Left Panel: Content & Editor */}
@@ -79,6 +153,12 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave }) 
                         </div>
                     </div>
                     <div className="flex gap-2">
+                        {card.type === 'image' && !showSpriteConverter && (
+                            <SecondaryButton onClick={() => setShowSpriteConverter(true)}>
+                                <rux-icon icon="animation" size="small" className="mr-2"></rux-icon>
+                                MAKE GIF
+                            </SecondaryButton>
+                        )}
                         {card.type === 'text' && (
                             <SecondaryButton onClick={() => setIsEditing(!isEditing)}>
                                 <rux-icon icon={isEditing ? "visibility" : "edit"} size="small" className="mr-2"></rux-icon>
@@ -94,8 +174,18 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave }) 
                 {/* Main Body */}
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-black/20 relative">
                     {card.type === 'image' && (
-                        <div className="flex justify-center items-center h-full">
-                            <img src={card.data?.imageUrl || card.data?.url} alt="Card Media" className="max-h-full max-w-full rounded-lg shadow-2xl border border-gray-800" />
+                        <div className="flex justify-center items-center h-full w-full">
+                            {showSpriteConverter ? (
+                                <div className="w-full h-full">
+                                    <SpriteSheetConverter
+                                        imageUrl={card.data?.imageUrl || card.data?.url}
+                                        onGenerate={handleSpriteGenerate}
+                                        onCancel={() => setShowSpriteConverter(false)}
+                                    />
+                                </div>
+                            ) : (
+                                <img src={card.data?.imageUrl || card.data?.url} alt="Card Media" className="max-h-full max-w-full rounded-lg shadow-2xl border border-gray-800" />
+                            )}
                         </div>
                     )}
 

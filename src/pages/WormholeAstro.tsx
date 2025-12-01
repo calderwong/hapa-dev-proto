@@ -45,6 +45,19 @@ const WormholeAstro: React.FC = () => {
     const [overrideSummarizationModel, setOverrideSummarizationModel] = useState('');
     const [overrideKeyTermsModel, setOverrideKeyTermsModel] = useState('');
     const [overrideWikiModel, setOverrideWikiModel] = useState('');
+    const [activeRun, setActiveRun] = useState<{
+        cardId: string;
+        step: 'summarization' | 'keyTerms' | 'wikiUpdate';
+    } | null>(null);
+
+    const emitWormholeRunEvent = (
+        type: 'start' | 'end',
+        step: 'summarization' | 'keyTerms' | 'wikiUpdate',
+    ) => {
+        if (typeof window === 'undefined') return;
+        const eventName = type === 'start' ? 'wormhole-run-start' : 'wormhole-run-end';
+        window.dispatchEvent(new CustomEvent(eventName, { detail: { step } }));
+    };
 
     const loadGlobalIngests = async () => {
         if (typeof window === 'undefined' || !window.electronAPI || !window.electronAPI.p2pRead) {
@@ -308,6 +321,8 @@ const WormholeAstro: React.FC = () => {
         }
 
         setError(null);
+        setActiveRun({ cardId: item.cardId, step: 'wikiUpdate' });
+        emitWormholeRunEvent('start', 'wikiUpdate');
         try {
             const result = await window.electronAPI.wormholeRunWikiUpdate({
                 cardId: item.cardId,
@@ -332,6 +347,11 @@ const WormholeAstro: React.FC = () => {
                         : entry,
                 ),
             );
+        } finally {
+            setActiveRun((prev) =>
+                prev && prev.cardId === item.cardId && prev.step === 'wikiUpdate' ? null : prev,
+            );
+            emitWormholeRunEvent('end', 'wikiUpdate');
         }
     };
 
@@ -351,6 +371,8 @@ const WormholeAstro: React.FC = () => {
         }
 
         setError(null);
+        setActiveRun({ cardId: item.cardId, step: 'summarization' });
+        emitWormholeRunEvent('start', 'summarization');
         try {
             const result = await window.electronAPI.wormholeRunSummarization({
                 cardId: item.cardId,
@@ -375,6 +397,11 @@ const WormholeAstro: React.FC = () => {
                         : entry,
                 ),
             );
+        } finally {
+            setActiveRun((prev) =>
+                prev && prev.cardId === item.cardId && prev.step === 'summarization' ? null : prev,
+            );
+            emitWormholeRunEvent('end', 'summarization');
         }
     };
 
@@ -385,6 +412,8 @@ const WormholeAstro: React.FC = () => {
         }
 
         setError(null);
+        setActiveRun({ cardId: item.cardId, step: 'keyTerms' });
+        emitWormholeRunEvent('start', 'keyTerms');
         try {
             const result = await window.electronAPI.wormholeRunKeyTerms({
                 cardId: item.cardId,
@@ -409,6 +438,11 @@ const WormholeAstro: React.FC = () => {
                         : entry,
                 ),
             );
+        } finally {
+            setActiveRun((prev) =>
+                prev && prev.cardId === item.cardId && prev.step === 'keyTerms' ? null : prev,
+            );
+            emitWormholeRunEvent('end', 'keyTerms');
         }
     };
 
@@ -449,6 +483,32 @@ const WormholeAstro: React.FC = () => {
                     background: rgba(30, 41, 59, 0.4);
                     backdrop-filter: blur(10px);
                     border: 1px solid rgba(255, 255, 255, 0.1);
+                }
+                .status-strip {
+                    position: relative;
+                    padding-bottom: 2px;
+                }
+                .status-strip::after {
+                    content: '';
+                    position: absolute;
+                    left: 0;
+                    bottom: 0;
+                    height: 2px;
+                    width: 100%;
+                    background: linear-gradient(to right, rgba(56, 189, 248, 0.9), rgba(129, 140, 248, 0.9));
+                    opacity: 0;
+                    transform-origin: left;
+                    transform: scaleX(0.2);
+                    transition: opacity 0.2s ease, transform 0.2s ease;
+                }
+                .status-strip--active::after {
+                    opacity: 0.9;
+                    animation: status-strip-pulse 1.2s infinite;
+                }
+                @keyframes status-strip-pulse {
+                    0% { transform: scaleX(0.2); opacity: 0.4; }
+                    50% { transform: scaleX(1); opacity: 0.9; }
+                    100% { transform: scaleX(0.2); opacity: 0.4; }
                 }
             `}</style>
 
@@ -720,13 +780,35 @@ const WormholeAstro: React.FC = () => {
                                                     </span>
                                                 </div>
                                                 <div className="flex gap-4 text-[10px] text-gray-400">
-                                                    <span className={`flex items-center gap-1 ${item.transcriptionStatus === 'complete' ? 'text-emerald-400' : ''}`}>
+                                                    <span className={`flex items-center gap-1 status-strip ${item.transcriptionStatus === 'complete' ? 'text-emerald-400' : ''}`}>
                                                         TX: {item.transcriptionStatus || 'PENDING'}
                                                     </span>
-                                                    <span className={`flex items-center gap-1 ${item.summarizationStatus === 'complete' ? 'text-cyan-400' : ''}`}>
+                                                    <span
+                                                        className={`flex items-center gap-1 status-strip ${
+                                                            item.summarizationStatus === 'complete'
+                                                                ? 'text-cyan-400'
+                                                                : ''
+                                                        } ${
+                                                            activeRun &&
+                                                            activeRun.cardId === item.cardId &&
+                                                            activeRun.step === 'summarization'
+                                                                ? 'status-strip--active'
+                                                                : ''
+                                                        }`}
+                                                    >
                                                         SUM: {item.summarizationStatus || 'PENDING'}
                                                     </span>
-                                                    <span className={`flex items-center gap-1 ${item.keyTermsStatus === 'complete' ? 'text-purple-400' : ''}`}>
+                                                    <span
+                                                        className={`flex items-center gap-1 status-strip ${
+                                                            item.keyTermsStatus === 'complete' ? 'text-purple-400' : ''
+                                                        } ${
+                                                            activeRun &&
+                                                            activeRun.cardId === item.cardId &&
+                                                            activeRun.step === 'keyTerms'
+                                                                ? 'status-strip--active'
+                                                                : ''
+                                                        }`}
+                                                    >
                                                         KEYS: {item.keyTermsStatus || 'PENDING'}
                                                     </span>
                                                 </div>
@@ -734,14 +816,65 @@ const WormholeAstro: React.FC = () => {
                                         </div>
 
                                         <div className="flex items-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                                            <rux-button size="small" secondary onClick={() => handleSummarize(item)} title="Run Summarization">
-                                                <rux-icon icon="short-text" size="extra-small"></rux-icon>
+                                            <rux-button
+                                                size="small"
+                                                secondary
+                                                onClick={() => handleSummarize(item)}
+                                                title="Run Summarization"
+                                                disabled={!!activeRun}
+                                            >
+                                                {activeRun && activeRun.cardId === item.cardId && activeRun.step === 'summarization' ? (
+                                                    <>
+                                                        <rux-icon
+                                                            icon="sync"
+                                                            size="extra-small"
+                                                            className="animate-spin mr-1"
+                                                        ></rux-icon>
+                                                        Running
+                                                    </>
+                                                ) : (
+                                                    <rux-icon icon="short-text" size="extra-small"></rux-icon>
+                                                )}
                                             </rux-button>
-                                            <rux-button size="small" secondary onClick={() => handleKeyTerms(item)} title="Extract Key Terms">
-                                                <rux-icon icon="vpn-key" size="extra-small"></rux-icon>
+                                            <rux-button
+                                                size="small"
+                                                secondary
+                                                onClick={() => handleKeyTerms(item)}
+                                                title="Extract Key Terms"
+                                                disabled={!!activeRun}
+                                            >
+                                                {activeRun && activeRun.cardId === item.cardId && activeRun.step === 'keyTerms' ? (
+                                                    <>
+                                                        <rux-icon
+                                                            icon="sync"
+                                                            size="extra-small"
+                                                            className="animate-spin mr-1"
+                                                        ></rux-icon>
+                                                        Running
+                                                    </>
+                                                ) : (
+                                                    <rux-icon icon="vpn-key" size="extra-small"></rux-icon>
+                                                )}
                                             </rux-button>
-                                            <rux-button size="small" secondary onClick={() => handleWikiUpdate(item)} title="Update Wiki">
-                                                <rux-icon icon="share" size="extra-small"></rux-icon>
+                                            <rux-button
+                                                size="small"
+                                                secondary
+                                                onClick={() => handleWikiUpdate(item)}
+                                                title="Update Wiki"
+                                                disabled={!!activeRun}
+                                            >
+                                                {activeRun && activeRun.cardId === item.cardId && activeRun.step === 'wikiUpdate' ? (
+                                                    <>
+                                                        <rux-icon
+                                                            icon="sync"
+                                                            size="extra-small"
+                                                            className="animate-spin mr-1"
+                                                        ></rux-icon>
+                                                        Running
+                                                    </>
+                                                ) : (
+                                                    <rux-icon icon="share" size="extra-small"></rux-icon>
+                                                )}
                                             </rux-button>
                                             <div className="h-4 w-px bg-gray-700 mx-1"></div>
                                             <rux-button size="small" onClick={() => handleOpenCard(item.cardId)}>

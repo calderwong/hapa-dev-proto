@@ -74,6 +74,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     p2pRead: (name: string, options?: any) => ipcRenderer.invoke('p2p-read', name, options),
     p2pGetLength: (name: string) => ipcRenderer.invoke('p2p-get-length', name),
     toggleDevTools: () => ipcRenderer.invoke('toggle-dev-tools'),
+    getProfile: () => ipcRenderer.invoke('get-profile'),
+    saveProfile: (profile: any) => ipcRenderer.invoke('save-profile', profile),
+    saveProfileImage: (params: any) => ipcRenderer.invoke('save-profile-image', params),
+    getSystemStats: () => ipcRenderer.invoke('get-system-stats'),
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

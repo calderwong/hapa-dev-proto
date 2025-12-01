@@ -21,6 +21,11 @@ interface Message {
   attachments?: ChatAttachmentPreview[];
   provider?: 'gemini' | 'openai' | 'llama';
   model?: string;
+  metrics?: {
+    startTime: number;
+    endTime?: number;
+    duration?: number;
+  };
 }
 
 interface ModelInfo {
@@ -28,6 +33,21 @@ interface ModelInfo {
   displayName: string;
   description: string;
 }
+
+const ElapsedTime: React.FC<{ startTime: number }> = ({ startTime }) => {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsed(Date.now() - startTime);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [startTime]);
+
+  return (
+    <span>{(elapsed / 1000).toFixed(1)}s</span>
+  );
+};
 
 
 
@@ -85,7 +105,25 @@ const Chat: React.FC = () => {
 
   const assistantMessageIdRef = useRef<string | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
+  const startTimeRef = useRef<number | null>(null);
   const [chatMode, setChatMode] = useState<ChatMode>('request-response');
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
+
+  const loadProfile = async () => {
+    if (window.electronAPI?.getProfile) {
+      const profile = await window.electronAPI.getProfile();
+      if (profile?.avatarUrl) {
+        setUserAvatar(profile.avatarUrl);
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadProfile();
+    const handleUpdate = () => loadProfile();
+    window.addEventListener('user-profile-update', handleUpdate);
+    return () => window.removeEventListener('user-profile-update', handleUpdate);
+  }, []);
 
 
 
@@ -342,12 +380,16 @@ const Chat: React.FC = () => {
       model: modelName,
     };
     const assistantId = `${Date.now()}-assistant`;
+    const startTime = Date.now();
+    startTimeRef.current = startTime;
+
     const assistantMessage: Message = {
       id: assistantId,
       role: 'model',
       content: '',
       provider,
       model: modelName,
+      metrics: { startTime }
     };
     assistantMessageIdRef.current = assistantId;
 
@@ -388,6 +430,9 @@ const Chat: React.FC = () => {
           return;
         }
 
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -396,6 +441,7 @@ const Chat: React.FC = () => {
                 content: result.content,
                 model: result.model,
                 provider: result.provider as any,
+                metrics: { startTime, endTime, duration }
               }
               : m,
           ),
@@ -800,199 +846,226 @@ const Chat: React.FC = () => {
               )}
             </div>
           ) : (
-            messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div className={`flex max-w-[85%] gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  {/* Avatar */}
-                  <div className={`flex-none w-8 h-8 rounded flex items-center justify-center mt-1 ${msg.role === 'user'
-                    ? 'bg-astro-primary text-astro-dark'
-                    : 'bg-astro-surface border border-astro-border text-astro-primary'
-                    }`}>
-                    <rux-icon icon={msg.role === 'user' ? 'person' : 'processor'} size="small"></rux-icon>
-                  </div>
+            messages.map((msg) => {
+              // Hide empty assistant message while loading to avoid double-bubble
+              if (msg.id === assistantMessageIdRef.current && !msg.content && isLoading) return null;
 
-                  {/* Bubble */}
-                  <div className={`flex flex-col min-w-0 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className="flex items-center gap-2 mb-1 px-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                        {msg.role === 'user' ? 'Operator' : 'AI System'}
-                      </span>
-                      {msg.role === 'model' && msg.provider && (
-                        <span className="text-[10px] text-astro-off">
-                          {formatProviderLabel(msg.provider)}
-                          {msg.model && <span className="opacity-70"> :: {msg.model}</span>}
-                        </span>
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div className={`flex max-w-[85%] gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    {/* Avatar */}
+                    <div className={`flex-none w-8 h-8 rounded flex items-center justify-center mt-1 overflow-hidden ${msg.role === 'user'
+                      ? 'bg-astro-primary text-astro-dark'
+                      : 'bg-astro-surface border border-astro-border text-astro-primary'
+                      }`}>
+                      {msg.role === 'user' && userAvatar ? (
+                        <img src={userAvatar} alt="User" className="w-full h-full object-cover" />
+                      ) : (
+                        <rux-icon icon={msg.role === 'user' ? 'person' : 'processor'} size="small"></rux-icon>
                       )}
                     </div>
 
-                    <div
-                      className={`rounded px-5 py-4 shadow-sm text-sm leading-relaxed overflow-hidden ${msg.role === 'user'
-                        ? 'bg-astro-hover/20 border border-astro-primary/30 text-white rounded-tr-none'
-                        : 'bg-astro-surface border border-astro-border text-gray-100 rounded-tl-none'
-                        }`}
-                    >
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="mb-4 flex flex-wrap gap-3">
-                          {msg.attachments.map((att, index) => {
-                            const stateKey = getAttachmentCardStateKey(msg.id, index);
-                            const stateEntry = imageCardState[stateKey];
-                            const alreadyCarded = !!stateEntry?.hasCard;
-                            return (
-                              <div key={index} className="group relative">
-                                {att.mimeType.startsWith('image/') ? (
-                                  <div className="relative rounded overflow-hidden border border-astro-border bg-black/30">
-                                    <img
-                                      src={att.previewUrl}
-                                      alt={att.fileName || `attachment-${index + 1}`}
-                                      className="h-24 w-auto object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                                      onClick={() =>
-                                        setPreviewImage({
-                                          src: att.previewUrl,
-                                          alt: att.fileName || `attachment-${index + 1}`,
-                                        })
+                    {/* Bubble */}
+                    <div className={`flex flex-col min-w-0 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <div className="flex items-center gap-2 mb-1 px-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                          {msg.role === 'user' ? 'Operator' : 'AI System'}
+                        </span>
+                        {msg.role === 'model' && msg.provider && (
+                          <span className="text-[10px] text-astro-off">
+                            {formatProviderLabel(msg.provider)}
+                            {msg.model && <span className="opacity-70"> :: {msg.model}</span>}
+                          </span>
+                        )}
+                        {msg.metrics?.duration && (
+                          <span className="text-[10px] text-astro-off opacity-50 font-mono">
+                            {(msg.metrics.duration / 1000).toFixed(1)}s
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        className={`rounded px-5 py-4 shadow-sm text-sm leading-relaxed overflow-hidden ${msg.role === 'user'
+                          ? 'bg-astro-hover/20 border border-astro-primary/30 text-white rounded-tr-none'
+                          : 'bg-astro-surface border border-astro-border text-gray-100 rounded-tl-none'
+                          }`}
+                      >
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div className="mb-4 flex flex-wrap gap-3">
+                            {msg.attachments.map((att, index) => {
+                              const stateKey = getAttachmentCardStateKey(msg.id, index);
+                              const stateEntry = imageCardState[stateKey];
+                              const alreadyCarded = !!stateEntry?.hasCard;
+                              return (
+                                <div key={index} className="group relative">
+                                  {att.mimeType.startsWith('image/') ? (
+                                    <div className="relative rounded overflow-hidden border border-astro-border bg-black/30">
+                                      <img
+                                        src={att.previewUrl}
+                                        alt={att.fileName || `attachment-${index + 1}`}
+                                        className="h-24 w-auto object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                                        onClick={() =>
+                                          setPreviewImage({
+                                            src: att.previewUrl,
+                                            alt: att.fileName || `attachment-${index + 1}`,
+                                          })
+                                        }
+                                      />
+                                      <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                                        <button
+                                          onClick={() => handleAddCardFromAttachment(msg, att, index)}
+                                          className={`group/btn flex items-center rounded backdrop-blur-sm border border-white/10 transition-all duration-300 ease-out overflow-hidden h-9 w-9 hover:w-[130px] p-0 ${alreadyCarded ? 'bg-green-500/90 text-black border-green-400' : 'bg-black/80 hover:bg-astro-primary text-astro-primary hover:text-black'}`}
+                                          title={alreadyCarded ? "Saved to Library" : "Save to Library"}
+                                        >
+                                          <div className="w-9 h-full flex items-center justify-center flex-none">
+                                            <rux-icon icon={alreadyCarded ? "check" : "add-to-photos"} size="small"></rux-icon>
+                                          </div>
+                                          <span className="text-xs font-bold whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity duration-200 pr-3">
+                                            {alreadyCarded ? "Saved" : "Save to Lib"}
+                                          </span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2 px-3 py-2 rounded border border-astro-border bg-astro-dark/50">
+                                      <rux-icon icon="insert-drive-file" size="small" className="text-astro-off"></rux-icon>
+                                      <div className="flex flex-col">
+                                        <span className="text-xs font-mono truncate max-w-[150px]">{att.fileName}</span>
+                                        <span className="text-[9px] text-astro-off uppercase">{att.mimeType.split('/')[1]}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="prose prose-invert prose-sm max-w-none prose-p:my-2 prose-pre:bg-astro-dark prose-pre:border prose-pre:border-astro-border">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            urlTransform={(uri) => (uri && uri.startsWith('data:') ? uri : uri)}
+                            components={{
+                              code: ({ node, inline, className, children, ...props }: any) => {
+                                return inline ? (
+                                  <code className="bg-astro-dark px-1.5 py-0.5 rounded text-astro-primary font-mono text-xs" {...props}>
+                                    {children}
+                                  </code>
+                                ) : (
+                                  <code className="block bg-astro-dark p-3 rounded border border-astro-border text-xs font-mono overflow-x-auto my-2" {...props}>
+                                    {children}
+                                  </code>
+                                );
+                              },
+                              img: ({ node, src, alt, title, ...props }: any) => {
+                                const [isHovered, setIsHovered] = useState(false);
+                                const [isCarded, setIsCarded] = useState(false);
+
+                                const handleDownload = () => {
+                                  if (!src) return;
+                                  const a = document.createElement('a');
+                                  a.href = src;
+                                  a.download = alt || `image-${Date.now()}.png`;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                };
+
+                                const handleCreateCard = async () => {
+                                  if (!src) return;
+                                  if (isCarded) return;
+
+                                  try {
+                                    let dataUrl = src;
+                                    let mimeType = 'image/png'; // Default
+
+                                    // If not a data URL, fetch it
+                                    if (!src.startsWith('data:')) {
+                                      const response = await fetch(src);
+                                      const blob = await response.blob();
+                                      mimeType = blob.type;
+                                      dataUrl = await new Promise<string>((resolve) => {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => resolve(reader.result as string);
+                                        reader.readAsDataURL(blob);
+                                      });
+                                    } else {
+                                      const match = src.match(/^data:(.*?);base64,/);
+                                      if (match) {
+                                        mimeType = match[1];
                                       }
+                                    }
+
+                                    const cardId = await createImageCard({
+                                      dataUrl,
+                                      mimeType,
+                                      source: 'markdown',
+                                      message: msg,
+                                      alt: alt || 'Generated Image',
+                                    });
+
+                                    if (cardId) {
+                                      setIsCarded(true);
+                                    }
+                                  } catch (err) {
+                                    console.error('Failed to create card from image:', err);
+                                  }
+                                };
+
+                                return (
+                                  <div
+                                    className="relative group inline-block max-w-full"
+                                    onMouseEnter={() => setIsHovered(true)}
+                                    onMouseLeave={() => setIsHovered(false)}
+                                  >
+                                    <img
+                                      src={src}
+                                      alt={alt}
+                                      title={title}
+                                      className="max-w-full h-auto rounded border border-astro-border cursor-pointer"
+                                      {...props}
+                                      onClick={() => setPreviewImage({ src, alt: alt || 'Image' })}
                                     />
-                                    <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className={`absolute top-2 right-2 flex gap-2 transition-all duration-200 ${isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none'}`}>
                                       <button
-                                        onClick={() => handleAddCardFromAttachment(msg, att, index)}
-                                        className="p-1 bg-astro-dark/80 rounded text-astro-primary hover:text-white"
-                                        title={alreadyCarded ? "Card Created" : "Create Card"}
+                                        onClick={(e) => { e.stopPropagation(); handleDownload(); }}
+                                        className="group/btn flex items-center bg-black/80 hover:bg-astro-primary text-astro-primary hover:text-black rounded backdrop-blur-sm border border-white/10 transition-all duration-300 ease-out overflow-hidden h-9 w-9 hover:w-[110px] p-0"
+                                        title="Download Image"
                                       >
-                                        <rux-icon icon={alreadyCarded ? "check" : "add-to-photos"} size="small"></rux-icon>
+                                        <div className="w-9 h-full flex items-center justify-center flex-none">
+                                          <rux-icon icon="get-app" size="small"></rux-icon>
+                                        </div>
+                                        <span className="text-xs font-bold whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity duration-200 pr-3">Download</span>
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleCreateCard(); }}
+                                        className={`group/btn flex items-center rounded backdrop-blur-sm border border-white/10 transition-all duration-300 ease-out overflow-hidden h-9 w-9 hover:w-[130px] p-0 ${isCarded ? 'bg-green-500/90 text-black border-green-400' : 'bg-black/80 hover:bg-astro-primary text-astro-primary hover:text-black'}`}
+                                        title={isCarded ? "Saved to Library" : "Save to Library"}
+                                      >
+                                        <div className="w-9 h-full flex items-center justify-center flex-none">
+                                          <rux-icon icon={isCarded ? "check" : "add-to-photos"} size="small"></rux-icon>
+                                        </div>
+                                        <span className="text-xs font-bold whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity duration-200 pr-3">
+                                          {isCarded ? "Saved" : "Save to Lib"}
+                                        </span>
                                       </button>
                                     </div>
                                   </div>
-                                ) : (
-                                  <div className="flex items-center gap-2 px-3 py-2 rounded border border-astro-border bg-astro-dark/50">
-                                    <rux-icon icon="insert-drive-file" size="small" className="text-astro-off"></rux-icon>
-                                    <div className="flex flex-col">
-                                      <span className="text-xs font-mono truncate max-w-[150px]">{att.fileName}</span>
-                                      <span className="text-[9px] text-astro-off uppercase">{att.mimeType.split('/')[1]}</span>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                                );
+                              }
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
                         </div>
-                      )}
-                      <div className="prose prose-invert prose-sm max-w-none prose-p:my-2 prose-pre:bg-astro-dark prose-pre:border prose-pre:border-astro-border">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          urlTransform={(uri) => (uri && uri.startsWith('data:') ? uri : uri)}
-                          components={{
-                            code: ({ node, inline, className, children, ...props }: any) => {
-                              return inline ? (
-                                <code className="bg-astro-dark px-1.5 py-0.5 rounded text-astro-primary font-mono text-xs" {...props}>
-                                  {children}
-                                </code>
-                              ) : (
-                                <code className="block bg-astro-dark p-3 rounded border border-astro-border text-xs font-mono overflow-x-auto my-2" {...props}>
-                                  {children}
-                                </code>
-                              );
-                            },
-                            img: ({ node, src, alt, title, ...props }: any) => {
-                              const [isHovered, setIsHovered] = useState(false);
-                              const [isCarded, setIsCarded] = useState(false);
-
-                              const handleDownload = () => {
-                                if (!src) return;
-                                const a = document.createElement('a');
-                                a.href = src;
-                                a.download = alt || `image-${Date.now()}.png`;
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                              };
-
-                              const handleCreateCard = async () => {
-                                if (!src) return;
-                                if (isCarded) return;
-
-                                try {
-                                  let dataUrl = src;
-                                  let mimeType = 'image/png'; // Default
-
-                                  // If not a data URL, fetch it
-                                  if (!src.startsWith('data:')) {
-                                    const response = await fetch(src);
-                                    const blob = await response.blob();
-                                    mimeType = blob.type;
-                                    dataUrl = await new Promise<string>((resolve) => {
-                                      const reader = new FileReader();
-                                      reader.onloadend = () => resolve(reader.result as string);
-                                      reader.readAsDataURL(blob);
-                                    });
-                                  } else {
-                                    const match = src.match(/^data:(.*?);base64,/);
-                                    if (match) {
-                                      mimeType = match[1];
-                                    }
-                                  }
-
-                                  const cardId = await createImageCard({
-                                    dataUrl,
-                                    mimeType,
-                                    source: 'markdown',
-                                    message: msg,
-                                    alt: alt || 'Generated Image',
-                                  });
-
-                                  if (cardId) {
-                                    setIsCarded(true);
-                                  }
-                                } catch (err) {
-                                  console.error('Failed to create card from image:', err);
-                                }
-                              };
-
-                              return (
-                                <div
-                                  className="relative group inline-block max-w-full"
-                                  onMouseEnter={() => setIsHovered(true)}
-                                  onMouseLeave={() => setIsHovered(false)}
-                                >
-                                  <img
-                                    src={src}
-                                    alt={alt}
-                                    title={title}
-                                    className="max-w-full h-auto rounded border border-astro-border"
-                                    {...props}
-                                    onClick={() => setPreviewImage({ src, alt: alt || 'Image' })}
-                                  />
-                                  <div className={`absolute top-2 right-2 flex gap-2 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleDownload(); }}
-                                      className="p-1.5 bg-black/70 hover:bg-black/90 text-white rounded backdrop-blur-sm border border-white/20"
-                                      title="Download"
-                                    >
-                                      <rux-icon icon="file-download" size="small"></rux-icon>
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleCreateCard(); }}
-                                      className={`p-1.5 rounded backdrop-blur-sm border border-white/20 ${isCarded ? 'bg-astro-primary text-black' : 'bg-black/70 hover:bg-black/90 text-white'}`}
-                                      title={isCarded ? "Card Created" : "Create Card"}
-                                    >
-                                      <rux-icon icon={isCarded ? "check" : "add-to-photos"} size="small"></rux-icon>
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            }
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
           {isLoading && (
             <div className="flex justify-start">
@@ -1000,8 +1073,12 @@ const Chat: React.FC = () => {
                 <div className="flex-none w-8 h-8 rounded bg-astro-surface border border-astro-border text-astro-primary flex items-center justify-center mt-1">
                   <rux-icon icon="processor" size="small"></rux-icon>
                 </div>
-                <div className="bg-astro-surface border border-astro-border rounded px-4 py-3 rounded-tl-none">
-                  <rux-progress type="indeterminate"></rux-progress>
+                <div className="bg-astro-surface border border-astro-border rounded px-4 py-3 rounded-tl-none flex items-center gap-3">
+                  <rux-progress type="indeterminate" className="w-24"></rux-progress>
+                  <div className="flex items-center gap-2 text-astro-primary font-mono text-xs border-l border-astro-border pl-3">
+                    <rux-icon icon="timer" size="extra-small"></rux-icon>
+                    {startTimeRef.current && <ElapsedTime startTime={startTimeRef.current} />}
+                  </div>
                 </div>
               </div>
             </div>

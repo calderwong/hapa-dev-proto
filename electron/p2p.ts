@@ -133,3 +133,19 @@ export async function readCore(name: string, options: { start?: number; end?: nu
 
     return entries;
 }
+
+export async function getP2PStats() {
+    if (!swarm) return { peers: 0, publicKey: undefined };
+
+    // Try to get key from card-library core if available
+    let publicKey: string | undefined;
+    const core = cores.get('card-library');
+    if (core) {
+        publicKey = b4a.toString(core.key, 'hex');
+    }
+
+    return {
+        peers: swarm.connections.size,
+        publicKey
+    };
+}

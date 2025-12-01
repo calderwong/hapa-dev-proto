@@ -99,3 +99,54 @@
 
 **Tags:** #feature #audio #ux
 **Est. Avg. Human Dev Time:** 0.75 hours
+
+## Entry 9 – Profile Page & System Stats
+**Prompt:** "Create a plan for a 'Profile Page' accessible via the current 'Profile' icon... And then implement using Astros' paradigm and your design philosophy."
+
+**Summary of actions:**
+- **Backend:**
+    - Implemented `get-profile` and `save-profile` IPC handlers using `electron-store`.
+    - Implemented `get-system-stats` IPC to aggregate storage usage, card/wiki counts, and P2P connectivity status.
+    - Added `getP2PStats` helper in `p2p.ts` to expose swarm peer count and public key.
+- **Frontend:**
+    - Created `src/pages/Profile.tsx` using Astro UXDS components (`rux-card`, `rux-input`, `rux-textarea`).
+    - Designed a dashboard layout featuring:
+        - **Identity:** Avatar, Display Name, and "Neural Persona" context field.
+        - **Network:** Live P2P swarm status and Public Key display.
+        - **Stats:** Visual counters for Cards, Wiki Nodes, and Storage usage.
+    - Wired the top-right profile icon in `Layout.tsx` to the new `/profile` route.
+
+**Tags:** #feature #ui #astro #profile #p2p
+**Est. Avg. Human Dev Time:** 2.0 hours
+
+## Entry 10 – Profile Image Upload & Hypercore Integration
+**Prompt:** "Can you make it so I can add a profile picture that creates a card and a hypercore. If I add another profile picture, update that hypercore with the new one vs. creating a new one though."
+
+**Summary of actions:**
+- **Backend (`electron/main.ts`):**
+    - Implemented `save-profile-image` IPC handler.
+    - Logic to check for an existing `profileCardId` in the user profile.
+    - If existing, reuses the Hypercore to append the new image card record (maintaining history).
+    - If new, creates a new Hypercore and appends it to the main `card-library` index.
+    - Saves image binary to `userData/wormhole/` and updates the profile with the local file path.
+- **Frontend (`src/pages/Profile.tsx`):**
+    - Added a hidden file input triggered by clicking the avatar.
+    - Implemented image upload handler that reads the file as Base64 and calls the backend.
+    - Added visual feedback (hover overlay with upload icon) to the avatar component.
+    - **Drag & Drop:** Added `onDragOver`, `onDragLeave`, and `onDrop` handlers to the avatar container to support dragging image files directly onto the profile picture area.
+- **Types:** Updated `UserProfile` to track `profileCardId`.
+
+**Tags:** #feature #profile #hypercore #p2p #images #ux
+**Est. Avg. Human Dev Time:** 1.25 hours
+
+## Entry 11 – Pet Forge Refinement & Chat Image Overlay
+**Prompt:** "Chat Image Hover Overlay", "Pet Forge UI refinements"
+
+**Summary of actions:**
+- **Pet Forge:** Refined chassis slot layout to prevent bleeding, implemented asset filtering to show only relevant sprite animations, added hover tooltips for asset names, and automated 'sprite' tagging for generated GIFs to ensure immediate availability.
+- **Chat UI:** Overhauled the image hover experience for both AI-generated images and file attachments. Replaced static overlay with expanding, interactive buttons (Download, Save to Library).
+- **Polish:** Implemented a robust flexbox-based button layout to ensure pixel-perfect icon centering in the collapsed state and smooth expansion on hover, addressing user feedback on visual alignment.
+- **Protocol:** Recorded a Rose for the user (for identifying the visual misalignment) and a Banana for the assistant (for the final implementation) in the project's `APPLES` logs.
+
+**Tags:** #feature #ui #ux #pet-forge #chat #polish
+**Est. Avg. Human Dev Time:** 1.5 hours

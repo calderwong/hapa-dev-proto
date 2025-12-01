@@ -45,6 +45,19 @@ const Wormhole: React.FC = () => {
     const [overrideSummarizationModel, setOverrideSummarizationModel] = useState('');
     const [overrideKeyTermsModel, setOverrideKeyTermsModel] = useState('');
     const [overrideWikiModel, setOverrideWikiModel] = useState('');
+    const [activeRun, setActiveRun] = useState<{
+        cardId: string;
+        step: 'transcription' | 'summarization' | 'keyTerms' | 'wikiUpdate';
+    } | null>(null);
+
+    const emitWormholeRunEvent = (
+        type: 'start' | 'end',
+        step: 'transcription' | 'summarization' | 'keyTerms' | 'wikiUpdate',
+    ) => {
+        if (typeof window === 'undefined') return;
+        const eventName = type === 'start' ? 'wormhole-run-start' : 'wormhole-run-end';
+        window.dispatchEvent(new CustomEvent(eventName, { detail: { step } }));
+    };
 
     const loadGlobalIngests = async () => {
         if (typeof window === 'undefined' || !window.electronAPI || !window.electronAPI.p2pRead) {
@@ -317,6 +330,8 @@ const Wormhole: React.FC = () => {
         }
 
         setError(null);
+        setActiveRun({ cardId: item.cardId, step: 'transcription' });
+        emitWormholeRunEvent('start', 'transcription');
         try {
             const result = await window.electronAPI.wormholeRunTranscription({
                 cardId: item.cardId,
@@ -340,6 +355,11 @@ const Wormhole: React.FC = () => {
                         : entry,
                 ),
             );
+        } finally {
+            setActiveRun((prev) =>
+                prev && prev.cardId === item.cardId && prev.step === 'transcription' ? null : prev,
+            );
+            emitWormholeRunEvent('end', 'transcription');
         }
     };
 
@@ -350,6 +370,8 @@ const Wormhole: React.FC = () => {
         }
 
         setError(null);
+        setActiveRun({ cardId: item.cardId, step: 'wikiUpdate' });
+        emitWormholeRunEvent('start', 'wikiUpdate');
         try {
             const result = await window.electronAPI.wormholeRunWikiUpdate({
                 cardId: item.cardId,
@@ -374,6 +396,11 @@ const Wormhole: React.FC = () => {
                         : entry,
                 ),
             );
+        } finally {
+            setActiveRun((prev) =>
+                prev && prev.cardId === item.cardId && prev.step === 'wikiUpdate' ? null : prev,
+            );
+            emitWormholeRunEvent('end', 'wikiUpdate');
         }
     };
 
@@ -393,6 +420,8 @@ const Wormhole: React.FC = () => {
         }
 
         setError(null);
+        setActiveRun({ cardId: item.cardId, step: 'summarization' });
+        emitWormholeRunEvent('start', 'summarization');
         try {
             const result = await window.electronAPI.wormholeRunSummarization({
                 cardId: item.cardId,
@@ -417,6 +446,11 @@ const Wormhole: React.FC = () => {
                         : entry,
                 ),
             );
+        } finally {
+            setActiveRun((prev) =>
+                prev && prev.cardId === item.cardId && prev.step === 'summarization' ? null : prev,
+            );
+            emitWormholeRunEvent('end', 'summarization');
         }
     };
 
@@ -427,6 +461,8 @@ const Wormhole: React.FC = () => {
         }
 
         setError(null);
+        setActiveRun({ cardId: item.cardId, step: 'keyTerms' });
+        emitWormholeRunEvent('start', 'keyTerms');
         try {
             const result = await window.electronAPI.wormholeRunKeyTerms({
                 cardId: item.cardId,
@@ -451,6 +487,11 @@ const Wormhole: React.FC = () => {
                         : entry,
                 ),
             );
+        } finally {
+            setActiveRun((prev) =>
+                prev && prev.cardId === item.cardId && prev.step === 'keyTerms' ? null : prev,
+            );
+            emitWormholeRunEvent('end', 'keyTerms');
         }
     };
 
@@ -710,9 +751,20 @@ const Wormhole: React.FC = () => {
                                             <SecondaryButton
                                                 type="button"
                                                 onClick={() => handleTranscribe(item)}
-                                                className="px-3 py-1.5 text-xs"
+                                                disabled={!!activeRun}
+                                                className={`px-3 py-1.5 text-xs ${
+                                                    activeRun &&
+                                                    activeRun.cardId === item.cardId &&
+                                                    activeRun.step === 'transcription'
+                                                        ? 'animate-pulse'
+                                                        : ''
+                                                }`}
                                             >
-                                                Run transcription
+                                                {activeRun &&
+                                                activeRun.cardId === item.cardId &&
+                                                activeRun.step === 'transcription'
+                                                    ? 'Running transcription…'
+                                                    : 'Run transcription'}
                                             </SecondaryButton>
                                         )}
                                         {(item.mediaType === 'audio' ||
@@ -721,24 +773,57 @@ const Wormhole: React.FC = () => {
                                             <SecondaryButton
                                                 type="button"
                                                 onClick={() => handleSummarize(item)}
-                                                className="px-3 py-1.5 text-xs"
+                                                disabled={!!activeRun}
+                                                className={`px-3 py-1.5 text-xs ${
+                                                    activeRun &&
+                                                    activeRun.cardId === item.cardId &&
+                                                    activeRun.step === 'summarization'
+                                                        ? 'animate-pulse'
+                                                        : ''
+                                                }`}
                                             >
-                                                Run summarization
+                                                {activeRun &&
+                                                activeRun.cardId === item.cardId &&
+                                                activeRun.step === 'summarization'
+                                                    ? 'Running summarization…'
+                                                    : 'Run summarization'}
                                             </SecondaryButton>
                                         )}
                                         <SecondaryButton
                                             type="button"
                                             onClick={() => handleKeyTerms(item)}
-                                            className="px-3 py-1.5 text-xs"
+                                            disabled={!!activeRun}
+                                            className={`px-3 py-1.5 text-xs ${
+                                                activeRun &&
+                                                activeRun.cardId === item.cardId &&
+                                                activeRun.step === 'keyTerms'
+                                                    ? 'animate-pulse'
+                                                    : ''
+                                            }`}
                                         >
-                                            Run key terms
+                                            {activeRun &&
+                                            activeRun.cardId === item.cardId &&
+                                            activeRun.step === 'keyTerms'
+                                                ? 'Running key terms…'
+                                                : 'Run key terms'}
                                         </SecondaryButton>
                                         <SecondaryButton
                                             type="button"
                                             onClick={() => handleWikiUpdate(item)}
-                                            className="px-3 py-1.5 text-xs"
+                                            disabled={!!activeRun}
+                                            className={`px-3 py-1.5 text-xs ${
+                                                activeRun &&
+                                                activeRun.cardId === item.cardId &&
+                                                activeRun.step === 'wikiUpdate'
+                                                    ? 'animate-pulse'
+                                                    : ''
+                                            }`}
                                         >
-                                            Run wiki update
+                                            {activeRun &&
+                                            activeRun.cardId === item.cardId &&
+                                            activeRun.step === 'wikiUpdate'
+                                                ? 'Running wiki update…'
+                                                : 'Run wiki update'}
                                         </SecondaryButton>
                                         <SecondaryButton
                                             type="button"

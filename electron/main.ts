@@ -7,7 +7,7 @@ import { spawn, ChildProcess } from 'child_process';
 import isDev from 'electron-is-dev';
 import Store from 'electron-store';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { initP2P, createCore, appendToCore, readCore, getCoreLength } from './p2p';
+import { initP2P, createCore, appendToCore, readCore, getCoreLength, getP2PStats } from './p2p';
 
 const store: any = new Store();
 
@@ -939,7 +939,7 @@ const extractKeyTermsWithGemini = async (
 };
 
 const getAppIconPath = () => {
-  const base = isDev ? '../public' : '../dist';
+  const base = isDev ? '../public' : '../dist-renderer';
   return path.join(__dirname, base, 'hapa-cat.png');
 };
 
@@ -961,7 +961,7 @@ function createWindow() {
     win.loadURL('http://localhost:5173');
     // win.webContents.openDevTools(); // Disabled automatic opening
   } else {
-    win.loadFile(path.join(__dirname, '../dist/index.html'));
+    win.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
   }
 }
 
@@ -1464,10 +1464,14 @@ app.whenReady().then(() => {
         ): any[] =>
           items
             .filter((item) => item.content && item.content.trim().length > 0)
-            .map((item) => ({
-              role: item.role === 'model' ? 'model' : 'user',
-              parts: [{ text: item.content }],
-            }));
+            .map((item) => {
+              // Strip base64 images from history to avoid token limits
+              const sanitized = item.content.replace(/!\[.*?\]\(data:image\/.*?;base64,.*?\)/g, '[Generated Image]');
+              return {
+                role: item.role === 'model' ? 'model' : 'user',
+                parts: [{ text: sanitized }],
+              };
+            });
 
         const sendMessageWithRetry = async (
           currentHistory: { role: string; content: string }[],
@@ -1482,9 +1486,11 @@ app.whenReady().then(() => {
             // can reliably access inlineData image bytes.
             if (isImageModel) {
               const textContext = currentHistory
-                .map((item) =>
-                  `${item.role === 'model' ? 'Assistant' : 'User'}: ${item.content}`,
-                )
+                .map((item) => {
+                  // Strip base64 images from history to avoid token limits
+                  const sanitized = item.content.replace(/!\[.*?\]\(data:image\/.*?;base64,.*?\)/g, '[Generated Image]');
+                  return `${item.role === 'model' ? 'Assistant' : 'User'}: ${sanitized}`;
+                })
                 .join('\n');
 
               const prompt =
@@ -3111,6 +3117,153 @@ app.whenReady().then(() => {
 
   ipcMain.handle('p2p-get-length', async (_event, name: string) => {
     return getCoreLength(name);
+  });
+
+  // Profile & System Stats IPC
+  ipcMain.handle('get-profile', async () => {
+    return store.get('userProfile', { displayName: 'Anon Node', bio: '' });
+  });
+
+  ipcMain.handle('save-profile', async (_event, profile: any) => {
+    store.set('userProfile', profile);
+    return true;
+  });
+
+  ipcMain.handle('save-profile-image', async (_event, payload: { bytesBase64: string; mimeType: string }) => {
+    const { bytesBase64, mimeType } = payload;
+    if (!bytesBase64) throw new Error('No image data provided');
+
+    // 1. Get current profile to check for existing card
+    const currentProfile = store.get('userProfile', {}) as any;
+    let cardId = currentProfile.profileCardId;
+    let isNewCard = false;
+
+    if (!cardId) {
+      cardId = `card-profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      isNewCard = true;
+    }
+
+    // 2. Save image to disk
+    const userDataDir = app.getPath('userData');
+    const wormholeDir = path.join(userDataDir, 'wormhole');
+    await fs.promises.mkdir(wormholeDir, { recursive: true });
+
+    const ext = mimeType.split('/')[1] || 'png';
+    const fileName = `profile-${Date.now()}.${ext}`;
+    const targetPath = path.join(wormholeDir, fileName);
+    const buffer = Buffer.from(bytesBase64, 'base64');
+    await fs.promises.writeFile(targetPath, buffer);
+
+    // 3. Create Card Record
+    const now = new Date().toISOString();
+    const coreInfo = await createCore(cardId); // Create or load existing core
+
+    const cardRecord = {
+      type: 'card',
+      cardType: 'agent-profile', // Special type
+      kind: 'image',
+      id: cardId,
+      createdAt: now,
+      updatedAt: now,
+      title: 'Agent Profile Picture',
+      mediaType: 'image',
+      source: 'user-upload',
+      provider: 'local',
+      tags: ['agent-profile'],
+      image: {
+        localPath: targetPath,
+        mimeType,
+      },
+      core: {
+        name: cardId,
+        key: coreInfo.key,
+        discoveryKey: coreInfo.discoveryKey,
+        length: coreInfo.length,
+      },
+    };
+
+    // 4. Append to Card Core
+    await appendToCore(cardId, JSON.stringify(cardRecord));
+
+    // 5. If new, append to Card Library
+    if (isNewCard) {
+      await createCore(CARD_LIBRARY_CORE_NAME);
+      const libraryEntry = {
+        type: 'card-index',
+        cardId: cardId,
+        createdAt: now,
+        provider: 'local',
+        coreName: cardId,
+        coreKey: coreInfo.key,
+        coreDiscoveryKey: coreInfo.discoveryKey,
+        tags: ['agent-profile'],
+      };
+      await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+    }
+
+    // 6. Update Profile
+    const imageUrl = `file://${targetPath.replace(/\\/g, '/')}`;
+    const newProfile = {
+      ...currentProfile,
+      profileCardId: cardId,
+      avatarUrl: imageUrl,
+    };
+    store.set('userProfile', newProfile);
+
+    return { cardId, imageUrl };
+  });
+
+  ipcMain.handle('get-system-stats', async () => {
+    // 1. Storage usage
+    let storageUsageBytes = 0;
+    try {
+      // Simple recursive size
+      const getDirSize = async (dir: string): Promise<number> => {
+        const files = await fs.promises.readdir(dir, { withFileTypes: true });
+        let size = 0;
+        for (const file of files) {
+          const filePath = path.join(dir, file.name);
+          if (file.isDirectory()) {
+            size += await getDirSize(filePath);
+          } else {
+            const stat = await fs.promises.stat(filePath);
+            size += stat.size;
+          }
+        }
+        return size;
+      };
+      // storage dir is relative to where main.ts runs? 
+      // In dev: electron/main.ts -> storage/ is in root.
+      // In prod: resources/app/storage? 
+      // For now, assume './storage' relative to CWD which is project root in dev.
+      storageUsageBytes = await getDirSize('./storage').catch(() => 0);
+    } catch {
+      // ignore
+    }
+
+    // 2. Counts
+    let cardCount = 0;
+    let wikiEntryCount = 0;
+    let wormholeRunCount = 0; // Not easily tracked without scanning all cards, skip for now or approx
+
+    try {
+      cardCount = await getCoreLength(CARD_LIBRARY_CORE_NAME).catch(() => 0);
+      wikiEntryCount = await getCoreLength(WIKI_CORE_NAME).catch(() => 0);
+    } catch {
+      // ignore
+    }
+
+    // 3. P2P Stats
+    const p2pStats = await getP2PStats();
+
+    return {
+      storageUsageBytes,
+      cardCount,
+      wikiEntryCount,
+      wormholeRunCount,
+      p2pPeers: p2pStats.peers,
+      p2pPublicKey: p2pStats.publicKey,
+    };
   });
 
   // Initialize P2P and optionally auto-start local llama.cpp server, then open the window

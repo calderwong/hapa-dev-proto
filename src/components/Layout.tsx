@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     { path: '/p2p', label: 'P2P Network', icon: 'device-hub' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
     { path: '/admin', label: 'Admin', icon: 'security' },
+    { path: '/pets', label: 'Sanctuary', icon: 'pets' },
 ];
 
 const SystemClock = () => {
@@ -94,6 +95,24 @@ const Layout: React.FC = () => {
     const wormholeLabel = wormholeBusy
         ? `WH:${String(wormholeActivity.lastStep || 'RUN').toUpperCase()}`
         : 'WH:IDLE';
+
+    const [userAvatar, setUserAvatar] = React.useState<string | null>(null);
+
+    const loadProfile = async () => {
+        if (window.electronAPI?.getProfile) {
+            const profile = await window.electronAPI.getProfile();
+            if (profile?.avatarUrl) {
+                setUserAvatar(profile.avatarUrl);
+            }
+        }
+    };
+
+    React.useEffect(() => {
+        loadProfile();
+        const handleUpdate = () => loadProfile();
+        window.addEventListener('user-profile-update', handleUpdate);
+        return () => window.removeEventListener('user-profile-update', handleUpdate);
+    }, []);
 
     const handleMuteToggle = () => {
         const newState = toggleMute();
@@ -263,11 +282,10 @@ const Layout: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-1.5" title="Wormhole Activity">
                                 <span
-                                    className={`w-1.5 h-1.5 rounded-full ${
-                                        wormholeBusy
-                                            ? 'bg-emerald-400 animate-pulse shadow-[0_0_4px_rgba(16,185,129,0.7)]'
-                                            : 'bg-gray-600'
-                                    }`}
+                                    className={`w-1.5 h-1.5 rounded-full ${wormholeBusy
+                                        ? 'bg-emerald-400 animate-pulse shadow-[0_0_4px_rgba(16,185,129,0.7)]'
+                                        : 'bg-gray-600'
+                                        }`}
                                 ></span>
                                 <span className="tracking-wider">{wormholeLabel}</span>
                             </div>
@@ -284,10 +302,10 @@ const Layout: React.FC = () => {
                                 className="flex items-center gap-1.5 hover:text-white transition-colors"
                                 title={isMuted ? "Unmute Audio" : "Mute Audio"}
                             >
-                                <rux-icon 
+                                <rux-icon
                                     key={isMuted ? 'mute' : 'vol'}
-                                    icon={isMuted ? "volume-mute" : "volume-up"} 
-                                    size="extra-small" 
+                                    icon={isMuted ? "volume-mute" : "volume-up"}
+                                    size="extra-small"
                                     className={`transition-colors ${isMuted ? 'text-gray-600' : 'text-astro-primary'}`}
                                 ></rux-icon>
                             </button>
@@ -303,11 +321,15 @@ const Layout: React.FC = () => {
                         <SystemClock />
 
                         <div className="flex items-center gap-3 border-l border-gray-700 pl-4">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-astro-primary to-purple-600 p-[1px]">
-                                <div className="w-full h-full rounded-full bg-gray-900 flex items-center justify-center">
-                                    <rux-icon icon="person" size="small" className="text-white"></rux-icon>
+                            <Link to="/profile" className="w-8 h-8 rounded-full bg-gradient-to-tr from-astro-primary to-purple-600 p-[1px] hover:scale-105 transition-transform cursor-pointer">
+                                <div className="w-full h-full rounded-full bg-gray-900 flex items-center justify-center overflow-hidden">
+                                    {userAvatar ? (
+                                        <img src={userAvatar} alt="Profile" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <rux-icon icon="person" size="small" className="text-white"></rux-icon>
+                                    )}
                                 </div>
-                            </div>
+                            </Link>
                         </div>
                     </div>
                 </rux-global-status-bar>

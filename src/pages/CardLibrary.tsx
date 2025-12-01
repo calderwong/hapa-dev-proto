@@ -21,6 +21,9 @@ interface CardIndexEntry {
     mediaLocalPath?: string;
     mediaRemoteUrl?: string;
     mediaMimeType?: string;
+    mediaMimeType?: string;
+    subType?: string;
+    derivedGif?: { localPath: string; cardId: string };
     cardRecord?: any;
 }
 
@@ -46,6 +49,9 @@ const CardLibrary: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [wormholeActionPending, setWormholeActionPending] = useState(false);
+    const [activeWormholeStep, setActiveWormholeStep] = useState<'summarization' | 'keyTerms' | 'wikiUpdate' | null>(
+        null,
+    );
     const [overrideSummarizationModel, setOverrideSummarizationModel] = useState('');
     const [overrideKeyTermsModel, setOverrideKeyTermsModel] = useState('');
     const [overrideWikiModel, setOverrideWikiModel] = useState('');
@@ -58,6 +64,15 @@ const CardLibrary: React.FC = () => {
     const [draggedCard, setDraggedCard] = useState<CardIndexEntry | null>(null);
     const [isOverDropZone, setIsOverDropZone] = useState(false);
     const [activeWorkspaceCard, setActiveWorkspaceCard] = useState<CardIndexEntry | null>(null);
+
+    const emitWormholeRunEvent = (
+        type: 'start' | 'end',
+        step: 'summarization' | 'keyTerms' | 'wikiUpdate',
+    ) => {
+        if (typeof window === 'undefined') return;
+        const eventName = type === 'start' ? 'wormhole-run-start' : 'wormhole-run-end';
+        window.dispatchEvent(new CustomEvent(eventName, { detail: { step } }));
+    };
 
     const enrichWithCardRecords = async (entries: CardIndexEntry[]): Promise<CardIndexEntry[]> => {
         if (!window.electronAPI || !window.electronAPI.p2pRead) {
@@ -123,6 +138,8 @@ const CardLibrary: React.FC = () => {
                         mediaLocalPath,
                         mediaRemoteUrl,
                         mediaMimeType,
+                        subType: cardRecord.subType,
+                        derivedGif: cardRecord.derivedGif,
                         cardRecord,
                     };
                 } catch {
@@ -392,6 +409,8 @@ const CardLibrary: React.FC = () => {
         try {
             setError(null);
             setWormholeActionPending(true);
+            setActiveWormholeStep(step);
+            emitWormholeRunEvent('start', step);
 
             if (step === 'summarization') {
                 await window.electronAPI.wormholeRunSummarization!({ cardId, overrideModel } as any);
@@ -408,6 +427,8 @@ const CardLibrary: React.FC = () => {
             setError(e?.message || 'Wormhole processing failed.');
         } finally {
             setWormholeActionPending(false);
+            setActiveWormholeStep(null);
+            emitWormholeRunEvent('end', step);
         }
     };
 
@@ -557,7 +578,8 @@ const CardLibrary: React.FC = () => {
                 url: activeWorkspaceCard.mediaRemoteUrl || toFileUrl(activeWorkspaceCard.mediaLocalPath),
                 imageUrl: activeWorkspaceCard.mediaRemoteUrl || toFileUrl(activeWorkspaceCard.mediaLocalPath),
                 tags: activeWorkspaceCard.cardRecord?.tags || []
-            }
+            },
+            coreName: activeWorkspaceCard.coreName || activeWorkspaceCard.cardId
         };
 
         return (
@@ -701,6 +723,12 @@ const CardLibrary: React.FC = () => {
 
                                                 return (
                                                     <div className="flex items-center gap-2 mr-2 border-r border-gray-700 pr-2">
+                                                        {card.subType === 'sprite-sheet' && (
+                                                            <div className="flex items-center gap-1 text-pink-400" title="Sprite Sheet">
+                                                                <rux-icon icon="animation" size="extra-small"></rux-icon>
+                                                                <span className="text-[10px] font-mono font-bold">GIF</span>
+                                                            </div>
+                                                        )}
                                                         {summaryCount > 0 && (
                                                             <div className="flex items-center gap-1 text-cyan-400" title={`${summaryCount} Summaries`}>
                                                                 <rux-icon icon="subject" size="extra-small"></rux-icon>
@@ -762,6 +790,8 @@ const CardLibrary: React.FC = () => {
                                     <span className="text-sm font-mono text-gray-400 uppercase tracking-widest">Card Inspector</span>
                                 </div>
                                 <button
+                                    type="button"
+                                    aria-label="Close card inspector"
                                     onClick={() => setSelected(null)}
                                     className="text-gray-500 hover:text-white transition-colors"
                                 >
@@ -797,6 +827,8 @@ const CardLibrary: React.FC = () => {
                                                                 {selected.name || 'Untitled Card'}
                                                             </h1>
                                                             <button
+                                                                type="button"
+                                                                aria-label="Edit card name"
                                                                 onClick={() => setIsEditingName(true)}
                                                                 className="opacity-0 group-hover/name:opacity-100 text-gray-500 hover:text-purple-400 transition-all"
                                                             >
@@ -863,14 +895,62 @@ const CardLibrary: React.FC = () => {
                                                 </div>
 
                                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-                                                    <rux-button size="small" secondary onClick={() => runWormholeStep('summarization')} disabled={wormholeActionPending}>
-                                                        Run Summarization
+                                                    <rux-button
+                                                        size="small"
+                                                        secondary
+                                                        onClick={() => runWormholeStep('summarization')}
+                                                        disabled={wormholeActionPending}
+                                                    >
+                                                        {wormholeActionPending && activeWormholeStep === 'summarization' ? (
+                                                            <>
+                                                                <rux-icon
+                                                                    icon="sync"
+                                                                    size="extra-small"
+                                                                    className="animate-spin mr-1"
+                                                                ></rux-icon>
+                                                                Running…
+                                                            </>
+                                                        ) : (
+                                                            'Run Summarization'
+                                                        )}
                                                     </rux-button>
-                                                    <rux-button size="small" secondary onClick={() => runWormholeStep('keyTerms')} disabled={wormholeActionPending}>
-                                                        Run Key Terms
+                                                    <rux-button
+                                                        size="small"
+                                                        secondary
+                                                        onClick={() => runWormholeStep('keyTerms')}
+                                                        disabled={wormholeActionPending}
+                                                    >
+                                                        {wormholeActionPending && activeWormholeStep === 'keyTerms' ? (
+                                                            <>
+                                                                <rux-icon
+                                                                    icon="sync"
+                                                                    size="extra-small"
+                                                                    className="animate-spin mr-1"
+                                                                ></rux-icon>
+                                                                Running…
+                                                            </>
+                                                        ) : (
+                                                            'Run Key Terms'
+                                                        )}
                                                     </rux-button>
-                                                    <rux-button size="small" secondary onClick={() => runWormholeStep('wikiUpdate')} disabled={wormholeActionPending}>
-                                                        Run Wiki Update
+                                                    <rux-button
+                                                        size="small"
+                                                        secondary
+                                                        onClick={() => runWormholeStep('wikiUpdate')}
+                                                        disabled={wormholeActionPending}
+                                                    >
+                                                        {wormholeActionPending && activeWormholeStep === 'wikiUpdate' ? (
+                                                            <>
+                                                                <rux-icon
+                                                                    icon="sync"
+                                                                    size="extra-small"
+                                                                    className="animate-spin mr-1"
+                                                                ></rux-icon>
+                                                                Running…
+                                                            </>
+                                                        ) : (
+                                                            'Run Wiki Update'
+                                                        )}
                                                     </rux-button>
                                                 </div>
                                             </div>

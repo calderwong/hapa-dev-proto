@@ -448,6 +448,28 @@ export interface ElectronAPI {
     wormholeRunWikiUpdate?: (params: WormholeRunStepParams) => Promise<WormholeRunStepResult>;
     wormholeGetStatus?: (params: WormholeStatusQuery) => Promise<WormholeStatus>;
     wormholeGetDerivedArtifacts?: (params: { cardId: string }) => Promise<WormholeDerivedArtifacts>;
+    wormholeGetWikiIndex?: () => Promise<{ entryList: any[]; metaMap: any }>;
+    toggleDevTools?: () => Promise<void>;
+    getProfile?: () => Promise<UserProfile>;
+    saveProfile?: (profile: UserProfile) => Promise<boolean>;
+    saveProfileImage?: (params: { bytesBase64: string; mimeType: string }) => Promise<{ cardId: string; imageUrl: string }>;
+    getSystemStats?: () => Promise<SystemStats>;
+}
+
+export interface UserProfile {
+    displayName: string;
+    avatarUrl?: string;
+    bio?: string;
+    profileCardId?: string;
+}
+
+export interface SystemStats {
+    storageUsageBytes: number;
+    cardCount: number;
+    wikiEntryCount: number;
+    wormholeRunCount: number;
+    p2pPeers: number;
+    p2pPublicKey?: string;
 }
 
 declare global {

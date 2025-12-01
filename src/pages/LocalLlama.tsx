@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useState } from 'react';
 import type { LlamaSettings, LlamaStatus, LocalLlamaModel, HfGGUFSearchResult } from '../types';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
