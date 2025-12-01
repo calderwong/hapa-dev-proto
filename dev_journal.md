@@ -150,3 +150,36 @@
 
 **Tags:** #feature #ui #ux #pet-forge #chat #polish
 **Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 12 – Pet Forge Module Behavior Implementation
+**Prompt:** "Make sure the 'Module' behavior is wired up for forged pets. I set an animation for 'on-click' which doesn't seem to work. Validate that the 'random/probability' module selection works as well."
+
+**Summary of actions:**
+- **Analysis:**
+    - Reviewed Pet Forge UI design vs actual implementation.
+    - Identified gap: Module configurations (trigger, probability, triggerValue) were designed in UI but not persisted or used at runtime.
+
+- **Type System (`src/components/pets/types.ts`):**
+    - Added `PetState.Special` for triggered animations.
+    - Created `ModuleConfig` interface with `id`, `assetUrl`, `trigger`, `probability`, and `triggerValue` fields.
+    - Added `modules` field to `PetConfig` to store module configurations.
+    - Added `id` field to `PetInstance` for convenience.
+
+- **PetController (`src/components/pets/PetController.ts`):**
+    - Implemented `triggerClick(petId)` – finds click-triggered modules and plays their animation.
+    - Implemented `triggerCommand(petId, command)` – supports future chat command triggers.
+    - Implemented `checkRandomTriggers()` – periodically checks for random-triggered modules and fires them based on configured probability (only when pet is idle).
+
+- **Pet Component (`src/components/pets/Pet.tsx`):**
+    - Added `onPetClick` prop to enable click handling.
+    - Added support for `PetState.Special` with module asset resolution.
+    - Added visual indicator (pulsing blue dot) for pets with click-triggered modules.
+    - Changed cursor to pointer for interactive pets.
+
+- **Pets Page (`src/pages/Pets.tsx`):**
+    - Updated `handleForgeSave` to build full `modules` map with trigger configurations from Pet Forge.
+    - Added `handlePetClick` handler that calls `controller.triggerClick()` and forces re-render.
+    - Wired `onPetClick` prop to all rendered Pet components.
+
+**Tags:** #feature #pet-forge #bugfix #modules #animation
+**Est. Avg. Human Dev Time:** 1.5 hours

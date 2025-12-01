@@ -221,11 +221,27 @@ const Pets: React.FC = () => {
 
     const handleForgeSave = async (config: any) => {
         const assets: any = {};
+        const modules: any = {};
 
+        // Build assets map
         if (config.modules.idle.asset) assets.idle = config.modules.idle.asset.url;
         if (config.modules.walk.asset) assets.walk = config.modules.walk.asset.url;
         if (config.modules.run.asset) assets.run = config.modules.run.asset.url;
         if (config.modules.sit.asset) assets.lie = config.modules.sit.asset.url;
+        if (config.modules.special?.asset) assets.special = config.modules.special.asset.url;
+
+        // Build modules map with trigger logic
+        for (const [key, mod] of Object.entries(config.modules) as [string, any][]) {
+            if (mod.asset) {
+                modules[key] = {
+                    id: key,
+                    assetUrl: mod.asset.url,
+                    trigger: mod.trigger || 'default',
+                    probability: mod.probability,
+                    triggerValue: mod.triggerValue
+                };
+            }
+        }
 
         const newPetId = Date.now().toString();
         const newPetConfig: PetConfig = {
@@ -235,7 +251,8 @@ const Pets: React.FC = () => {
             name: config.name,
             speed: config.speed,
             size: config.scale,
-            assets: assets
+            assets: assets,
+            modules: modules
         };
 
         if (window.electronAPI?.p2pCreateCore && window.electronAPI?.p2pAppend) {
@@ -247,19 +264,18 @@ const Pets: React.FC = () => {
             });
 
             if (controllerRef.current) {
-                controllerRef.current.addPet({
-                    id: newPetId,
-                    type: 'custom',
-                    color: 'custom',
-                    name: config.name,
-                    speed: config.speed,
-                    size: config.scale,
-                    assets: assets
-                });
+                controllerRef.current.addPet(newPetConfig);
             }
         }
 
         setIsForgeOpen(false);
+    };
+
+    const handlePetClick = (petId: string) => {
+        if (controllerRef.current) {
+            controllerRef.current.triggerClick(petId);
+            setPets([...controllerRef.current.getPets()]); // Force re-render
+        }
     };
 
     return (
@@ -286,7 +302,7 @@ const Pets: React.FC = () => {
                 <div className="absolute inset-0 bg-gradient-to-b from-gray-900/50 via-transparent to-gray-900/80 pointer-events-none"></div>
 
                 {pets.map(pet => (
-                    <Pet key={pet.id} pet={pet} />
+                    <Pet key={pet.id} pet={pet} onPetClick={handlePetClick} />
                 ))}
 
                 {/* Status Overlay */}

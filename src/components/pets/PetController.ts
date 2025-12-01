@@ -1,21 +1,25 @@
 // @ts-nocheck
 import { PetState } from './types';
-import type { PetConfig, PetInstance, PetPosition } from './types';
+import type { PetConfig, PetInstance, PetPosition, ModuleConfig } from './types';
 
 const FRAME_RATE = 100; // Update every 100ms
+const RANDOM_CHECK_INTERVAL = 5000; // Check random triggers every 5 seconds
 
 export class PetController {
     private pets: PetInstance[] = [];
     private containerWidth: number = 0;
     private containerHeight: number = 0;
+    private lastRandomCheck: number = 0;
 
     constructor(width: number, height: number) {
         this.containerWidth = width;
         this.containerHeight = height;
+        this.lastRandomCheck = Date.now();
     }
 
     public addPet(config: PetConfig) {
         this.pets.push({
+            id: config.id,
             config,
             position: {
                 x: Math.random() * (this.containerWidth - 100),
@@ -31,13 +35,64 @@ export class PetController {
         return this.pets;
     }
 
+    public getPetById(id: string): PetInstance | undefined {
+        return this.pets.find(p => p.id === id);
+    }
+
     public updateDimensions(width: number, height: number) {
         this.containerWidth = width;
         this.containerHeight = height;
     }
 
+    // Trigger a click-based module for a pet
+    public triggerClick(petId: string): boolean {
+        const pet = this.getPetById(petId);
+        if (!pet) return false;
+
+        // Find a module with trigger 'click'
+        if (pet.config.modules) {
+            for (const [key, module] of Object.entries(pet.config.modules)) {
+                if (module.trigger === 'click' && module.assetUrl) {
+                    // Trigger the special state
+                    pet.state = PetState.Special;
+                    pet.customAction = key;
+                    pet.nextStateTime = Date.now() + 2000; // Play for 2 seconds
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Trigger a command-based module for a pet
+    public triggerCommand(petId: string, command: string): boolean {
+        const pet = this.getPetById(petId);
+        if (!pet) return false;
+
+        if (pet.config.modules) {
+            for (const [key, module] of Object.entries(pet.config.modules)) {
+                if (module.trigger === 'command' && 
+                    module.triggerValue?.toLowerCase() === command.toLowerCase() && 
+                    module.assetUrl) {
+                    pet.state = PetState.Special;
+                    pet.customAction = key;
+                    pet.nextStateTime = Date.now() + 3000;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public tick() {
         const now = Date.now();
+
+        // Check random triggers periodically
+        if (now - this.lastRandomCheck > RANDOM_CHECK_INTERVAL) {
+            this.checkRandomTriggers();
+            this.lastRandomCheck = now;
+        }
+
         this.pets.forEach(pet => {
             // 1. State Transition
             if (now >= pet.nextStateTime) {
@@ -46,6 +101,29 @@ export class PetController {
 
             // 2. Movement
             this.movePet(pet);
+        });
+    }
+
+    // Check all pets for random-triggered modules
+    private checkRandomTriggers() {
+        this.pets.forEach(pet => {
+            // Only trigger random actions when idle
+            if (pet.state !== PetState.SitIdle && pet.state !== PetState.Lie) return;
+
+            if (pet.config.modules) {
+                for (const [key, module] of Object.entries(pet.config.modules)) {
+                    if (module.trigger === 'random' && module.assetUrl) {
+                        const probability = module.probability ?? 0.3;
+                        if (Math.random() < probability) {
+                            // Trigger the random action
+                            pet.state = PetState.Special;
+                            pet.customAction = key;
+                            pet.nextStateTime = Date.now() + 3000;
+                            break; // Only trigger one at a time
+                        }
+                    }
+                }
+            }
         });
     }
 
