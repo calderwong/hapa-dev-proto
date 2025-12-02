@@ -12,6 +12,31 @@ export enum PetState {
     Special = 'special' // Triggered by click or command
 }
 
+// Pet location zones
+export type PetZone = 'sanctuary' | 'header' | 'hidden';
+
+// Pet location state
+export interface PetLocation {
+    zone: PetZone;
+    position?: { x: number; y: number };  // Last position in zone
+    enteredAt: number;                     // Timestamp
+}
+
+// Animation asset reference
+export interface AnimationAsset {
+    url: string;                   // Local file:// or remote URL
+    cardRef?: CardRef;             // If sourced from a card
+    frames?: number;               // Frame count for timing
+    duration?: number;             // Animation duration in ms
+}
+
+// Card reference for relationships
+export interface CardRef {
+    cardId: string;
+    coreName: string;
+    relation?: string;             // 'animation', 'behavior', 'tool', etc.
+}
+
 // Module trigger configuration from Pet Forge
 export interface ModuleConfig {
     id: string;
@@ -21,6 +46,70 @@ export interface ModuleConfig {
     triggerValue?: string; // For 'command' trigger
 }
 
+// Pet behavior configuration
+export interface PetBehavior {
+    speed: number;               // Movement speed (1-10)
+    scale: number;               // Size multiplier
+    restFrequency?: number;      // How often to rest (0-1)
+    playfulness?: number;        // Activity level (0-1)
+}
+
+// Full Pet Card schema for Hypercore storage
+export interface PetCard {
+    // Card Identity
+    type: 'pet';
+    id: string;                    // Unique identifier
+    coreName: string;              // Hypercore name for this pet
+    
+    // Display
+    name: string;
+    species: string;               // 'dog', 'cat', 'custom', etc.
+    color?: string;                // Color variant
+    thumbnail?: string;            // Base64 or URL for card display
+    
+    // Animation Configuration
+    animations: {
+        idle: AnimationAsset | string;
+        walk: AnimationAsset | string;
+        run?: AnimationAsset | string;
+        lie?: AnimationAsset | string;
+        special?: (AnimationAsset | string)[];
+    };
+    
+    // Module System (from Pet Forge)
+    modules?: Record<string, ModuleConfig>;
+    
+    // Behavior Profile
+    behavior: PetBehavior;
+    
+    // Location State
+    location: PetLocation;
+    
+    // Card Relationships (for agent composition)
+    attachedCards?: CardRef[];     // Tools, behaviors, memories attached
+    parentCards?: CardRef[];       // Lineage tracking
+    
+    // Metadata
+    createdAt: number;
+    updatedAt: number;
+    version: number;
+}
+
+// Pet Card index entry for card-library
+export interface PetCardIndexEntry {
+    type: 'card-index';
+    cardId: string;
+    coreName: string;
+    mediaKind: 'pet';
+    name: string;
+    species: string;
+    thumbnail?: string;
+    location: PetLocation;
+    createdAt: number;
+    updatedAt: number;
+}
+
+// Legacy PetConfig for backward compatibility
 export interface PetConfig {
     id: string;
     type: 'dog' | 'cat' | 'crab' | 'fox' | 'clippy' | 'chicken' | 'cockatiel' | 'deno' | 'horse' | 'panda' | 'snake' | 'totoro' | 'custom';
@@ -45,4 +134,24 @@ export interface PetInstance {
     state: PetState;
     customAction?: string; // Name of the custom action if state is Custom
     nextStateTime: number; // Timestamp when state should change
+    // Link to full card data
+    cardRef?: CardRef;
+}
+
+// Drag data for pet cards
+export interface PetDragData {
+    type: 'pet-card';
+    petId: string;
+    coreName: string;
+    sourceZone: PetZone | 'library' | 'sidebar';
+    petCard: PetCard;
+}
+
+// Environment theme for pet portal
+export interface EnvironmentTheme {
+    id: string;
+    name: string;
+    background: string;            // CSS gradient or image
+    groundColor: string;
+    ambientParticles?: boolean;    // Floating effects
 }

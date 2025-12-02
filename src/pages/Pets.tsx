@@ -1,18 +1,30 @@
 // @ts-nocheck
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import PageContainer from '../components/PageContainer';
 import { PetController } from '../components/pets/PetController';
 import Pet from '../components/pets/Pet';
-import type { PetInstance, PetConfig, PetState } from '../components/pets/types';
+import type { PetInstance, PetConfig, PetCard, PetZone } from '../components/pets/types';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import PetForge from '../components/PetForge';
+import { 
+    createPetCard, 
+    loadPetsByZone, 
+    updatePetLocation,
+    petCardToConfig,
+    parsePetDragData,
+    hasPetDragData,
+    createPetDragData 
+} from '../utils/petCardUtils';
 
 const Pets: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
     const controllerRef = useRef<PetController | null>(null);
     const [pets, setPets] = useState<PetInstance[]>([]);
+    const [petCards, setPetCards] = useState<Map<string, PetCard>>(new Map());
     const [debugInfo, setDebugInfo] = useState<string>('');
     const [showAddModal, setShowAddModal] = useState(false);
+    const [isDragOver, setIsDragOver] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
     // Form State
     const [newPetName, setNewPetName] = useState('');
@@ -26,6 +38,30 @@ const Pets: React.FC = () => {
     const [isCreating, setIsCreating] = useState(false);
     const [isForgeOpen, setIsForgeOpen] = useState(false);
 
+    // Load sanctuary pets from card library
+    const loadSanctuaryPets = useCallback(async () => {
+        if (!containerRef.current || !controllerRef.current) return;
+        
+        try {
+            const sanctuaryPets = await loadPetsByZone('sanctuary');
+            const cardMap = new Map<string, PetCard>();
+            
+            sanctuaryPets.forEach((petCard) => {
+                cardMap.set(petCard.id, petCard);
+                const config = petCardToConfig(petCard);
+                controllerRef.current?.addPet(config);
+            });
+            
+            setPetCards(cardMap);
+            setPets([...controllerRef.current.getPets()]);
+            console.log(`Loaded ${sanctuaryPets.length} pets from sanctuary`);
+        } catch (e) {
+            console.error('Failed to load sanctuary pets:', e);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
     useEffect(() => {
         if (!containerRef.current) return;
 
@@ -33,15 +69,8 @@ const Pets: React.FC = () => {
         const { clientWidth, clientHeight } = containerRef.current;
         controllerRef.current = new PetController(clientWidth, clientHeight);
 
-        // Add a default pet
-        controllerRef.current.addPet({
-            id: 'pet-1',
-            type: 'dog',
-            color: 'black',
-            name: 'Hapa Dog',
-            speed: 3,
-            size: 1.0
-        });
+        // Load pets from card library
+        loadSanctuaryPets();
 
         // Game Loop
         const interval = setInterval(() => {
@@ -66,7 +95,7 @@ const Pets: React.FC = () => {
             clearInterval(interval);
             window.removeEventListener('resize', handleResize);
         };
-    }, []);
+    }, [loadSanctuaryPets]);
 
     const getAvailableColors = (type: string) => {
         switch (type) {
@@ -153,32 +182,8 @@ const Pets: React.FC = () => {
                 const petName = newPetName || 'Custom Pet';
                 const petId = `pet-${Date.now()}`;
 
-                const petData = {
-                    type: 'pet',
-                    id: petId,
-                    name: petName,
-                    createdAt: new Date().toISOString(),
-                    config: {
-                        type: 'custom',
-                        speed: 3,
-                        size: 1.0,
-                        assets: {
-                            idle: idleUrl,
-                            walk: walkUrl,
-                            run: runUrl
-                        }
-                    }
-                };
-
-                // Save to P2P
-                const coreName = `pet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                await window.electronAPI.p2pCreateCore(coreName);
-                await window.electronAPI.p2pAppend({
-                    name: coreName,
-                    data: JSON.stringify(petData)
-                });
-
-                controllerRef.current.addPet({
+                // Create pet config
+                const petConfig: PetConfig = {
                     id: petId,
                     type: 'custom',
                     color: 'custom',
@@ -190,7 +195,16 @@ const Pets: React.FC = () => {
                         walk: walkUrl,
                         run: runUrl
                     }
-                });
+                };
+
+                // Save as a proper pet card
+                const petCard = await createPetCard(petConfig, { zone: 'sanctuary', enteredAt: Date.now() });
+                
+                if (petCard) {
+                    setPetCards(prev => new Map(prev).set(petCard.id, petCard));
+                    controllerRef.current.addPet(petConfig);
+                    setPets([...controllerRef.current.getPets()]);
+                }
 
                 setShowAddModal(false);
                 setNewPetName('');
@@ -204,18 +218,34 @@ const Pets: React.FC = () => {
                 setIsCreating(false);
             }
         } else {
-            // Standard Pet Logic
-            const petId = `pet-${Date.now()}`;
-            controllerRef.current.addPet({
-                id: petId,
-                type: newPetType,
-                color: newPetColor,
-                name: newPetName || `My ${newPetType}`,
-                speed: 3,
-                size: 1.0
-            });
-            setShowAddModal(false);
-            setNewPetName('');
+            // Standard Pet Logic - save as card
+            setIsCreating(true);
+            try {
+                const petId = `pet-${Date.now()}`;
+                const petConfig: PetConfig = {
+                    id: petId,
+                    type: newPetType,
+                    color: newPetColor,
+                    name: newPetName || `My ${newPetType}`,
+                    speed: 3,
+                    size: 1.0
+                };
+                
+                const petCard = await createPetCard(petConfig, { zone: 'sanctuary', enteredAt: Date.now() });
+                
+                if (petCard) {
+                    setPetCards(prev => new Map(prev).set(petCard.id, petCard));
+                    controllerRef.current.addPet(petConfig);
+                    setPets([...controllerRef.current.getPets()]);
+                }
+                
+                setShowAddModal(false);
+                setNewPetName('');
+            } catch (error) {
+                console.error('Failed to create pet:', error);
+            } finally {
+                setIsCreating(false);
+            }
         }
     };
 
@@ -255,17 +285,13 @@ const Pets: React.FC = () => {
             modules: modules
         };
 
-        if (window.electronAPI?.p2pCreateCore && window.electronAPI?.p2pAppend) {
-            const coreName = `pet-${newPetId}`;
-            await window.electronAPI.p2pCreateCore(coreName);
-            await window.electronAPI.p2pAppend({
-                name: coreName,
-                data: JSON.stringify(newPetConfig)
-            });
-
-            if (controllerRef.current) {
-                controllerRef.current.addPet(newPetConfig);
-            }
+        // Save as a proper pet card
+        const petCard = await createPetCard(newPetConfig, { zone: 'sanctuary', enteredAt: Date.now() });
+        
+        if (petCard && controllerRef.current) {
+            setPetCards(prev => new Map(prev).set(petCard.id, petCard));
+            controllerRef.current.addPet(newPetConfig);
+            setPets([...controllerRef.current.getPets()]);
         }
 
         setIsForgeOpen(false);
@@ -277,6 +303,63 @@ const Pets: React.FC = () => {
             setPets([...controllerRef.current.getPets()]); // Force re-render
         }
     };
+
+    // Handle pet drag start from sanctuary
+    const handlePetDragStart = useCallback((petId: string, e: React.DragEvent) => {
+        const petCard = petCards.get(petId);
+        if (!petCard) return;
+
+        const dragData = createPetDragData(petCard, 'sanctuary');
+        e.dataTransfer.setData('application/x-pet-card', dragData);
+        e.dataTransfer.setData('application/json', dragData);
+        e.dataTransfer.effectAllowed = 'move';
+    }, [petCards]);
+
+    // Handle drop - return pet from header to sanctuary
+    const handleDrop = useCallback(async (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
+
+        const parsed = parsePetDragData(e.dataTransfer);
+        if (!parsed) return;
+
+        const { petCard, sourceZone } = parsed;
+        
+        // Only accept drops from header
+        if (sourceZone !== 'header') return;
+
+        // Update pet location to sanctuary
+        const updatedCard = await updatePetLocation(petCard, 'sanctuary');
+        if (updatedCard && controllerRef.current) {
+            const config = petCardToConfig(updatedCard);
+            controllerRef.current.addPet(config);
+            
+            setPetCards(prev => new Map(prev).set(updatedCard.id, updatedCard));
+            setPets([...controllerRef.current.getPets()]);
+        }
+    }, []);
+
+    const handleDragOver = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        if (hasPetDragData(e.dataTransfer)) {
+            e.dataTransfer.dropEffect = 'move';
+        }
+    }, []);
+
+    const handleDragEnter = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        if (hasPetDragData(e.dataTransfer)) {
+            setIsDragOver(true);
+        }
+    }, []);
+
+    const handleDragLeave = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        if (!containerRef.current?.contains(e.relatedTarget as Node)) {
+            setIsDragOver(false);
+        }
+    }, []);
 
     return (
         <div className="h-full flex flex-col bg-astro-dark relative overflow-hidden">
@@ -297,12 +380,54 @@ const Pets: React.FC = () => {
                 </div>
             </div>
 
-            {/* Game Area */}
-            <div ref={containerRef} className="flex-1 relative overflow-hidden bg-[url('/grid-pattern.png')] bg-center">
+            {/* Game Area - Drop zone for pets returning from header */}
+            <div 
+                ref={containerRef} 
+                className={`flex-1 relative overflow-hidden bg-[url('/grid-pattern.png')] bg-center transition-all duration-200 ${
+                    isDragOver ? 'ring-2 ring-inset ring-astro-primary bg-astro-primary/5' : ''
+                }`}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragEnter={handleDragEnter}
+                onDragLeave={handleDragLeave}
+            >
                 <div className="absolute inset-0 bg-gradient-to-b from-gray-900/50 via-transparent to-gray-900/80 pointer-events-none"></div>
 
+                {/* Loading state */}
+                {isLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-gray-400 text-sm">Loading pets...</div>
+                    </div>
+                )}
+
+                {/* Drop zone indicator */}
+                {isDragOver && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                        <div className="bg-astro-primary/20 px-6 py-3 rounded-lg border border-astro-primary">
+                            <span className="text-astro-primary font-bold text-lg">Drop pet here to return to Sanctuary</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Empty state */}
+                {!isLoading && pets.length === 0 && !isDragOver && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="text-center">
+                            <rux-icon icon="pets" size="large" className="text-gray-600 mb-2"></rux-icon>
+                            <p className="text-gray-500 text-sm">No pets in the sanctuary</p>
+                            <p className="text-gray-600 text-xs mt-1">Adopt a pet or drag one from the header portal</p>
+                        </div>
+                    </div>
+                )}
+
                 {pets.map(pet => (
-                    <Pet key={pet.id} pet={pet} onPetClick={handlePetClick} />
+                    <Pet 
+                        key={pet.id} 
+                        pet={pet} 
+                        onPetClick={handlePetClick}
+                        onDragStart={(e) => handlePetDragStart(pet.id, e)}
+                        draggable={!!petCards.get(pet.id)}
+                    />
                 ))}
 
                 {/* Status Overlay */}

@@ -1127,3 +1127,104 @@ Sidebar Card → Drag → Drop on Input → Attachment locked in (like library p
 
 **Tags:** #feature #media #cards #drag-drop #thumbnails #sidebar
 **Est. Avg. Human Dev Time:** 2.5 hours
+
+## Entry 19 – Pet Card System & Header Pet Portal
+**Prompt:** "Starting by when a new pet is created, I want you to save it as a new Card with a type <pet> with its animations and their configurations and behavior. Create a new 'pet area' in the header..."
+
+**Summary of actions:**
+Created a comprehensive Pet Card system that transforms pets into card-based entities, enabling:
+1. Pets as persistent Cards stored in Hypercore
+2. A header "Pet Portal" where pets can roam
+3. Drag-drop between Sanctuary and Header to change pet "location state"
+
+**Design Document Created:**
+`docs/PET_CARD_SYSTEM_DESIGN.md` - Complete architecture spec covering:
+- PetCard schema with animations, behaviors, location state
+- Card relationships for future agent composition
+- Environment themes for the portal
+- State machine for pet locations (sanctuary ↔ header ↔ hidden)
+
+**Implementation Details:**
+
+1. **Extended Pet Types** (`src/components/pets/types.ts`)
+   - Added `PetCard` interface with full card schema
+   - Added `PetLocation`, `PetZone`, `PetDragData` types
+   - Added `PetCardIndexEntry` for card-library integration
+   - Added `EnvironmentTheme` for portal backgrounds
+
+2. **Created Pet Card Utilities** (`src/utils/petCardUtils.ts`)
+   - `createPetCard()` - Create & persist pet as card
+   - `loadPetsByZone()` - Load pets by location
+   - `updatePetLocation()` - Change pet zone state
+   - `petCardToConfig()` / `petConfigToCard()` - Conversion utilities
+   - Drag data helpers for pet-specific MIME types
+
+3. **Pet Portal Component** (`src/components/pets/PetPortal.tsx`)
+   - Self-contained mini habitat in header (200px × 40px)
+   - Embedded `HeaderPetController` for scaled-down behavior
+   - Environment themes (Meadow, Night, Cyber, Space, Sunset)
+   - Drop zone with visual feedback
+   - Click to cycle themes
+   - Pets scale to 28px with 5fps update rate
+
+4. **Updated Layout** (`src/components/Layout.tsx`)
+   - Integrated PetPortal into rux-global-status-bar
+   - Positioned between logo and system indicators
+
+5. **Enhanced Sanctuary** (`src/pages/Pets.tsx`)
+   - Loads pets from card library on mount
+   - All pet creation now saves as proper cards
+   - Drop zone for pets returning from header
+   - Draggable pets (when card exists)
+   - Empty state and loading state UI
+
+6. **Enhanced Pet Component** (`src/components/pets/Pet.tsx`)
+   - Added `draggable` and `onDragStart` props
+   - Visual drag indicator (purple dot)
+   - Cursor changes for drag feedback
+
+**Visual Architecture:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ LAYOUT HEADER                                               │
+├─────────┬─────────────────────┬────────────────────────────┤
+│  Logo   │   🌿 PET PORTAL 🌿   │  NET:OK  SYS:OK  [Clock]  │
+│ Hapa AI │   ┌─────────────┐   │                            │
+│         │   │  🐕 walks   │   │                            │
+│         │   └─────────────┘   │                            │
+└─────────┴─────────────────────┴────────────────────────────┘
+
+DRAG FLOWS:
+Sanctuary → Drag Pet → Drop on Portal → Pet moves to header
+Portal → Drag Pet → Drop on Sanctuary → Pet returns to sanctuary
+```
+
+**State Model:**
+```
+Pet Location State:
+┌─────────┐  drag to portal  ┌─────────┐
+│SANCTUARY│ ───────────────► │ HEADER  │
+│ (idle)  │ ◄─────────────── │(active) │
+└─────────┘  drag to sanct   └─────────┘
+```
+
+**Future Foundation:**
+This architecture enables:
+- Pets as agent avatars (location = deployment state)
+- Card attachments (tools, behaviors, memories)
+- P2P pet sharing via Hypercore
+- Complex agent composition
+
+**Files created:**
+- `docs/PET_CARD_SYSTEM_DESIGN.md`
+- `src/utils/petCardUtils.ts`
+- `src/components/pets/PetPortal.tsx`
+
+**Files modified:**
+- `src/components/pets/types.ts`
+- `src/components/pets/Pet.tsx`
+- `src/components/Layout.tsx`
+- `src/pages/Pets.tsx`
+
+**Tags:** #feature #pets #cards #agents #drag-drop #portal #architecture
+**Est. Avg. Human Dev Time:** 4 hours

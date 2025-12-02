@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
+import PetPortal from './pets/PetPortal';
 
 interface NavItemConfig {
     path: string;
@@ -273,7 +274,15 @@ const Layout: React.FC = () => {
             {/* Main content area */}
             <main className="flex-1 overflow-hidden flex flex-col min-w-0 bg-gray-900">
                 <rux-global-status-bar appname="Hapa AI" className="border-b border-gray-800/50">
-                    <div className="flex items-center justify-end w-full gap-6 px-4">
+                    <div className="flex items-center w-full gap-4 px-4">
+                        {/* Pet Portal - mini pet habitat */}
+                        <div className="flex-shrink-0">
+                            <PetPortal />
+                        </div>
+                        
+                        {/* Spacer */}
+                        <div className="flex-1" />
+                        
                         {/* System Metrics */}
                         <div className="hidden md:flex items-center gap-4 text-[10px] font-mono text-gray-400">
                             <div className="flex items-center gap-1.5" title="Network Status">

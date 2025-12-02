@@ -6,9 +6,11 @@ import type { PetInstance } from './types';
 interface PetProps {
     pet: PetInstance;
     onPetClick?: (petId: string) => void;
+    onDragStart?: (e: React.DragEvent) => void;
+    draggable?: boolean;
 }
 
-const Pet: React.FC<PetProps> = ({ pet, onPetClick }) => {
+const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, draggable = false }) => {
     // Map state to asset filename
     // We downloaded: black_idle.gif, black_walk.gif, black_run.gif, black_lie.gif
 
@@ -61,11 +63,20 @@ const Pet: React.FC<PetProps> = ({ pet, onPetClick }) => {
         cursor: hasClickTrigger ? 'pointer' : 'grab'
     };
 
+    const handleDragStart = (e: React.DragEvent) => {
+        if (onDragStart) {
+            onDragStart(e);
+        }
+    };
+
     return (
         <div 
             style={style} 
-            title={`${pet.config.name} (${pet.state})${hasClickTrigger ? ' - Click me!' : ''}`}
+            title={`${pet.config.name} (${pet.state})${hasClickTrigger ? ' - Click me!' : ''}${draggable ? ' - Drag to move' : ''}`}
             onClick={handleClick}
+            draggable={draggable}
+            onDragStart={handleDragStart}
+            className={draggable ? 'cursor-grab active:cursor-grabbing' : ''}
         >
             <img
                 src={src}
@@ -80,6 +91,10 @@ const Pet: React.FC<PetProps> = ({ pet, onPetClick }) => {
             {/* Click indicator for pets with click triggers */}
             {hasClickTrigger && pet.state !== PetState.Special && (
                 <div className="absolute -top-1 -right-1 w-3 h-3 bg-astro-primary rounded-full animate-pulse" title="Click to interact!"></div>
+            )}
+            {/* Drag indicator for draggable pets */}
+            {draggable && (
+                <div className="absolute -top-1 -left-1 w-3 h-3 bg-purple-500 rounded-full opacity-50" title="Drag me!"></div>
             )}
         </div>
     );

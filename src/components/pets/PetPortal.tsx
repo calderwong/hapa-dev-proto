@@ -1,0 +1,361 @@
+// @ts-nocheck
+/**
+ * PetPortal - A mini pet habitat in the header
+ * Pets can be dragged here from the Sanctuary or Card Library
+ */
+
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import type { PetCard, PetInstance, PetConfig, EnvironmentTheme, PetZone } from './types';
+import { PetState } from './types';
+import { 
+  loadPetsByZone, 
+  updatePetLocation, 
+  petCardToConfig,
+  parsePetDragData,
+  hasPetDragData,
+  ENVIRONMENT_THEMES 
+} from '../../utils/petCardUtils';
+
+// Smaller controller for header pets
+class HeaderPetController {
+  private pets: PetInstance[] = [];
+  private containerWidth: number = 0;
+  private containerHeight: number = 0;
+
+  constructor(width: number, height: number) {
+    this.containerWidth = width;
+    this.containerHeight = height;
+  }
+
+  public addPet(config: PetConfig, cardRef?: { cardId: string; coreName: string }) {
+    const existing = this.pets.find(p => p.id === config.id);
+    if (existing) return; // Already exists
+
+    this.pets.push({
+      id: config.id,
+      config,
+      position: {
+        x: Math.random() * Math.max(0, this.containerWidth - 32),
+        y: 0,
+        direction: Math.random() > 0.5 ? 'right' : 'left',
+      },
+      state: PetState.SitIdle,
+      nextStateTime: Date.now() + 2000 + Math.random() * 3000,
+      cardRef,
+    });
+  }
+
+  public removePet(id: string) {
+    this.pets = this.pets.filter(p => p.id !== id);
+  }
+
+  public getPets(): PetInstance[] {
+    return this.pets;
+  }
+
+  public updateDimensions(width: number, height: number) {
+    this.containerWidth = width;
+    this.containerHeight = height;
+  }
+
+  public tick() {
+    const now = Date.now();
+    
+    this.pets.forEach(pet => {
+      // State transition
+      if (now >= pet.nextStateTime) {
+        this.changeState(pet);
+      }
+
+      // Movement
+      const speed = (pet.config.speed * 0.3); // Slower in header
+      
+      if (pet.state === PetState.WalkRight) {
+        pet.position.x += speed;
+        pet.position.direction = 'right';
+      } else if (pet.state === PetState.WalkLeft) {
+        pet.position.x -= speed;
+        pet.position.direction = 'left';
+      }
+
+      // Boundary check
+      if (pet.position.x <= 0) {
+        pet.position.x = 0;
+        pet.position.direction = 'right';
+        this.changeState(pet);
+      } else if (pet.position.x >= this.containerWidth - 28) {
+        pet.position.x = this.containerWidth - 28;
+        pet.position.direction = 'left';
+        this.changeState(pet);
+      }
+    });
+  }
+
+  private changeState(pet: PetInstance) {
+    const rand = Math.random();
+    
+    if (rand < 0.5) {
+      // Idle
+      pet.state = PetState.SitIdle;
+      pet.nextStateTime = Date.now() + 2000 + Math.random() * 3000;
+    } else if (rand < 0.75) {
+      // Walk right
+      pet.state = PetState.WalkRight;
+      pet.nextStateTime = Date.now() + 1500 + Math.random() * 2000;
+    } else {
+      // Walk left
+      pet.state = PetState.WalkLeft;
+      pet.nextStateTime = Date.now() + 1500 + Math.random() * 2000;
+    }
+  }
+}
+
+// Mini pet renderer for header
+const MiniPet: React.FC<{ 
+  pet: PetInstance; 
+  onDragStart?: (pet: PetInstance, e: React.DragEvent) => void;
+}> = ({ pet, onDragStart }) => {
+  let action = 'idle';
+  if (pet.state === PetState.WalkRight || pet.state === PetState.WalkLeft) action = 'walk';
+
+  let src = '';
+  if (pet.config.type === 'custom' && pet.config.assets) {
+    src = pet.config.assets[action] || pet.config.assets.idle;
+  } else {
+    src = `/pets/${pet.config.type}/${pet.config.color}_${action}.gif`;
+  }
+
+  const handleDragStart = (e: React.DragEvent) => {
+    if (onDragStart) {
+      onDragStart(pet, e);
+    }
+  };
+
+  return (
+    <div
+      draggable
+      onDragStart={handleDragStart}
+      className="absolute cursor-grab active:cursor-grabbing transition-[left] duration-100"
+      style={{
+        left: `${pet.position.x}px`,
+        bottom: '2px',
+        transform: pet.position.direction === 'left' ? 'scaleX(-1)' : 'none',
+      }}
+      title={`${pet.config.name} - Drag to move`}
+    >
+      <img
+        src={src}
+        alt={pet.config.name}
+        className="w-7 h-7 object-contain pointer-events-none"
+        style={{ imageRendering: 'pixelated' }}
+        draggable={false}
+      />
+    </div>
+  );
+};
+
+interface PetPortalProps {
+  onPetDropped?: (petCard: PetCard) => void;
+  onPetRemoved?: (petCard: PetCard) => void;
+}
+
+const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const controllerRef = useRef<HeaderPetController | null>(null);
+  const [pets, setPets] = useState<PetInstance[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [theme, setTheme] = useState<EnvironmentTheme>(ENVIRONMENT_THEMES[0]);
+  const [petCards, setPetCards] = useState<Map<string, PetCard>>(new Map());
+
+  // Initialize controller and load pets
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const { clientWidth, clientHeight } = containerRef.current;
+    controllerRef.current = new HeaderPetController(clientWidth, clientHeight);
+
+    // Load pets in header zone
+    loadPetsByZone('header').then((headerPets) => {
+      const cardMap = new Map<string, PetCard>();
+      headerPets.forEach((petCard) => {
+        cardMap.set(petCard.id, petCard);
+        const config = petCardToConfig(petCard);
+        controllerRef.current?.addPet(config, { 
+          cardId: petCard.id, 
+          coreName: petCard.coreName 
+        });
+      });
+      setPetCards(cardMap);
+      setPets([...controllerRef.current?.getPets() || []]);
+    });
+
+    // Game loop - slower for header (5fps)
+    const interval = setInterval(() => {
+      if (controllerRef.current) {
+        controllerRef.current.tick();
+        setPets([...controllerRef.current.getPets()]);
+      }
+    }, 200);
+
+    // Resize handler
+    const handleResize = () => {
+      if (containerRef.current && controllerRef.current) {
+        controllerRef.current.updateDimensions(
+          containerRef.current.clientWidth,
+          containerRef.current.clientHeight
+        );
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  // Handle pet drag from portal to remove/return to sanctuary
+  const handlePetDragStart = useCallback((pet: PetInstance, e: React.DragEvent) => {
+    const petCard = petCards.get(pet.id);
+    if (!petCard) return;
+
+    const dragData = JSON.stringify({
+      type: 'pet-card',
+      petId: petCard.id,
+      coreName: petCard.coreName,
+      sourceZone: 'header',
+      petCard,
+    });
+
+    e.dataTransfer.setData('application/x-pet-card', dragData);
+    e.dataTransfer.setData('application/json', dragData);
+    e.dataTransfer.effectAllowed = 'move';
+  }, [petCards]);
+
+  // Handle drop - add pet to portal
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const parsed = parsePetDragData(e.dataTransfer);
+    if (!parsed) return;
+
+    const { petCard, sourceZone } = parsed;
+    
+    // Don't re-add if already in header
+    if (sourceZone === 'header') return;
+
+    // Update pet location to header
+    const updatedCard = await updatePetLocation(petCard, 'header');
+    if (updatedCard && controllerRef.current) {
+      const config = petCardToConfig(updatedCard);
+      controllerRef.current.addPet(config, {
+        cardId: updatedCard.id,
+        coreName: updatedCard.coreName,
+      });
+      
+      setPetCards(prev => new Map(prev).set(updatedCard.id, updatedCard));
+      setPets([...controllerRef.current.getPets()]);
+      
+      onPetDropped?.(updatedCard);
+    }
+  }, [onPetDropped]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (hasPetDragData(e.dataTransfer)) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (hasPetDragData(e.dataTransfer)) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    // Only set false if leaving the container entirely
+    if (!containerRef.current?.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  // Theme cycling
+  const cycleTheme = () => {
+    const currentIndex = ENVIRONMENT_THEMES.findIndex(t => t.id === theme.id);
+    const nextIndex = (currentIndex + 1) % ENVIRONMENT_THEMES.length;
+    setTheme(ENVIRONMENT_THEMES[nextIndex]);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={`
+        relative h-9 w-48 mx-2 rounded-md overflow-hidden
+        border transition-all duration-200 cursor-pointer
+        ${isDragOver 
+          ? 'border-astro-primary shadow-[0_0_12px_rgba(77,184,255,0.5)] scale-105' 
+          : 'border-gray-700/50 hover:border-gray-600'
+        }
+      `}
+      style={{ background: theme.background }}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onClick={cycleTheme}
+      title={`Pet Portal - ${theme.name} (click to change)`}
+    >
+      {/* Ground line */}
+      <div 
+        className="absolute bottom-0 left-0 right-0 h-1"
+        style={{ backgroundColor: theme.groundColor }}
+      />
+
+      {/* Ambient particles for night/space themes */}
+      {theme.ambientParticles && (
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute w-0.5 h-0.5 bg-white rounded-full animate-pulse" style={{ top: '20%', left: '10%' }} />
+          <div className="absolute w-0.5 h-0.5 bg-white rounded-full animate-pulse" style={{ top: '40%', left: '30%', animationDelay: '0.5s' }} />
+          <div className="absolute w-0.5 h-0.5 bg-white rounded-full animate-pulse" style={{ top: '15%', left: '60%', animationDelay: '1s' }} />
+          <div className="absolute w-0.5 h-0.5 bg-white rounded-full animate-pulse" style={{ top: '50%', left: '80%', animationDelay: '0.3s' }} />
+          <div className="absolute w-0.5 h-0.5 bg-white rounded-full animate-pulse" style={{ top: '30%', left: '90%', animationDelay: '0.7s' }} />
+        </div>
+      )}
+
+      {/* Drop zone indicator */}
+      {isDragOver && (
+        <div className="absolute inset-0 bg-astro-primary/20 flex items-center justify-center pointer-events-none">
+          <span className="text-[10px] font-bold text-white drop-shadow-lg">
+            DROP HERE
+          </span>
+        </div>
+      )}
+
+      {/* Pets */}
+      {pets.map(pet => (
+        <MiniPet 
+          key={pet.id} 
+          pet={pet} 
+          onDragStart={handlePetDragStart}
+        />
+      ))}
+
+      {/* Empty state */}
+      {pets.length === 0 && !isDragOver && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[9px] text-white/40 font-medium">
+            Drag a pet here
+          </span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default PetPortal;
