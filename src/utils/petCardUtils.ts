@@ -249,18 +249,21 @@ export async function loadPetCards(): Promise<PetCard[]> {
     const entries = await window.electronAPI.p2pRead(CARD_LIBRARY_CORE_NAME);
     const petCards: PetCard[] = [];
     
-    // Find all pet card index entries
-    const petEntries: PetCardIndexEntry[] = [];
+    // Find all pet card index entries and deduplicate by cardId (latest wins)
+    const petEntriesMap = new Map<string, PetCardIndexEntry>();
+    
     for (const entry of entries) {
       try {
         const parsed = JSON.parse(entry);
         if (parsed.type === 'card-index' && parsed.mediaKind === 'pet') {
-          petEntries.push(parsed);
+          petEntriesMap.set(parsed.cardId, parsed);
         }
       } catch (e) {
         // Skip invalid entries
       }
     }
+    
+    const petEntries = Array.from(petEntriesMap.values());
     
     // Load full card data from each pet's core
     for (const entry of petEntries) {

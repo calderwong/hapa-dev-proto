@@ -1281,3 +1281,31 @@ Pets now behave differently depending on the theme:
 
 **Tags:** #feature #pets #ai #physics #architecture
 **Est. Avg. Human Dev Time:** 3.5 hours
+
+## Entry 21 – Pet Card System Fixes & Refinements
+**Prompt:** "Fix drag-and-drop transfer issues and missing pet cards in the library."
+
+**Summary of actions:**
+Addressed two critical issues preventing the Pet Card System from functioning correctly:
+1.  **Card Library Visibility**: Pets were missing from the library because the index parser wasn't copying the `mediaKind` field.
+2.  **Drag-and-Drop Persistence**: Transferring pets resulted in duplicate "ghost" pets or failures because the loader wasn't deduplicating index entries (loading both old 'sanctuary' and new 'header' states).
+
+**Fixes Implemented:**
+- **`src/pages/CardLibrary.tsx`**: Updated `loadCards` to correctly propagate `mediaKind` from the index entry, ensuring pets are classified as 'pet' instead of 'text'.
+- **`src/utils/petCardUtils.ts`**: Added deduplication logic to `loadPetCards`. It now maps entries by `cardId` and keeps only the latest version, ensuring a pet only exists in its most recent zone.
+- **`src/pages/Pets.tsx`**: Implemented `onDragEnd` handler to reload the sanctuary view immediately after a successful drop (`dropEffect === 'move'`), removing the transferred pet from the main view.
+- **`src/components/pets/Pet.tsx`**: Exposed `onDragEnd` prop to the draggable element.
+
+**Outcome:**
+- Pets created now appear correctly in the Card Library.
+- Dragging a pet from Sanctuary to Header correctly moves it (disappears from Sanctuary, appears in Header).
+- No more duplicate pets appearing in both zones simultaneously.
+
+**Files modified:**
+- `src/pages/CardLibrary.tsx`
+- `src/utils/petCardUtils.ts`
+- `src/pages/Pets.tsx`
+- `src/components/pets/Pet.tsx`
+
+**Tags:** #bugfix #pets #drag-drop #data-integrity
+**Est. Avg. Human Dev Time:** 1.0 hours

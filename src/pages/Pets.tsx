@@ -315,6 +315,14 @@ const Pets: React.FC = () => {
         e.dataTransfer.effectAllowed = 'move';
     }, [petCards]);
 
+    const handlePetDragEnd = useCallback((e: React.DragEvent) => {
+        // If drop was successful (moved)
+        if (e.dataTransfer.dropEffect === 'move') {
+            // Reload sanctuary pets to reflect the move
+            loadSanctuaryPets();
+        }
+    }, [loadSanctuaryPets]);
+
     // Handle drop - return pet from header to sanctuary
     const handleDrop = useCallback(async (e: React.DragEvent) => {
         e.preventDefault();
@@ -426,6 +434,7 @@ const Pets: React.FC = () => {
                         pet={pet} 
                         onPetClick={handlePetClick}
                         onDragStart={(e) => handlePetDragStart(pet.id, e)}
+                        onDragEnd={handlePetDragEnd}
                         draggable={!!petCards.get(pet.id)}
                     />
                 ))}

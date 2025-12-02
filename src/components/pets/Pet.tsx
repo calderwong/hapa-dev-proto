@@ -7,10 +7,11 @@ interface PetProps {
     pet: PetInstance;
     onPetClick?: (petId: string) => void;
     onDragStart?: (e: React.DragEvent) => void;
+    onDragEnd?: (e: React.DragEvent) => void;
     draggable?: boolean;
 }
 
-const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, draggable = false }) => {
+const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, onDragEnd, draggable = false }) => {
     // Map state to asset filename
     // We downloaded: black_idle.gif, black_walk.gif, black_run.gif, black_lie.gif
 
@@ -69,6 +70,12 @@ const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, draggable = fal
         }
     };
 
+    const handleDragEnd = (e: React.DragEvent) => {
+        if (onDragEnd) {
+            onDragEnd(e);
+        }
+    };
+
     return (
         <div 
             style={style} 
@@ -76,6 +83,7 @@ const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, draggable = fal
             onClick={handleClick}
             draggable={draggable}
             onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
             className={draggable ? 'cursor-grab active:cursor-grabbing' : ''}
         >
             <img
