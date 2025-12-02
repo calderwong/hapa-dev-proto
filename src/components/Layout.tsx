@@ -228,9 +228,9 @@ const Layout: React.FC = () => {
                         <div className="relative flex-shrink-0">
                             <div className="absolute inset-0 bg-astro-primary blur-md opacity-20 rounded-lg group-hover:opacity-40 transition-opacity duration-500"></div>
                             <img
-                                src="hapa-cat.png"
-                                alt="Hapa logo"
-                                className="relative w-12 h-12 rounded-lg object-cover border border-gray-600 shadow-xl ring-1 ring-white/10"
+                                src="/Paramation_Logo.png"
+                                alt="Paramation logo"
+                                className="relative w-12 h-12 rounded-lg object-contain bg-gray-800 border border-gray-600 shadow-xl ring-1 ring-white/10"
                             />
                             <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-gray-800 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
                         </div>

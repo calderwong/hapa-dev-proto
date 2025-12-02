@@ -940,7 +940,7 @@ const extractKeyTermsWithGemini = async (
 
 const getAppIconPath = () => {
   const base = isDev ? '../public' : '../dist-renderer';
-  return path.join(__dirname, base, 'hapa-cat.png');
+  return path.join(__dirname, base, 'Paramation_Logo.png');
 };
 
 function createWindow() {
