@@ -3,7 +3,7 @@
  * Inspired by: Diablo loot, Path of Exile, Borderlands, Destiny
  */
 
-export type CardType = 'image' | 'video' | 'audio' | 'text' | 'extracted' | 'sprite';
+export type CardType = 'image' | 'video' | 'audio' | 'text' | 'extracted' | 'sprite' | 'pet';
 export type CardQualityTier = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
 
 export interface CardQualityResult {
@@ -19,7 +19,7 @@ export interface CardQualityResult {
 
 export interface CardForQuality {
   name?: string;
-  mediaKind?: 'image' | 'video' | 'audio';
+  mediaKind?: 'image' | 'video' | 'audio' | 'pet';
   subType?: string;
   derivedGif?: any;
   cardRecord?: {
@@ -179,6 +179,7 @@ export function getCardType(card: CardForQuality): CardType {
   if (card.mediaKind === 'video') return 'video';
   if (card.mediaKind === 'audio') return 'audio';
   if (card.mediaKind === 'image') return 'image';
+  if (card.mediaKind === 'pet') return 'pet';
   return 'text';
 }
 
@@ -222,5 +223,6 @@ export function getAllCardTypes(): { value: CardType; label: string; icon: strin
     { value: 'text', label: 'Text', icon: 'description' },
     { value: 'extracted', label: 'Extracted', icon: 'content-cut' },
     { value: 'sprite', label: 'Sprite', icon: 'animation' },
+    { value: 'pet', label: 'Pet', icon: 'pets' },
   ];
 }

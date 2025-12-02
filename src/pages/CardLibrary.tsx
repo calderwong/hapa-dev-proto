@@ -26,7 +26,7 @@ interface CardIndexEntry {
     coreDiscoveryKey?: string;
     thumbnail?: string;
     raw: any;
-    mediaKind?: 'image' | 'video' | 'audio' | 'message';
+    mediaKind?: 'image' | 'video' | 'audio' | 'message' | 'pet';
     mediaLocalPath?: string;
     mediaRemoteUrl?: string;
     mediaMimeType?: string;
