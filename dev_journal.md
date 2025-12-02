@@ -1228,3 +1228,56 @@ This architecture enables:
 
 **Tags:** #feature #pets #cards #agents #drag-drop #portal #architecture
 **Est. Avg. Human Dev Time:** 4 hours
+
+## Entry 20 – Pet Behavior System & Physics Engine
+**Prompt:** "Make pet behavior in the header more sophisticated to respond to different types of environments... think about scaffolding design and how to update the intelligence and behavior..."
+
+**Summary of actions:**
+Refactored the Pet Portal to use a sophisticated "Brain + Body" architecture, enabling physics-based movement and environment-aware behaviors.
+
+**Design Document Created:**
+`docs/PET_BEHAVIOR_SYSTEM_DESIGN.md` - Outlines the separation of decision making (Brain) from execution (Physics/Body).
+
+**Implementation Details:**
+
+1.  **Physics System (`types.ts`, `petCardUtils.ts`)**
+    - Added `EnvironmentPhysics` interface:
+      - `gravity`: Controls Y-axis pull (allows space floating)
+      - `friction`: Controls X-axis deceleration (allows slippery surfaces)
+      - `verticality`: Boolean for whether pets can fly/float
+      - `bounciness`: Wall restitution
+    - Updated all `ENVIRONMENT_THEMES` with specific physics profiles.
+
+2.  **Behavior Engine (`HeaderPetController.ts`)**
+    - **The Brain (`PetBehaviorEngine`)**: 
+      - Uses a weighted random system for state transitions.
+      - Modifies weights based on "Personality" (derived from speed) and Environment.
+      - Example: "Energetic" pets run more; "Space" environment encourages idling/floating.
+    - **The Body (`HeaderPetController`)**:
+      - Implements a physics loop separate from the state machine.
+      - Handles velocity, acceleration, gravity, and collision detection.
+      - "Soft" wall collisions (turn around or bounce) instead of hard resets.
+      - Smooth 30fps update loop for fluid animation.
+
+3.  **Component Integration (`PetPortal.tsx`)**
+    - Replaced inline controller with the new class.
+    - Updated `MiniPet` renderer to handle Y-axis positioning (jumping/floating).
+    - Connected theme changes to the physics engine instantly.
+
+**Outcome:**
+Pets now behave differently depending on the theme:
+- **Meadow**: Walk/Run normally.
+- **Space**: Float around with low gravity, bouncing off walls.
+- **Cyber**: Heavy gravity, sticky movement.
+- **Night**: Slightly slippery.
+
+**Files created:**
+- `src/components/pets/HeaderPetController.ts`
+
+**Files modified:**
+- `src/components/pets/types.ts`
+- `src/utils/petCardUtils.ts`
+- `src/components/pets/PetPortal.tsx`
+
+**Tags:** #feature #pets #ai #physics #architecture
+**Est. Avg. Human Dev Time:** 3.5 hours

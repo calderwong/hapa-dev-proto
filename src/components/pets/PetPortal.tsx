@@ -7,6 +7,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { PetCard, PetInstance, PetConfig, EnvironmentTheme, PetZone } from './types';
 import { PetState } from './types';
+import { HeaderPetController } from './HeaderPetController';
 import { 
   loadPetsByZone, 
   updatePetLocation, 
@@ -16,100 +17,6 @@ import {
   ENVIRONMENT_THEMES 
 } from '../../utils/petCardUtils';
 
-// Smaller controller for header pets
-class HeaderPetController {
-  private pets: PetInstance[] = [];
-  private containerWidth: number = 0;
-  private containerHeight: number = 0;
-
-  constructor(width: number, height: number) {
-    this.containerWidth = width;
-    this.containerHeight = height;
-  }
-
-  public addPet(config: PetConfig, cardRef?: { cardId: string; coreName: string }) {
-    const existing = this.pets.find(p => p.id === config.id);
-    if (existing) return; // Already exists
-
-    this.pets.push({
-      id: config.id,
-      config,
-      position: {
-        x: Math.random() * Math.max(0, this.containerWidth - 32),
-        y: 0,
-        direction: Math.random() > 0.5 ? 'right' : 'left',
-      },
-      state: PetState.SitIdle,
-      nextStateTime: Date.now() + 2000 + Math.random() * 3000,
-      cardRef,
-    });
-  }
-
-  public removePet(id: string) {
-    this.pets = this.pets.filter(p => p.id !== id);
-  }
-
-  public getPets(): PetInstance[] {
-    return this.pets;
-  }
-
-  public updateDimensions(width: number, height: number) {
-    this.containerWidth = width;
-    this.containerHeight = height;
-  }
-
-  public tick() {
-    const now = Date.now();
-    
-    this.pets.forEach(pet => {
-      // State transition
-      if (now >= pet.nextStateTime) {
-        this.changeState(pet);
-      }
-
-      // Movement
-      const speed = (pet.config.speed * 0.3); // Slower in header
-      
-      if (pet.state === PetState.WalkRight) {
-        pet.position.x += speed;
-        pet.position.direction = 'right';
-      } else if (pet.state === PetState.WalkLeft) {
-        pet.position.x -= speed;
-        pet.position.direction = 'left';
-      }
-
-      // Boundary check
-      if (pet.position.x <= 0) {
-        pet.position.x = 0;
-        pet.position.direction = 'right';
-        this.changeState(pet);
-      } else if (pet.position.x >= this.containerWidth - 28) {
-        pet.position.x = this.containerWidth - 28;
-        pet.position.direction = 'left';
-        this.changeState(pet);
-      }
-    });
-  }
-
-  private changeState(pet: PetInstance) {
-    const rand = Math.random();
-    
-    if (rand < 0.5) {
-      // Idle
-      pet.state = PetState.SitIdle;
-      pet.nextStateTime = Date.now() + 2000 + Math.random() * 3000;
-    } else if (rand < 0.75) {
-      // Walk right
-      pet.state = PetState.WalkRight;
-      pet.nextStateTime = Date.now() + 1500 + Math.random() * 2000;
-    } else {
-      // Walk left
-      pet.state = PetState.WalkLeft;
-      pet.nextStateTime = Date.now() + 1500 + Math.random() * 2000;
-    }
-  }
-}
-
 // Mini pet renderer for header
 const MiniPet: React.FC<{ 
   pet: PetInstance; 
@@ -117,6 +24,7 @@ const MiniPet: React.FC<{
 }> = ({ pet, onDragStart }) => {
   let action = 'idle';
   if (pet.state === PetState.WalkRight || pet.state === PetState.WalkLeft) action = 'walk';
+  if (pet.state === PetState.RunRight || pet.state === PetState.RunLeft) action = 'run';
 
   let src = '';
   if (pet.config.type === 'custom' && pet.config.assets) {
@@ -135,10 +43,10 @@ const MiniPet: React.FC<{
     <div
       draggable
       onDragStart={handleDragStart}
-      className="absolute cursor-grab active:cursor-grabbing transition-[left] duration-100"
+      className="absolute cursor-grab active:cursor-grabbing transition-none" // Removed transition for smooth physics
       style={{
         left: `${pet.position.x}px`,
-        bottom: '2px',
+        bottom: `${pet.position.y + 2}px`, // Apply Y position from physics
         transform: pet.position.direction === 'left' ? 'scaleX(-1)' : 'none',
       }}
       title={`${pet.config.name} - Drag to move`}
@@ -172,7 +80,7 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
     if (!containerRef.current) return;
 
     const { clientWidth, clientHeight } = containerRef.current;
-    controllerRef.current = new HeaderPetController(clientWidth, clientHeight);
+    controllerRef.current = new HeaderPetController(clientWidth, clientHeight, theme);
 
     // Load pets in header zone
     loadPetsByZone('header').then((headerPets) => {
@@ -189,13 +97,13 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
       setPets([...controllerRef.current?.getPets() || []]);
     });
 
-    // Game loop - slower for header (5fps)
+    // Game loop - 30fps for smooth physics
     const interval = setInterval(() => {
       if (controllerRef.current) {
         controllerRef.current.tick();
         setPets([...controllerRef.current.getPets()]);
       }
-    }, 200);
+    }, 33);
 
     // Resize handler
     const handleResize = () => {
@@ -213,7 +121,14 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
       clearInterval(interval);
       window.removeEventListener('resize', handleResize);
     };
-  }, []);
+  }, []); // Run once on mount
+
+  // Update environment when theme changes
+  useEffect(() => {
+    if (controllerRef.current) {
+      controllerRef.current.setEnvironment(theme);
+    }
+  }, [theme]);
 
   // Handle pet drag from portal to remove/return to sanctuary
   const handlePetDragStart = useCallback((pet: PetInstance, e: React.DragEvent) => {

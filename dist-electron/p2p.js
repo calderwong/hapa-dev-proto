@@ -39,7 +39,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.initP2P = initP2P;
 exports.createCore = createCore;
 exports.appendToCore = appendToCore;
+exports.getCoreLength = getCoreLength;
 exports.readCore = readCore;
+exports.getP2PStats = getP2PStats;
 const hypercore_1 = __importDefault(require("hypercore"));
 const hyperswarm_1 = __importDefault(require("hyperswarm"));
 const b4a = __importStar(require("b4a"));
@@ -89,7 +91,8 @@ async function createCore(name) {
     if (!joinedTopics.has(topicHex)) {
         swarm.join(core.discoveryKey);
         joinedTopics.add(topicHex);
-        await swarm.flush();
+        // Do not await flush; let discovery happen in background
+        swarm.flush().catch((err) => console.error('Swarm flush error:', err));
     }
     return {
         key: b4a.toString(core.key, 'hex'),
@@ -105,15 +108,68 @@ async function appendToCore(name, data) {
     await core.append(data);
     return { length: core.length };
 }
-async function readCore(name) {
-    const core = cores.get(name);
+async function getCoreLength(name) {
+    let core = cores.get(name);
     if (!core) {
-        throw new Error(`Core ${name} not found`);
+        const info = await createCore(name);
+        core = cores.get(name);
+        if (!core) {
+            throw new Error(`Core ${name} not found after create (key=${info?.key})`);
+        }
     }
+    return core.length;
+}
+async function readCore(name, options = {}) {
+    let core = cores.get(name);
+    if (!core) {
+        // Lazily open or create the core using the same path and swarm wiring as createCore.
+        const info = await createCore(name);
+        core = cores.get(name);
+        if (!core) {
+            throw new Error(`Core ${name} not found after create (key=${info?.key})`);
+        }
+    }
+    const length = core.length;
+    let { start, end, reverse, limit } = options;
+    // If limit is provided but no end, calculate end
+    if (limit !== undefined && end === undefined) {
+        if (reverse) {
+            // Reading backwards
+            // If start is not provided, start from end (length)
+            const from = start !== undefined ? start : length;
+            const to = Math.max(0, from - limit);
+            start = to;
+            end = from;
+        }
+        else {
+            // Reading forwards
+            const from = start !== undefined ? start : 0;
+            end = from + limit;
+            start = from;
+        }
+    }
+    const stream = core.createReadStream({
+        start,
+        end,
+        reverse
+    });
     const entries = [];
-    for (let i = 0; i < core.length; i++) {
-        const block = await core.get(i);
+    for await (const block of stream) {
         entries.push(b4a.toString(block));
     }
     return entries;
+}
+async function getP2PStats() {
+    if (!swarm)
+        return { peers: 0, publicKey: undefined };
+    // Try to get key from card-library core if available
+    let publicKey;
+    const core = cores.get('card-library');
+    if (core) {
+        publicKey = b4a.toString(core.key, 'hex');
+    }
+    return {
+        peers: swarm.connections.size,
+        publicKey
+    };
 }

@@ -147,6 +147,14 @@ export interface PetDragData {
     petCard: PetCard;
 }
 
+// Environment physics configuration
+export interface EnvironmentPhysics {
+    gravity: number;        // 1.0 = normal, 0.1 = space (affects Y movement)
+    friction: number;       // 1.0 = normal, 0.1 = ice (affects X deceleration)
+    verticality: boolean;   // Can pets move up/down freely? (e.g. Space/Water)
+    bounciness: number;     // Wall restitution (0.0 - 1.0)
+}
+
 // Environment theme for pet portal
 export interface EnvironmentTheme {
     id: string;
@@ -154,4 +162,5 @@ export interface EnvironmentTheme {
     background: string;            // CSS gradient or image
     groundColor: string;
     ambientParticles?: boolean;    // Floating effects
+    physics: EnvironmentPhysics;   // Physics modifiers
 }

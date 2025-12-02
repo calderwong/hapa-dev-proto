@@ -23,6 +23,12 @@ export const ENVIRONMENT_THEMES: EnvironmentTheme[] = [
     name: 'Sunny Meadow',
     background: 'linear-gradient(to bottom, #87CEEB 0%, #a8e6cf 60%, #88d8b0 100%)',
     groundColor: '#5a9c6f',
+    physics: {
+        gravity: 1.0,
+        friction: 0.85,
+        verticality: false,
+        bounciness: 0.2
+    }
   },
   {
     id: 'night',
@@ -30,18 +36,36 @@ export const ENVIRONMENT_THEMES: EnvironmentTheme[] = [
     background: 'linear-gradient(to bottom, #0a0a2e 0%, #1a1a4e 50%, #2a1a3e 100%)',
     groundColor: '#2d2d4d',
     ambientParticles: true,
+    physics: {
+        gravity: 0.9,
+        friction: 0.8,
+        verticality: false,
+        bounciness: 0.1
+    }
   },
   {
     id: 'cyber',
     name: 'Cyber Grid',
     background: 'linear-gradient(to bottom, #0a0a1a 0%, #1a0a2e 50%, #0f0f1f 100%)',
     groundColor: 'rgba(77, 184, 255, 0.15)',
+    physics: {
+        gravity: 1.2,     // Heavy digital gravity
+        friction: 0.95,   // Very grippy
+        verticality: false,
+        bounciness: 0.0   // No bounce
+    }
   },
   {
     id: 'sunset',
     name: 'Golden Sunset',
     background: 'linear-gradient(to bottom, #ff7e5f 0%, #feb47b 50%, #ffcf8b 100%)',
     groundColor: '#8b6b4f',
+    physics: {
+        gravity: 1.0,
+        friction: 0.7,    // A bit sandy/slippery
+        verticality: false,
+        bounciness: 0.3
+    }
   },
   {
     id: 'space',
@@ -49,6 +73,12 @@ export const ENVIRONMENT_THEMES: EnvironmentTheme[] = [
     background: 'linear-gradient(to bottom, #000011 0%, #0a0a2e 50%, #1a0a3e 100%)',
     groundColor: '#333355',
     ambientParticles: true,
+    physics: {
+        gravity: 0.1,     // Very low gravity
+        friction: 0.98,   // No air resistance/friction
+        verticality: true, // Can float up
+        bounciness: 0.8   // Bouncy walls
+    }
   },
 ];
 
