@@ -457,3 +457,673 @@
 
 **Tags:** #feature #card-library #tooltips #ux #css
 **Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 25 – Card Lineage & Extraction System
+**Prompt:** "For cards that have videos, add functionality to capture first frame, last frame, and audio by extracting them into their own cards with child relationships pointing back to the video card. Update card details to show lineage and relationships. Rethink UI and animations for navigating between cards."
+
+**Summary of actions:**
+- Created comprehensive design document: `docs/CARD_LINEAGE_EXTRACTION_DESIGN.md`
+
+**Implementation:**
+1. **Data Model**:
+   - Added `parentCardId` and `childCardIds` to card records
+   - Added `extractionSource` metadata (type, extractedAt, sourceVideoPath)
+
+2. **Extraction Functionality** (CardLibrary.tsx):
+   - `handleExtract()` - Extracts first-frame, last-frame, or audio from video cards
+   - Creates new child card with parent reference
+   - Updates parent card with child ID
+   - Indexes relationships in card-library
+
+3. **Lineage Display** (Card Inspector):
+   - Parent card preview with click-to-navigate
+   - Children carousel with mini previews
+   - Sibling navigation for extracted cards
+   - "Original (No Parent)" badge for root cards
+
+4. **Grid Indicators**:
+   - Child count badge (top-left) with tree icon
+   - Parent indicator (bottom-left) with link icon
+
+5. **CSS Animations** (index.css):
+   - `zoom-to-child` / `zoom-to-parent` for hierarchy navigation
+   - `slide-sibling-left/right` for sibling navigation
+   - `card-appear` variants for smooth entry
+   - `lineage-pulse` for connection emphasis
+   - `extract-pulse` for extraction buttons
+
+6. **Navigation State Machine**:
+   - `navigateToCard(card, relationship)` function
+   - Plays exit animation, delays, then shows new card
+   - Relationship-aware transitions
+
+**Files created:**
+- `docs/CARD_LINEAGE_EXTRACTION_DESIGN.md`
+
+**Files modified:**
+- `src/index.css` (navigation animations)
+- `src/pages/CardLibrary.tsx` (extraction, lineage, navigation)
+
+**Tags:** #feature #card-library #extraction #lineage #animation #parent-child
+**Est. Avg. Human Dev Time:** 3.0 hours
+
+## Entry 26 – Drag-and-Drop Frames to Veo Video Options
+**Prompt:** "Can you make it so I can easily add the first or last frame into the video UI as the first or last frame for a new video gen request? Try to make it with as least friction and as intuitive as possible."
+
+**Summary of actions:**
+- Added drag-and-drop support to VeoOptionsPanel frame slots
+- Auto-expand Veo panel when dragging frames over Chat
+- Updated CardLibrary to include full card data in drag events
+
+**Implementation:**
+1. **VeoOptionsPanel.tsx**:
+   - Added `dragOverTarget` state for visual feedback
+   - Added `handleDragOver`, `handleDragLeave`, `handleDrop` handlers
+   - Drop handler parses JSON card data OR reads from file system
+   - Visual feedback: cyan glow on start frame, pink glow on end frame
+   - "Drop Here!" text and file-download icon when hovering
+
+2. **CardLibrary.tsx**:
+   - Enhanced `handleDragStart` to set `application/json` data
+   - Includes: cardId, name, mediaKind, mediaLocalPath, thumbnail, image data
+
+3. **Chat.tsx**:
+   - Added `isDraggingFrame` and `frameDropTarget` state
+   - Global drag event listeners detect when cards are being dragged
+   - Auto-expands Veo options panel when dragging over chat (if Veo model selected)
+
+**UX Flow:**
+1. User drags image card from Card Library
+2. Chat detects drag, auto-opens Veo options panel
+3. User drops on Start Frame or End Frame slot
+4. Frame is loaded and ready for video generation
+
+**Files modified:**
+- `src/components/VeoOptionsPanel.tsx` (drop zones + handlers)
+- `src/pages/CardLibrary.tsx` (richer drag data)
+- `src/pages/Chat.tsx` (auto-expand on drag)
+
+**Tags:** #feature #drag-drop #veo #video-generation #ux
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 27 – Chat Media Sidebar Gallery
+**Prompt:** "Can you create a feature that keeps thumbnails of all of the media created in a given chat thread, maybe as column on the side, that allows a user to click to open up their card details, but ALSO drag and drop them into media buckets like start and end frame in specific widgets like the veo video options."
+
+**Summary of actions:**
+- Created collapsible media sidebar in Chat view
+- Aggregates all media from current thread (videos, extracted frames, attachments)
+- All image items are draggable to Veo frame slots
+- Click to navigate to Card Library
+
+**Implementation:**
+1. **ThreadMediaItem type & useMemo**:
+   - Computes all media from messages: generated videos, extracted frames, image attachments
+   - Each item has: id, type (video/image/audio), source (generated/extracted/attachment), dataUrl, label
+
+2. **Media Sidebar Component** (embedded in Chat.tsx):
+   - Collapsible sidebar on right side (w-48 expanded, w-10 collapsed)
+   - Toggle button with chevron icon
+   - Shows media count in header
+
+3. **Expanded State**:
+   - Full thumbnails with labels
+   - Hover overlay shows grab icon (for images) or open-in-new (for videos/audio)
+   - Type badge in corner (purple=video, cyan=audio, green=image)
+   - Source label (generated/extracted/attachment)
+
+4. **Collapsed State**:
+   - Compact 8x8 thumbnail grid
+   - Shows first 10 items + count badge for overflow
+
+5. **Drag Support**:
+   - Images emit `application/json` with card data
+   - Compatible with VeoOptionsPanel drop zones
+   - `cursor-grab` / `cursor-grabbing` states
+
+**Layout Change:**
+```
+┌─────────────────────────────────────────────────────────┐
+│  HEADER                                                 │
+├──────────────────────────────────────────┬──────────────┤
+│                                          │  MEDIA (5)   │
+│     MESSAGE STREAM                       │  ┌────────┐  │
+│                                          │  │ frame1 │  │
+│     [user bubble]                        │  └────────┘  │
+│                                          │  ┌────────┐  │
+│     [assistant bubble with video]        │  │ frame2 │  │
+│                                          │  └────────┘  │
+│                                          │  ┌────────┐  │
+│                                          │  │ video  │  │
+│                                          │  └────────┘  │
+├──────────────────────────────────────────┴──────────────┤
+│  VEO OPTIONS PANEL (if Veo model selected)              │
+├─────────────────────────────────────────────────────────┤
+│  CHAT INPUT                                             │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Files modified:**
+- `src/pages/Chat.tsx` (sidebar component + layout restructure)
+
+**Tags:** #feature #sidebar #media-gallery #drag-drop #ux
+**Est. Avg. Human Dev Time:** 2.0 hours
+
+## Entry 28 – Clipboard Paste for Images
+**Prompt:** "Can you make it so I can paste / ctrl+v images copied to the clipboard into the chat UI wherever I could drop a file in?"
+
+**Summary of actions:**
+- Added global clipboard paste handler to ChatInput component
+- Added paste support to Veo frame slots
+
+**Implementation:**
+1. **ChatInput.tsx - Global Paste Handler**:
+   - Added `handleWindowPaste` listener in capture phase (alongside drag handlers)
+   - Checks clipboard for image/* MIME types
+   - Converts clipboard items to Files and processes via `addAttachmentFromBlob`
+   - Generates timestamped filenames: `clipboard-2025-12-01T23-45-00-000Z.png`
+   - Only prevents default if images are found (allows normal text paste)
+
+2. **VeoOptionsPanel.tsx - Frame Slot Paste**:
+   - Added `handlePaste` function for frame slots
+   - Made frame containers focusable with `tabIndex={0}`
+   - Added focus ring styles for visual feedback
+   - Paste works when frame slot is focused
+
+**Usage:**
+```
+┌─────────────────────────────────────────┐
+│  Screenshot copied to clipboard         │
+│                                         │
+│  Press Ctrl+V anywhere in Chat →        │
+│  Image appears as attachment            │
+│                                         │
+│  OR click on Veo Start Frame slot →     │
+│  Press Ctrl+V → Image becomes frame     │
+└─────────────────────────────────────────┘
+```
+
+**Files modified:**
+- `src/components/ChatInput.tsx` (global paste handler)
+- `src/components/VeoOptionsPanel.tsx` (frame slot paste)
+
+**Tags:** #feature #clipboard #paste #ux #accessibility
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 29 – Save Message as Card Feature
+**Prompt:** "Add a feature to chat dialog boxes that create a button to add that specific message from the requestor OR the response as a NEW card into the library as a new card type: 'message' and store metadata for the chat parent hypercore/thread as well as pointers for to the parent message in that thread. Associate any thumbnails/media to the new card."
+
+**Summary of actions:**
+- Created new `message` card type for storing chat messages
+- Added "Save as Card" button to each message bubble
+- Message cards include: content, role, attachments, video, extracted cards
+- Thread context and message IDs stored for navigation
+- Updated CardLibrary to display and handle message cards
+
+**Implementation:**
+1. **Chat.tsx - createMessageCard function**:
+   - Creates hypercore with `msg-{timestamp}-{random}` ID
+   - Stores full message context:
+     - `thread.id` and `thread.messageId` for parent reference
+     - `message.role`, `message.content`, `message.provider`, `message.model`
+     - `attachments[]` with full dataUrl for each attachment
+     - `video` reference if generated
+     - `extractedCards` references to any extracted frames/audio
+   - Adds to card-library index with thumbnail from first attachment
+
+2. **Chat.tsx - Message Actions Bar UI**:
+   - Added action bar below each message bubble
+   - "Save as Card" button with loading/saved states
+   - Shows attachment count badge (e.g., "+3 media")
+   - "View Card" button appears after saving
+
+3. **CardLibrary.tsx - Message Card Support**:
+   - Extended `CardIndexEntry` interface with message-specific fields
+   - Updated `enrichWithCardRecords` to detect and parse message cards
+   - Added message card rendering in `renderThumbnail`:
+     - Shows thumbnail from first attachment if available
+     - Otherwise shows text preview with role indicator
+     - Displays attachment count and video badges
+   - Updated media kind icon to show chat icon for messages
+
+**Card Structure:**
+```json
+{
+  "type": "card",
+  "kind": "message",
+  "id": "msg-1701494400000-abc123",
+  "thread": {
+    "id": "thread-uuid",
+    "messageId": "msg-original-id"
+  },
+  "message": {
+    "role": "user",
+    "content": "Generate a video of...",
+    "provider": "gemini",
+    "model": "veo-3.1-fast"
+  },
+  "attachments": [
+    { "index": 0, "fileName": "start.png", "mimeType": "image/png", "dataUrl": "..." }
+  ],
+  "video": { "localPath": "...", "mimeType": "video/mp4" },
+  "extractedCards": {
+    "firstFrame": { "cardId": "...", "coreName": "...", "kind": "image" }
+  }
+}
+```
+
+**UI Layout:**
+```
+┌────────────────────────────────────────────────────┐
+│  USER MESSAGE                                      │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ [img1] [img2]                                │  │
+│  │ Generate a video of a cat transforming...   │  │
+│  └──────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ [Save as Card +2 media] [View Card]          │  │
+│  └──────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────┘
+```
+
+**Files modified:**
+- `src/pages/Chat.tsx` (createMessageCard + UI)
+- `src/pages/CardLibrary.tsx` (message card support)
+
+**Tags:** #feature #cards #message-card #library #metadata
+**Est. Avg. Human Dev Time:** 2.5 hours
+
+## Entry 30 – Message Card Context Attachment System
+**Prompt:** "Persist 'Saved to Library' state, add message cards to media sidebar, make them draggable into chat input as 'mounted' context with animated border, store attached cards in message schema for history viewing."
+
+**Summary of actions:**
+- Persisted messageCardState to localStorage per thread
+- Added message cards to thread media sidebar
+- Created drag-and-drop for message cards into ChatInput
+- Built "Context Attached" UI with animated purple border
+- Updated Message interface to include attachedMessageCards
+- Display attached cards in message history
+
+**Implementation:**
+
+1. **Persistence (Chat.tsx)**:
+   - messageCardState loaded from localStorage on mount
+   - Saved to `chatMessageCards_{threadId}` on changes
+   - Stores: hasCard, cardCoreName, thumbnail, content
+
+2. **Media Sidebar - Message Cards**:
+   - Added 'message' type to ThreadMediaItem
+   - Render with role icon (👤/🤖), text preview, attachment count
+   - Draggable with 'application/x-message-card' data transfer type
+
+3. **ChatInput - Context Attachment**:
+   - New props: attachedMessageCards, setAttachedMessageCards
+   - Drop handler for 'application/x-message-card' mime type
+   - "Context Attached" UI section with animated purple border
+   - Compact chips showing role, preview, remove button
+   - onSend passes attachedMessageCards to parent
+
+4. **Message Schema Extension**:
+   - AttachedMessageCard interface: cardId, coreName, role, preview, thumbnail
+   - Message.attachedMessageCards?: AttachedMessageCard[]
+
+5. **History Display**:
+   - Shows "Referenced:" badge before message content
+   - Clickable chips to navigate to the referenced card
+
+**UI Flow:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ MEDIA SIDEBAR                                                    │
+│ ┌─────────────┐                                                  │
+│ │ 💬 MSG CARD │  ← Drag to ChatInput                            │
+│ │ "Generate..."│                                                  │
+│ └─────────────┘                                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ drag
+┌─────────────────────────────────────────────────────────────────┐
+│ CHAT INPUT                                                       │
+│ ╔═══════════════════════════════════════════════════════════╗   │
+│ ║ 💬 CONTEXT ATTACHED                      (animated glow)  ║   │
+│ ║ ┌────────────────────────┐                                 ║   │
+│ ║ │ 👤 "Generate an anim..." [×] │                          ║   │
+│ ║ └────────────────────────┘                                 ║   │
+│ ╚═══════════════════════════════════════════════════════════╝   │
+│ [textarea]                                                       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ send
+┌─────────────────────────────────────────────────────────────────┐
+│ MESSAGE IN HISTORY                                               │
+│ 🔗 Referenced: [💬 "Generate an animated..."]                   │
+│ Refine this prompt with more coffee steam details...            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Files modified:**
+- `src/pages/Chat.tsx` (state, sidebar, message display, handleSend)
+- `src/components/ChatInput.tsx` (props, drop handlers, UI)
+
+**Tags:** #feature #context #drag-drop #message-card #ux
+**Est. Avg. Human Dev Time:** 3.5 hours
+
+## Entry 31 – Card Library Attachment System with Lineage
+**Prompt:** "Make attachment button let users select from card library. Show distinction between card-sourced vs uploaded. Establish parent/child lineage when message cards are created from messages with attached cards."
+
+**Summary of actions:**
+- Extended Attachment interface with `fromCard` for card source tracking
+- Added attachment dropdown menu: "Upload File" or "From Library"
+- Created card library picker modal for selecting media cards
+- Added visual distinction (purple border for library, cyan for uploads)
+- Track parent card references in message schema
+- Establish parent/child lineage in createMessageCard
+
+**Implementation:**
+
+1. **Extended Interfaces (Chat.tsx, ChatInput.tsx)**:
+   ```typescript
+   interface Attachment {
+     // ... existing
+     fromCard?: {
+       cardId: string;
+       coreName: string;
+       mediaKind: 'image' | 'video' | 'audio';
+       name?: string;
+     };
+   }
+   
+   interface Message {
+     // ... existing
+     parentCardRefs?: AttachmentCardSource[];
+   }
+   ```
+
+2. **Attachment Button Dropdown (ChatInput.tsx)**:
+   - Click attachment → dropdown appears
+   - "Upload File" → opens file picker
+   - "From Library" → opens card picker modal
+
+3. **Card Library Picker Modal (Chat.tsx)**:
+   - Grid of all media cards (image/video/audio)
+   - Click to add as attachment
+   - Loads card data and converts to attachment
+
+4. **Visual Distinction in Thumbnails**:
+   - **Purple border + 📚 Library badge** = from Card Library
+   - **Cyan badge + ☁️ Upload** = user uploaded
+
+5. **Parent/Child Lineage (createMessageCard)**:
+   - `parentCards` array in card record
+   - Relations: `media-attached` (card media used), `context-reference` (message cards)
+   - Navigable from Card Library details
+
+**UI Flow:**
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ ATTACHMENT BUTTON DROPDOWN                                        │
+│ ┌──────────────────────────┐                                      │
+│ │ 📁 Upload File           │  ← Opens file picker                │
+│ │     From your device     │                                      │
+│ ├──────────────────────────┤                                      │
+│ │ 📚 From Library          │  ← Opens card picker modal          │
+│ │     Select a card        │                                      │
+│ └──────────────────────────┘                                      │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│ ATTACHMENT PREVIEW (in ChatInput)                                 │
+│ ┌────────────┐ ┌────────────┐                                    │
+│ │ [image]    │ │ [image]    │                                    │
+│ │ ───────────│ │ ───────────│                                    │
+│ │ 📚 Library │ │ ☁️ Upload  │  ← Distinct badges                 │
+│ └────────────┘ └────────────┘                                    │
+│  purple border   cyan badge                                       │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│ MESSAGE CARD LINEAGE                                              │
+│ ┌─────────────────────────────────────────────────────────────┐  │
+│ │ Parent Cards:                                                │  │
+│ │ • [Image Card A] - media-attached                           │  │
+│ │ • [Message Card B] - context-reference                      │  │
+│ └─────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Files modified:**
+- `src/components/ChatInput.tsx` (Attachment interface, dropdown, badges)
+- `src/pages/Chat.tsx` (picker modal, handlers, lineage, message display)
+
+**Tags:** #feature #cards #attachments #lineage #library
+**Est. Avg. Human Dev Time:** 4 hours
+
+## Entry 32 – Imagen/Nano Banana Options Panel
+**Prompt:** "Investigate Google's Nano Banana/Imagen models documentation, create a plan, and implement a crafted UI like Veo for image generation options."
+
+**Research Findings:**
+
+### Google Imagen API Parameters:
+- `numberOfImages`: 1-4 images per generation
+- `aspectRatio`: 1:1, 3:4, 4:3, 9:16, 16:9
+- `imageSize`: 1K (1024px) or 2K (2048px) - Standard/Ultra only
+- `personGeneration`: dont_allow, allow_adult, allow_all
+- `negativePrompt`: Things to avoid in generation
+- `outputMimeType`: image/png or image/jpeg
+
+### Model Variants:
+| Model | Type | Notes |
+|-------|------|-------|
+| `imagen-4.0-generate-001` | Standard | Balanced quality/speed |
+| `imagen-4.0-ultra-generate-001` | Ultra | Highest quality, 2K support |
+| `imagen-4.0-fast-generate-001` | Fast | Speed optimized |
+| `nano-banana-*` | Experimental | Google's preview models |
+
+### Advanced Features (Phase 2):
+- Inpainting (insert/remove objects)
+- Outpainting (expand image borders)
+- Style transfer from reference images
+- Subject customization
+
+**Implementation:**
+
+1. **Created Plan Document**: `docs/imagen-integration-plan.md`
+   - Full API documentation
+   - UI wireframes
+   - Implementation timeline
+
+2. **Created ImagenOptionsPanel Component**: `src/components/ImagenOptionsPanel.tsx`
+   - Visual aspect ratio selector with preview shapes
+   - Resolution dropdown (1K/2K based on model)
+   - Image count selector (1-4)
+   - Output format (PNG/JPEG)
+   - Person generation policy with region warning
+   - Negative prompt textarea
+   - Style reference image upload (optional)
+
+3. **Integrated into Chat.tsx**:
+   - Model detection: `isImagenModelSelected` via useMemo
+   - State: `showImagenPanel`, `imagenOptions`
+   - Collapsed bar showing current settings
+   - Expanded panel for full options
+
+**UI Design:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 🎨 IMAGEN OPTIONS                                    [×] Close │
+├─────────────────────────────────────────────────────────────────┤
+│ ASPECT RATIO                                                    │
+│ [□] [▯] [▬] [│] [━]                                            │
+│  1:1  3:4  4:3  9:16 16:9                                       │
+├─────────────────────────────────────────────────────────────────┤
+│ Resolution: [1K ▼]  Count: [4 ▼]  Format: [PNG ▼]              │
+├─────────────────────────────────────────────────────────────────┤
+│ PERSON GENERATION                                               │
+│ ○ Don't Allow  ● Adults Only  ○ Allow All                      │
+├─────────────────────────────────────────────────────────────────┤
+│ NEGATIVE PROMPT                                                 │
+│ [blurry, low quality, distorted...                           ] │
+├─────────────────────────────────────────────────────────────────┤
+│ STYLE REFERENCE (optional)                                      │
+│ [+ Drop or click to add style reference]                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Files created/modified:**
+- `docs/imagen-integration-plan.md` (NEW)
+- `src/components/ImagenOptionsPanel.tsx` (NEW)
+- `src/pages/Chat.tsx` (import, state, UI integration)
+
+**Next Steps:**
+- Backend integration to pass options to API
+- Multiple image grid display
+- Image editing features (inpainting, outpainting)
+
+**Tags:** #feature #imagen #image-generation #nano-banana #ui
+**Est. Avg. Human Dev Time:** 3 hours
+
+## Entry 33 – Imagen Config Cards: Saved Prompts & Templates
+**Prompt:** "Add ability to save negative prompts and full templates as cards in the library for easy reuse."
+
+**Design Thinking:**
+
+The goal is to build a "config card" system where users can:
+1. Save frequently-used negative prompts to their Card Library
+2. Save complete template configurations for one-click reuse
+3. Easily swap between saved configurations
+
+**Card Schema Design:**
+
+### Negative Prompt Card
+```typescript
+{
+  type: 'config',
+  subType: 'negative-prompt',
+  cardId: 'neg-prompt-1733123456789',
+  coreName: 'card-neg-prompt-...',
+  content: 'blurry, low quality, distorted...',
+  name: 'blurry, low quality, dist...',  // Truncated for display
+  createdAt: '2024-12-02T...'
+}
+```
+
+### Template Card
+```typescript
+{
+  type: 'config',
+  subType: 'imagen-template',
+  cardId: 'imagen-template-1733123456789',
+  coreName: 'card-imagen-template-...',
+  name: 'High Quality Portrait',
+  config: {
+    aspectRatio: '3:4',
+    imageSize: '2K',
+    numberOfImages: 4,
+    personGeneration: 'allow_adult',
+    negativePrompt: 'blurry...',
+    outputMimeType: 'image/png'
+  },
+  createdAt: '2024-12-02T...'
+}
+```
+
+**Implementation:**
+
+1. **Added Card Types**: `NegativePromptCard`, `ImagenTemplateCard` interfaces
+2. **Load from Library**: On mount, reads card-library core and filters by `subType`
+3. **Save Negative Prompt**: Creates new card core, saves content, indexes in library
+4. **Save Template**: Saves complete form state as template card
+5. **Load Config**: Clicking a saved card populates the form fields
+
+**UI Layout:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ NEGATIVE PROMPT (things to avoid)                    [💾 Save] │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ blurry, low quality, distorted...                          │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│ 🔖 SAVED PROMPTS                                                │
+│ [blurry, lo...] [anime sty...] [photore...] ← horizontal scroll │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ 📊 SAVED TEMPLATES                              [Show (3)]      │
+│ ┌──────────┐ ┌──────────┐ ┌──────────┐                         │
+│ │Portrait  │ │Landscape │ │Square HD │                         │
+│ │3:4  2K   │ │16:9  1K  │ │1:1  2K   │                         │
+│ └──────────┘ └──────────┘ └──────────┘                         │
+├─────────────────────────────────────────────────────────────────┤
+│ [📑 Save as Template]    Settings apply...        [Done]       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**UX Features:**
+- **Save Button**: Next to negative prompt label, saves current text
+- **Saved Prompts Carousel**: Horizontal scrollable row of clickable chips
+- **Template Cards**: Show aspect ratio + size badges for quick reference
+- **Selection State**: Active cards highlighted with colored border
+- **Auto-deselect**: Editing text manually clears selection
+- **Template Name Input**: Inline input with Enter/Escape shortcuts
+
+**Files modified:**
+- `src/components/ImagenOptionsPanel.tsx` (complete enhancement)
+
+**Tags:** #feature #cards #config #templates #negative-prompts
+**Est. Avg. Human Dev Time:** 2 hours
+
+---
+
+## Entry 18: Enhanced Message Cards with Generated Media Thumbnails & Drag-Drop
+**Date:** 2025-12-02
+**Prompt:** "when response messages are saved as cards and added to the right sidebar, can you also save/attach the returned media and show its thumbnail + make drag and dropping the image in the message saved as a card and on the sidebar work drag and drop like the other types that have images."
+
+### Execution Summary:
+
+**Problem:** When saving AI responses (e.g., from Nano Banana image generation) as message cards, the generated images embedded in the response content were not being extracted, saved, or displayed as thumbnails. The sidebar showed text previews instead of image thumbnails, and drag-drop didn't work the same as the library picker.
+
+**Solution Implemented:**
+
+1. **Extract Embedded Images from Markdown Content** (`Chat.tsx`)
+   - Added `extractEmbeddedImages()` helper to parse `![image](data:image/...;base64,...)` patterns
+   - Extracts dataUrl and mimeType from generated images in AI responses
+
+2. **Updated `createMessageCard` Function**
+   - Now extracts embedded images and stores them in `generatedImages` field
+   - Uses first embedded image as thumbnail if no attachments exist
+   - Adds `generatedImageCount` to library entry metadata
+
+3. **Updated Save Handler**
+   - Also extracts embedded images when setting thumbnail in `messageCardState`
+
+4. **Enhanced Sidebar Display**
+   - Message cards with image thumbnails now show the **actual image** instead of text preview
+   - Added "CARD" badge and role indicator overlay on image
+   - Falls back to text preview if no image available
+
+5. **Fixed Drag & Drop to Work Like Library Picker** (`ChatInput.tsx`)
+   - Updated drop handler to check for `application/json` data (image cards)
+   - Extracts image dataUrl and creates proper `Attachment` with `fromCard` metadata
+   - Now adds to `attachments` array, not just `attachedMessageCards`
+
+6. **Fixed Stutter During Drag**
+   - Removed state updates from `handleWindowDragOver` (was causing rapid re-renders)
+   - State now only set on `dragenter` and cleared on `dragleave`
+   - Added `application/json` type detection for image cards
+
+**Visual Result:**
+```
+Sidebar Card (with image):
+┌────────────────┐
+│ [Generated Img]│  ← Shows actual image thumbnail
+│ ───────────────│
+│ CARD    💜     │  ← Badge + role indicator
+│    Response    │
+└────────────────┘
+
+Drag flow:
+Sidebar Card → Drag → Drop on Input → Attachment locked in (like library picker)
+```
+
+**Files modified:**
+- `src/pages/Chat.tsx` (extractEmbeddedImages, createMessageCard, sidebar display, drag handling)
+- `src/components/ChatInput.tsx` (drop handler, drag state management)
+
+**Tags:** #feature #media #cards #drag-drop #thumbnails #sidebar
+**Est. Avg. Human Dev Time:** 2.5 hours

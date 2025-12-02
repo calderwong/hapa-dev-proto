@@ -1538,10 +1538,34 @@ app.whenReady().then(() => {
                   ? `${textContext}\n\nUser: ${message}`
                   : message;
 
+              // Build parts array with text prompt AND any image attachments
+              const parts: any[] = [{ text: prompt }];
+              
+              // Add image attachments as inline data for the model to use
+              if (attachments && attachments.length > 0) {
+                console.log(`Including ${attachments.length} attachment(s) in image generation request`);
+                for (const att of attachments) {
+                  if (att.mimeType && att.data) {
+                    // Ensure we have clean base64 data (strip data URL prefix if present)
+                    let base64Data = att.data;
+                    if (base64Data.includes(',')) {
+                      base64Data = base64Data.split(',')[1];
+                    }
+                    parts.push({
+                      inlineData: {
+                        mimeType: att.mimeType,
+                        data: base64Data,
+                      },
+                    });
+                    console.log(`Added attachment: ${att.mimeType}, ${base64Data.length} chars`);
+                  }
+                }
+              }
+
               const contents = [
                 {
                   role: 'user',
-                  parts: [{ text: prompt }],
+                  parts,
                 },
               ];
 
@@ -1796,9 +1820,9 @@ app.whenReady().then(() => {
             mimeType: imageMimeType,
           };
 
-          // Loop mode: use same image as lastFrame to create seamless loop
+          // Loop mode: use same image as last_frame to create seamless loop
           if (loopMode) {
-            config.lastFrame = {
+            config.last_frame = {
               bytesBase64Encoded: imageBase64,
               mimeType: imageMimeType,
             };
@@ -1807,7 +1831,7 @@ app.whenReady().then(() => {
 
         // Add end frame for interpolation (start + end frame mode)
         if (lastFrameBase64 && lastFrameMimeType && !loopMode) {
-          config.lastFrame = {
+          config.last_frame = {
             bytesBase64Encoded: lastFrameBase64,
             mimeType: lastFrameMimeType,
           };
@@ -1825,20 +1849,71 @@ app.whenReady().then(() => {
           requestBody.config = config;
         }
 
-        // Start the video generation operation
-        const startUrl = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateVideos?key=${apiKey}`;
+        // Veo 3.0 and 2.0 don't support last_frame - only Veo 3.1 does
+        const isVeo31 = resolvedModel.includes('3.1');
+        if (!isVeo31 && config.last_frame) {
+          console.warn('last_frame not supported on', resolvedModel, '- removing from config');
+          delete config.last_frame;
+        }
+
+        // Build the instances array for the REST API
+        // The REST API uses predictLongRunning with instances array format
+        const instance: any = { prompt };
+        
+        // Add image for image-to-video
+        if (imageBase64 && imageMimeType) {
+          instance.image = {
+            bytesBase64Encoded: imageBase64,
+            mimeType: imageMimeType,
+          };
+        }
+
+        // Add lastFrame to instance (not parameters) for loop/interpolation
+        // Try both camelCase and snake_case since API docs are inconsistent
+        if (config.last_frame && isVeo31) {
+          instance.lastFrame = config.last_frame;
+          delete config.last_frame; // Remove from parameters
+        }
+
+        const restRequestBody: any = {
+          instances: [instance],
+        };
+
+        // Add parameters if any are set (excluding last_frame which goes in instance)
+        if (Object.keys(config).length > 0) {
+          restRequestBody.parameters = config;
+        }
+
+        console.log('Final REST request body (truncated):', JSON.stringify(restRequestBody, null, 2).substring(0, 500) + '...');
+
+        // Start the video generation operation using predictLongRunning
+        const startUrl = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:predictLongRunning`;
         
         const startResponse = await fetch(startUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
+          body: JSON.stringify(restRequestBody),
         });
 
-        const startData = await startResponse.json();
+        // Handle response - check for empty body first
+        const responseText = await startResponse.text();
+        console.log('Video generation response status:', startResponse.status);
+        console.log('Video generation response text (first 500 chars):', responseText.substring(0, 500));
+
+        let startData: any;
+        try {
+          startData = responseText ? JSON.parse(responseText) : {};
+        } catch (parseError) {
+          console.error('Failed to parse API response:', responseText);
+          throw new Error(`Invalid API response: ${responseText.substring(0, 200)}`);
+        }
 
         if (!startResponse.ok) {
           console.error('Video generation start error:', startData);
-          throw new Error(startData?.error?.message || 'Failed to start video generation');
+          throw new Error(startData?.error?.message || `API error ${startResponse.status}: ${responseText.substring(0, 200)}`);
         }
 
         // Get operation name for polling
@@ -1856,13 +1931,23 @@ app.whenReady().then(() => {
         for (let i = 0; i < maxPolls; i++) {
           await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
-          const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
-          const pollResponse = await fetch(pollUrl);
-          const pollData = await pollResponse.json();
+          const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}`;
+          const pollResponse = await fetch(pollUrl, {
+            headers: { 'x-goog-api-key': apiKey },
+          });
+          const pollText = await pollResponse.text();
+          
+          let pollData: any;
+          try {
+            pollData = pollText ? JSON.parse(pollText) : {};
+          } catch (parseError) {
+            console.error('Failed to parse poll response:', pollText);
+            throw new Error(`Invalid poll response: ${pollText.substring(0, 200)}`);
+          }
 
           if (!pollResponse.ok) {
             console.error('Video generation poll error:', pollData);
-            throw new Error(pollData?.error?.message || 'Failed to poll video generation');
+            throw new Error(pollData?.error?.message || `Poll error ${pollResponse.status}`);
           }
 
           // Broadcast progress
@@ -1877,22 +1962,29 @@ app.whenReady().then(() => {
 
           if (pollData.done) {
             console.log('Video generation complete!');
+            console.log('Poll response:', JSON.stringify(pollData, null, 2).substring(0, 1000));
 
-            const generatedVideos = pollData.response?.generatedVideos || [];
-            if (generatedVideos.length === 0) {
-              throw new Error('No videos were generated');
+            // REST API uses generateVideoResponse.generatedSamples format
+            const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples || 
+                                     pollData.response?.generatedVideos || [];
+            if (generatedSamples.length === 0) {
+              throw new Error('No videos were generated. Response: ' + JSON.stringify(pollData).substring(0, 500));
             }
 
-            const video = generatedVideos[0];
-            const videoFile = video.video;
+            const sample = generatedSamples[0];
+            const videoUri = sample.video?.uri || sample.uri;
 
             // Download the video
-            if (videoFile?.uri) {
-              const downloadUrl = `${videoFile.uri}&key=${apiKey}`;
-              const downloadResponse = await fetch(downloadUrl);
+            if (videoUri) {
+              // Use x-goog-api-key header for download (per REST API docs)
+              console.log('Downloading video from:', videoUri.substring(0, 100) + '...');
+              const downloadResponse = await fetch(videoUri, {
+                headers: { 'x-goog-api-key': apiKey },
+                redirect: 'follow',
+              });
               
               if (!downloadResponse.ok) {
-                throw new Error('Failed to download generated video');
+                throw new Error(`Failed to download generated video: ${downloadResponse.status}`);
               }
 
               const videoBuffer = await downloadResponse.arrayBuffer();
@@ -1938,6 +2030,113 @@ app.whenReady().then(() => {
       }
     },
   );
+
+  // Extract a frame (first or last) from a video file
+  ipcMain.handle('extract-video-frame', async (_event, { videoPath, frameType }: { videoPath: string; frameType: 'first' | 'last' }) => {
+    try {
+      const { execSync, spawn } = require('child_process');
+      // Use bundled ffmpeg/ffprobe
+      const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+      const ffprobePath = require('@ffprobe-installer/ffprobe').path;
+      
+      const userDataDir = app.getPath('userData');
+      const extractDir = path.join(userDataDir, 'wormhole');
+      await fs.promises.mkdir(extractDir, { recursive: true });
+      
+      const outputFileName = `frame-${frameType}-${Date.now()}.png`;
+      const outputPath = path.join(extractDir, outputFileName);
+      
+      // Use ffmpeg to extract frame
+      // For first frame: -ss 0 -vframes 1
+      // For last frame: we need duration first, then seek to near end
+      let ffmpegArgs: string[];
+      
+      if (frameType === 'first') {
+        ffmpegArgs = ['-i', videoPath, '-ss', '0', '-vframes', '1', '-y', outputPath];
+      } else {
+        // Get video duration first using bundled ffprobe
+        let duration = 8; // Default
+        try {
+          const durationStr = execSync(`"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`, { encoding: 'utf8' }).trim();
+          duration = parseFloat(durationStr) || 8;
+        } catch (e) {
+          console.warn('Could not get video duration, using default');
+        }
+        // Seek to 0.1s before end
+        const seekTime = Math.max(0, duration - 0.1);
+        ffmpegArgs = ['-ss', seekTime.toString(), '-i', videoPath, '-vframes', '1', '-y', outputPath];
+      }
+      
+      // Run bundled ffmpeg
+      await new Promise<void>((resolve, reject) => {
+        const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
+        ffmpeg.on('close', (code: number) => {
+          if (code === 0) resolve();
+          else reject(new Error(`ffmpeg exited with code ${code}`));
+        });
+        ffmpeg.on('error', reject);
+      });
+      
+      // Read the extracted frame as base64
+      const frameBuffer = await fs.promises.readFile(outputPath);
+      const base64 = frameBuffer.toString('base64');
+      
+      return {
+        success: true,
+        imagePath: outputPath,
+        imageBase64: base64,
+        mimeType: 'image/png',
+        fileName: outputFileName,
+        frameType,
+      };
+    } catch (error: any) {
+      console.error('Frame extraction error:', error);
+      throw new Error(`Failed to extract ${frameType} frame: ${error.message}`);
+    }
+  });
+
+  // Extract audio from a video file
+  ipcMain.handle('extract-video-audio', async (_event, { videoPath }: { videoPath: string }) => {
+    try {
+      const { spawn } = require('child_process');
+      // Use bundled ffmpeg
+      const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+      
+      const userDataDir = app.getPath('userData');
+      const extractDir = path.join(userDataDir, 'wormhole');
+      await fs.promises.mkdir(extractDir, { recursive: true });
+      
+      const outputFileName = `audio-${Date.now()}.mp3`;
+      const outputPath = path.join(extractDir, outputFileName);
+      
+      // Use bundled ffmpeg to extract audio as mp3
+      const ffmpegArgs = ['-i', videoPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', '-y', outputPath];
+      
+      await new Promise<void>((resolve, reject) => {
+        const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
+        ffmpeg.on('close', (code: number) => {
+          if (code === 0) resolve();
+          else reject(new Error(`ffmpeg exited with code ${code}`));
+        });
+        ffmpeg.on('error', reject);
+      });
+      
+      // Read the extracted audio as base64
+      const audioBuffer = await fs.promises.readFile(outputPath);
+      const base64 = audioBuffer.toString('base64');
+      
+      return {
+        success: true,
+        audioPath: outputPath,
+        audioBase64: base64,
+        mimeType: 'audio/mpeg',
+        fileName: outputFileName,
+      };
+    } catch (error: any) {
+      console.error('Audio extraction error:', error);
+      throw new Error(`Failed to extract audio: ${error.message}`);
+    }
+  });
 
   ipcMain.handle('gemini-list-requests', () => {
     const entries = (store.get(GEMINI_REQUEST_LOG_KEY, []) as GeminiRequestLogEntry[]) || [];

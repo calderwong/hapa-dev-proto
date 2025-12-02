@@ -100,6 +100,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onVideoGenerationProgress: (listener: (payload: any) => void) => {
         ipcRenderer.on('video-generation-progress', (_event, payload) => listener(payload));
     },
+    // Video extraction utilities
+    extractVideoFrame: (data: { videoPath: string; frameType: 'first' | 'last' }) => 
+        ipcRenderer.invoke('extract-video-frame', data),
+    extractVideoAudio: (data: { videoPath: string }) => 
+        ipcRenderer.invoke('extract-video-audio', data),
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

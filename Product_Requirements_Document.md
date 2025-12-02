@@ -47,6 +47,35 @@ Goals:
 - View core contents as a scrollable log.
 - Sync with peers over Hyperswarm.
 
+### 2.6 Card Library & Media Management
+- **Card Library**: Persistent storage for reusable content cards backed by Hypercore.
+  - Save messages, images, videos, audio, and configuration as "cards" with metadata.
+  - Browse and search saved cards in a dedicated library view.
+  - Cards support parent-child lineage tracking for provenance.
+- **Message Cards**: Save any chat message as a card for later reference.
+  - Automatically extracts and stores generated images from AI responses.
+  - Displays image thumbnails in sidebar for visual identification.
+  - Supports drag-and-drop to reuse as attachments in new prompts.
+- **Config Cards**: Save and reuse prompt templates and settings.
+  - Negative prompts for Imagen can be saved and quickly recalled.
+  - Full Imagen option templates (aspect ratio, resolution, etc.) can be saved and applied.
+- **Media Sidebar**: Thread-contextual media panel showing all media in conversation.
+  - Displays video thumbnails, extracted frames, audio tracks, and saved cards.
+  - Drag-and-drop from sidebar to input for quick attachment.
+  - Click to navigate to card details.
+
+### 2.7 Imagen Integration (Image Generation)
+- Support for Google Imagen models via Gemini API (e.g., Nano Banana Pro).
+- **Image Options Panel**: Collapsible UI for configuring image generation parameters.
+  - Aspect ratio (1:1, 3:4, 4:3, 9:16, 16:9)
+  - Resolution/output quality settings
+  - Number of images to generate
+  - Person generation safety controls
+  - Negative prompt input with save/recall functionality
+  - Style reference support (planned)
+- Generated images embedded in chat responses and saveable as cards.
+- Reference image support: attach images from library or sidebar to influence generation.
+
 ## 3. Non-Functional Requirements
 
 - **Platform**: Desktop (Electron; Windows-focused, but cross-platform where possible).

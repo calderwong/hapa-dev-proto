@@ -26,12 +26,16 @@ interface CardIndexEntry {
     coreDiscoveryKey?: string;
     thumbnail?: string;
     raw: any;
-    mediaKind?: 'image' | 'video' | 'audio';
+    mediaKind?: 'image' | 'video' | 'audio' | 'message';
     mediaLocalPath?: string;
     mediaRemoteUrl?: string;
     mediaMimeType?: string;
-    mediaMimeType?: string;
     subType?: string;
+    // Message card specific fields
+    messageContent?: string;
+    messageRole?: 'user' | 'model';
+    attachmentCount?: number;
+    hasVideo?: boolean;
     derivedGif?: { localPath: string; cardId: string };
     cardRecord?: any;
 }
@@ -80,6 +84,14 @@ const CardLibrary: React.FC = () => {
     const [filterTypes, setFilterTypes] = useState<CardType[]>([]);
     const [showFilters, setShowFilters] = useState(false);
 
+    // Extraction State
+    const [extracting, setExtracting] = useState<{ [key: string]: boolean }>({});
+    const [extractedChildren, setExtractedChildren] = useState<{ [cardId: string]: string[] }>({});
+    
+    // Navigation Animation State
+    const [navAnimation, setNavAnimation] = useState<'none' | 'zoom-to-child' | 'zoom-to-parent' | 'slide-left' | 'slide-right'>('none');
+    const [pendingCard, setPendingCard] = useState<CardIndexEntry | null>(null);
+
     const emitWormholeRunEvent = (
         type: 'start' | 'end',
         step: 'summarization' | 'keyTerms' | 'wikiUpdate',
@@ -125,12 +137,27 @@ const CardLibrary: React.FC = () => {
                         return entry;
                     }
 
-                    let mediaKind: 'image' | 'video' | 'audio' | undefined;
+                    let mediaKind: 'image' | 'video' | 'audio' | 'message' | undefined;
                     let mediaLocalPath: string | undefined;
                     let mediaRemoteUrl: string | undefined;
                     let mediaMimeType: string | undefined;
+                    let messageContent: string | undefined;
+                    let messageRole: 'user' | 'model' | undefined;
+                    let attachmentCount: number | undefined;
+                    let hasVideo: boolean | undefined;
 
-                    if (cardRecord.image) {
+                    if (cardRecord.kind === 'message' || cardRecord.message) {
+                        // Message card
+                        mediaKind = 'message';
+                        messageContent = cardRecord.message?.content;
+                        messageRole = cardRecord.message?.role;
+                        attachmentCount = cardRecord.attachments?.length;
+                        hasVideo = !!cardRecord.video;
+                        // Use first attachment as thumbnail if available
+                        if (cardRecord.attachments?.[0]?.dataUrl) {
+                            mediaRemoteUrl = cardRecord.attachments[0].dataUrl;
+                        }
+                    } else if (cardRecord.image) {
                         mediaKind = 'image';
                         mediaLocalPath = cardRecord.image.localPath;
                         mediaRemoteUrl = cardRecord.image.remoteUrl || cardRecord.image.dataUrl;
@@ -153,6 +180,10 @@ const CardLibrary: React.FC = () => {
                         mediaLocalPath,
                         mediaRemoteUrl,
                         mediaMimeType,
+                        messageContent,
+                        messageRole,
+                        attachmentCount,
+                        hasVideo,
                         subType: cardRecord.subType,
                         derivedGif: cardRecord.derivedGif,
                         cardRecord,
@@ -474,6 +505,24 @@ const CardLibrary: React.FC = () => {
         );
     };
 
+    // Mini thumbnail for lineage previews
+    const getMiniThumbnailSrc = (card: CardIndexEntry): string | null => {
+        if (card.mediaKind === 'image') {
+            return card.mediaLocalPath ? toFileUrl(card.mediaLocalPath) : card.thumbnail || card.mediaRemoteUrl || null;
+        }
+        if (card.mediaKind === 'video') {
+            // For videos, use the thumbnail if available, or the cardRecord image dataUrl
+            if (card.thumbnail) return card.thumbnail;
+            if (card.cardRecord?.video?.thumbnail) return card.cardRecord.video.thumbnail;
+            // Can't easily show video as mini preview, return null
+            return null;
+        }
+        if (card.thumbnail) return card.thumbnail;
+        // Check cardRecord for image dataUrl
+        if (card.cardRecord?.image?.dataUrl) return card.cardRecord.image.dataUrl;
+        return null;
+    };
+
     const renderThumbnail = (card: CardIndexEntry, large = false) => {
         const className = large
             ? "w-full h-64 object-cover rounded-lg border border-gray-700 bg-black/40 shadow-lg"
@@ -498,6 +547,53 @@ const CardLibrary: React.FC = () => {
                 <div className={`${className} flex flex-col items-center justify-center bg-gray-900 text-gray-300`}>
                     <rux-icon icon="audiotrack" size={large ? "large" : "normal"}></rux-icon>
                     <span className="mt-2 text-xs font-mono">{card.mediaMimeType || 'AUDIO'}</span>
+                </div>
+            );
+        }
+
+        if (card.mediaKind === 'message') {
+            const hasMedia = (card.attachmentCount || 0) > 0 || card.hasVideo;
+            // If message has thumbnail from attachment, show it
+            if (card.thumbnail || card.mediaRemoteUrl) {
+                return (
+                    <div className={`${className} relative`}>
+                        <img 
+                            src={card.thumbnail || card.mediaRemoteUrl} 
+                            alt={card.cardId} 
+                            className="w-full h-full object-cover" 
+                        />
+                        {/* Message badge overlay */}
+                        <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 bg-black/70 rounded text-xs">
+                            <rux-icon icon={card.messageRole === 'user' ? 'person' : 'smart-toy'} size="12px" className="text-purple-400"></rux-icon>
+                            <span className="text-purple-300 font-medium">{card.messageRole === 'user' ? 'Request' : 'Response'}</span>
+                        </div>
+                    </div>
+                );
+            }
+            // Text-only message card
+            return (
+                <div className={`${className} flex flex-col p-3 bg-gradient-to-br from-purple-900/50 to-gray-900`}>
+                    <div className="flex items-center gap-2 mb-2">
+                        <rux-icon icon={card.messageRole === 'user' ? 'person' : 'smart-toy'} size="small" className="text-purple-400"></rux-icon>
+                        <span className="text-xs font-medium text-purple-300">{card.messageRole === 'user' ? 'User Request' : 'AI Response'}</span>
+                    </div>
+                    <p className="text-xs text-gray-300 line-clamp-4 flex-1">{card.messageContent || card.name}</p>
+                    {hasMedia && (
+                        <div className="flex items-center gap-2 mt-2 text-[10px] text-purple-400">
+                            {(card.attachmentCount || 0) > 0 && (
+                                <span className="flex items-center gap-1">
+                                    <rux-icon icon="attach-file" size="12px"></rux-icon>
+                                    {card.attachmentCount} media
+                                </span>
+                            )}
+                            {card.hasVideo && (
+                                <span className="flex items-center gap-1">
+                                    <rux-icon icon="videocam" size="12px"></rux-icon>
+                                    Video
+                                </span>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -578,12 +674,152 @@ const CardLibrary: React.FC = () => {
         return stats;
     }, [cards]);
 
+    // Helper to find related cards
+    const findCardById = (cardId: string) => cards.find(c => c.cardId === cardId);
+    
+    const getParentCard = (card: CardIndexEntry) => {
+        const parentId = card.cardRecord?.parentCardId;
+        return parentId ? findCardById(parentId) : null;
+    };
+    
+    const getChildCards = (card: CardIndexEntry) => {
+        const childIds = card.cardRecord?.childCardIds || [];
+        return childIds.map(id => findCardById(id)).filter(Boolean) as CardIndexEntry[];
+    };
+    
+    const getSiblingCards = (card: CardIndexEntry) => {
+        const parent = getParentCard(card);
+        if (!parent) return [];
+        return getChildCards(parent).filter(c => c.cardId !== card.cardId);
+    };
+
+    // Animated navigation between cards
+    const navigateToCard = (toCard: CardIndexEntry, relationship: 'parent' | 'child' | 'sibling') => {
+        const animMap = {
+            parent: 'zoom-to-parent',
+            child: 'zoom-to-child',
+            sibling: 'slide-left'
+        } as const;
+        
+        setNavAnimation(animMap[relationship]);
+        setPendingCard(toCard);
+        
+        setTimeout(() => {
+            setSelected(toCard);
+            setNavAnimation('none');
+            setPendingCard(null);
+        }, 300);
+    };
+
+    // Extract media from video card
+    const handleExtract = async (extractType: 'first-frame' | 'last-frame' | 'audio') => {
+        if (!selected || !selected.mediaLocalPath || selected.mediaKind !== 'video') return;
+        if (!window.electronAPI) return;
+        
+        const extractKey = `${selected.cardId}-${extractType}`;
+        if (extracting[extractKey]) return;
+        
+        setExtracting(prev => ({ ...prev, [extractKey]: true }));
+        
+        try {
+            let result: any;
+            if (extractType === 'audio') {
+                result = await window.electronAPI.extractVideoAudio({ videoPath: selected.mediaLocalPath });
+            } else {
+                const frameType = extractType === 'first-frame' ? 'first' : 'last';
+                result = await window.electronAPI.extractVideoFrame({ 
+                    videoPath: selected.mediaLocalPath, 
+                    frameType 
+                });
+            }
+            
+            // Create new card
+            const childCoreName = `card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const isAudio = extractType === 'audio';
+            const dataUrl = isAudio 
+                ? `data:${result.mimeType};base64,${result.audioBase64}`
+                : `data:${result.mimeType};base64,${result.imageBase64}`;
+            
+            const childRecord = {
+                type: 'card',
+                id: childCoreName,
+                kind: isAudio ? 'audio' : 'image',
+                title: `${extractType === 'first-frame' ? 'First Frame' : extractType === 'last-frame' ? 'Last Frame' : 'Audio'} from ${selected.name || 'Video'}`,
+                [isAudio ? 'audio' : 'image']: { dataUrl, localPath: isAudio ? result.audioPath : result.imagePath },
+                mimeType: result.mimeType,
+                parentCardId: selected.cardId,
+                extractionSource: {
+                    type: extractType,
+                    extractedAt: new Date().toISOString(),
+                    sourceVideoPath: selected.mediaLocalPath
+                },
+                tags: ['extracted', isAudio ? 'audio' : 'frame', extractType],
+                createdAt: new Date().toISOString(),
+            };
+            
+            // Save child card
+            await window.electronAPI.p2pCreateCore(childCoreName);
+            await window.electronAPI.p2pAppend({ name: childCoreName, data: JSON.stringify(childRecord) });
+            
+            // Update parent card with child reference
+            const existingChildIds = selected.cardRecord?.childCardIds || [];
+            const updatedParentRecord = {
+                ...selected.cardRecord,
+                childCardIds: [...existingChildIds, childCoreName]
+            };
+            await window.electronAPI.p2pAppend({ name: selected.coreName, data: JSON.stringify(updatedParentRecord) });
+            
+            // Add to library index
+            await window.electronAPI.p2pCreateCore('card-library');
+            await window.electronAPI.p2pAppend({ name: 'card-library', data: JSON.stringify({
+                type: 'card-index',
+                cardId: childCoreName,
+                coreName: childCoreName,
+                name: childRecord.title,
+                createdAt: childRecord.createdAt,
+                parentCardId: selected.cardId,
+            })});
+            
+            // Track locally
+            setExtractedChildren(prev => ({
+                ...prev,
+                [selected.cardId]: [...(prev[selected.cardId] || []), childCoreName]
+            }));
+            
+            // Refresh cards
+            await loadCards(selected.cardId);
+            
+        } catch (err) {
+            console.error('Extraction failed:', err);
+        } finally {
+            setExtracting(prev => ({ ...prev, [extractKey]: false }));
+        }
+    };
+    
+    // Check if extraction type already exists
+    const hasExtractionChild = (card: CardIndexEntry, extractType: 'first-frame' | 'last-frame' | 'audio') => {
+        const childIds = card.cardRecord?.childCardIds || [];
+        return childIds.some(id => {
+            const child = findCardById(id);
+            return child?.cardRecord?.extractionSource?.type === extractType;
+        });
+    };
+
     // Drag Handlers
     const handleDragStart = (e: React.DragEvent, card: CardIndexEntry) => {
         setDraggedCard(card);
         e.dataTransfer.setData('text/plain', card.cardId);
-        e.dataTransfer.effectAllowed = 'move';
-        // Create a custom drag image if desired, or let browser handle it
+        // Include full card data for cross-component drops (e.g., to Veo frame slots)
+        e.dataTransfer.setData('application/json', JSON.stringify({
+            cardId: card.cardId,
+            name: card.name,
+            mediaKind: card.mediaKind,
+            mediaLocalPath: card.mediaLocalPath,
+            thumbnail: card.thumbnail,
+            image: card.cardRecord?.image,
+            coreName: card.coreName,
+        }));
+        e.dataTransfer.effectAllowed = 'copyMove';
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -914,6 +1150,25 @@ const CardLibrary: React.FC = () => {
                                 >
                                     {getTierBadge(quality.tier)}
                                 </div>
+                                {/* Child Count Badge */}
+                                {(card.cardRecord?.childCardIds?.length > 0) && (
+                                    <div 
+                                        className="absolute top-2 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-[9px] font-bold"
+                                        data-tooltip={`${card.cardRecord.childCardIds.length} extracted card${card.cardRecord.childCardIds.length > 1 ? 's' : ''}`}
+                                    >
+                                        <rux-icon icon="account-tree" size="extra-small"></rux-icon>
+                                        {card.cardRecord.childCardIds.length}
+                                    </div>
+                                )}
+                                {/* Has Parent Indicator */}
+                                {card.cardRecord?.parentCardId && (
+                                    <div 
+                                        className="absolute bottom-2 left-2 z-10 flex items-center gap-0.5 text-purple-400"
+                                        data-tooltip="Extracted from parent"
+                                    >
+                                        <rux-icon icon="link" size="extra-small"></rux-icon>
+                                    </div>
+                                )}
                                 {renderThumbnail(card)}
                                 <div className="p-4 flex flex-col gap-1">
                                     <div className="font-bold text-sm text-gray-200 truncate group-hover:text-purple-300 transition-colors">
@@ -967,7 +1222,15 @@ const CardLibrary: React.FC = () => {
                                                 );
                                             })()}
                                             {card.mediaKind && (
-                                                <rux-icon icon={card.mediaKind === 'video' ? 'videocam' : card.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="extra-small" className="text-gray-600"></rux-icon>
+                                                <rux-icon 
+                                                    icon={
+                                                        card.mediaKind === 'video' ? 'videocam' : 
+                                                        card.mediaKind === 'audio' ? 'audiotrack' : 
+                                                        card.mediaKind === 'message' ? 'chat' : 'image'
+                                                    } 
+                                                    size="extra-small" 
+                                                    className={card.mediaKind === 'message' ? 'text-purple-500' : 'text-gray-600'}
+                                                ></rux-icon>
                                             )}
                                         </div>
                                     </div>
@@ -1070,6 +1333,179 @@ const CardLibrary: React.FC = () => {
                                                     <div className="text-gray-300 font-mono break-all">{selected.cardId}</div>
                                                 </div>
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px bg-gray-800"></div>
+
+                                    {/* Extraction Panel - Only for video cards */}
+                                    {selected.mediaKind === 'video' && (
+                                        <div className="space-y-4">
+                                            <div className="flex items-center gap-2 text-purple-400">
+                                                <rux-icon icon="content-cut" size="small"></rux-icon>
+                                                <h3 className="font-bold uppercase tracking-wider text-sm">Extract Media</h3>
+                                            </div>
+                                            <div className="flex gap-3">
+                                                {(['first-frame', 'last-frame', 'audio'] as const).map((extractType) => {
+                                                    const isExtracting = extracting[`${selected.cardId}-${extractType}`];
+                                                    const isDone = hasExtractionChild(selected, extractType);
+                                                    const config = {
+                                                        'first-frame': { icon: 'first-page', label: 'First Frame' },
+                                                        'last-frame': { icon: 'last-page', label: 'Last Frame' },
+                                                        'audio': { icon: 'audiotrack', label: 'Audio' }
+                                                    }[extractType];
+                                                    
+                                                    return (
+                                                        <button
+                                                            key={extractType}
+                                                            onClick={() => handleExtract(extractType)}
+                                                            disabled={isExtracting || isDone}
+                                                            className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
+                                                                isDone
+                                                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                                                    : isExtracting
+                                                                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                                                        : 'bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20 animate-extract-pulse'
+                                                            }`}
+                                                            data-tooltip={isDone ? 'Already extracted' : isExtracting ? 'Extracting...' : `Extract ${config.label}`}
+                                                        >
+                                                            <rux-icon icon={isDone ? 'check' : config.icon} size="small"></rux-icon>
+                                                            <span className="text-[10px] font-bold uppercase tracking-wider">
+                                                                {isDone ? 'Done' : isExtracting ? 'Working...' : config.label}
+                                                            </span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Lineage Panel */}
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-2 text-cyan-400">
+                                            <rux-icon icon="account-tree" size="small"></rux-icon>
+                                            <h3 className="font-bold uppercase tracking-wider text-sm">Card Lineage</h3>
+                                        </div>
+                                        
+                                        <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50 space-y-4">
+                                            {/* Parent Card */}
+                                            {(() => {
+                                                const parent = getParentCard(selected);
+                                                const parentThumb = parent ? getMiniThumbnailSrc(parent) : null;
+                                                return parent ? (
+                                                    <div>
+                                                        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Parent</div>
+                                                        <button
+                                                            onClick={() => navigateToCard(parent, 'parent')}
+                                                            className="w-full flex items-center gap-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-purple-500/50 hover:bg-purple-500/10 transition-all group"
+                                                        >
+                                                            <div className="w-16 h-16 rounded overflow-hidden border border-gray-700 flex-shrink-0 bg-gray-800">
+                                                                {parentThumb ? (
+                                                                    <img src={parentThumb} alt="" className="w-full h-full object-cover" />
+                                                                ) : parent.mediaKind === 'video' && parent.mediaLocalPath ? (
+                                                                    <video src={toFileUrl(parent.mediaLocalPath)} className="w-full h-full object-cover" muted />
+                                                                ) : (
+                                                                    <div className="w-full h-full flex items-center justify-center">
+                                                                        <rux-icon icon={parent.mediaKind === 'video' ? 'videocam' : parent.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="small" className="text-gray-600"></rux-icon>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex-1 text-left">
+                                                                <div className="text-sm text-white group-hover:text-purple-300 truncate">
+                                                                    {parent.name || 'Untitled'}
+                                                                </div>
+                                                                <div className="text-[10px] text-gray-500 uppercase">{parent.mediaKind}</div>
+                                                            </div>
+                                                            <rux-icon icon="arrow-upward" size="small" className="text-gray-500 group-hover:text-purple-400"></rux-icon>
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-2 text-gray-500">
+                                                        <rux-icon icon="star" size="extra-small"></rux-icon>
+                                                        <span className="text-xs">Original (No Parent)</span>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            {/* Children Cards */}
+                                            {(() => {
+                                                const children = getChildCards(selected);
+                                                return children.length > 0 && (
+                                                    <div>
+                                                        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                                                            Children ({children.length})
+                                                        </div>
+                                                        <div className="flex gap-2 overflow-x-auto pb-2">
+                                                            {children.map(child => {
+                                                                const childThumb = getMiniThumbnailSrc(child);
+                                                                return (
+                                                                <button
+                                                                    key={child.cardId}
+                                                                    onClick={() => navigateToCard(child, 'child')}
+                                                                    className="flex-shrink-0 flex flex-col items-center gap-1 p-2 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all group"
+                                                                >
+                                                                    <div className="w-14 h-14 rounded overflow-hidden border border-gray-700 bg-gray-800">
+                                                                        {childThumb ? (
+                                                                            <img src={childThumb} alt="" className="w-full h-full object-cover" />
+                                                                        ) : (
+                                                                            <div className="w-full h-full flex items-center justify-center">
+                                                                                <rux-icon 
+                                                                                    icon={child.mediaKind === 'audio' ? 'audiotrack' : 'image'} 
+                                                                                    size="small" 
+                                                                                    className="text-gray-600"
+                                                                                ></rux-icon>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <span className="text-[9px] text-gray-400 truncate max-w-[60px] group-hover:text-cyan-300">
+                                                                        {child.cardRecord?.extractionSource?.type || child.mediaKind}
+                                                                    </span>
+                                                                </button>
+                                                            );})}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            {/* Siblings */}
+                                            {(() => {
+                                                const siblings = getSiblingCards(selected);
+                                                return siblings.length > 0 && (
+                                                    <div>
+                                                        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                                                            Siblings ({siblings.length})
+                                                        </div>
+                                                        <div className="flex gap-2 overflow-x-auto pb-2">
+                                                            {siblings.map(sibling => {
+                                                                const siblingThumb = getMiniThumbnailSrc(sibling);
+                                                                return (
+                                                                <button
+                                                                    key={sibling.cardId}
+                                                                    onClick={() => navigateToCard(sibling, 'sibling')}
+                                                                    className="flex-shrink-0 flex flex-col items-center gap-1 p-2 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-pink-500/50 hover:bg-pink-500/10 transition-all group"
+                                                                >
+                                                                    <div className="w-12 h-12 rounded overflow-hidden border border-gray-700 bg-gray-800">
+                                                                        {siblingThumb ? (
+                                                                            <img src={siblingThumb} alt="" className="w-full h-full object-cover" />
+                                                                        ) : (
+                                                                            <div className="w-full h-full flex items-center justify-center">
+                                                                                <rux-icon 
+                                                                                    icon={sibling.mediaKind === 'audio' ? 'audiotrack' : 'image'} 
+                                                                                    size="extra-small" 
+                                                                                    className="text-gray-600"
+                                                                                ></rux-icon>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <span className="text-[9px] text-gray-400 truncate max-w-[50px] group-hover:text-pink-300">
+                                                                        {sibling.cardRecord?.extractionSource?.type || sibling.mediaKind}
+                                                                    </span>
+                                                                </button>
+                                                            );})}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
 

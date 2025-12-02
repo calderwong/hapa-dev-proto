@@ -6,16 +6,36 @@ export interface Attachment {
     preview: string;
     base64: string;
     mimeType: string;
+    // Card source info (if attachment came from card library)
+    fromCard?: {
+        cardId: string;
+        coreName: string;
+        mediaKind: 'image' | 'video' | 'audio';
+        name?: string;
+    };
+}
+
+// Attached message card reference for context
+export interface AttachedMessageCard {
+    cardId: string;
+    coreName: string;
+    role: 'user' | 'model';
+    preview: string; // Truncated content
+    attachmentCount?: number;
+    thumbnail?: string;
 }
 
 interface ChatInputProps {
-    onSend: (text: string, attachments: Attachment[]) => void;
+    onSend: (text: string, attachments: Attachment[], attachedMessageCards?: AttachedMessageCard[]) => void;
     isLoading: boolean;
     chatMode: 'request-response' | 'realtime';
     provider: 'gemini' | 'openai' | 'llama';
     onStop: () => void;
     attachments: Attachment[];
     setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
+    attachedMessageCards?: AttachedMessageCard[];
+    setAttachedMessageCards?: React.Dispatch<React.SetStateAction<AttachedMessageCard[]>>;
+    onOpenCardPicker?: () => void; // Opens card library picker
 }
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -43,16 +63,35 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     onStop,
     attachments,
     setAttachments,
+    attachedMessageCards = [],
+    setAttachedMessageCards,
+    onOpenCardPicker,
 }) => {
     const [input, setInput] = useState('');
     // const [attachments, setAttachments] = useState<Attachment[]>([]); // Lifted up
     const [isRecording, setIsRecording] = useState(false);
     const [liveTranscript, setLiveTranscript] = useState('');
     const [isDragOver, setIsDragOver] = useState(false);
+    const [isDraggingMessageCard, setIsDraggingMessageCard] = useState(false);
+    const [showAttachMenu, setShowAttachMenu] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const attachMenuRef = useRef<HTMLDivElement>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const recordedChunksRef = useRef<Blob[]>([]);
     const openaiSessionIdRef = useRef<string | null>(null);
+    
+    // Close attach menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+                setShowAttachMenu(false);
+            }
+        };
+        if (showAttachMenu) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [showAttachMenu]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -258,9 +297,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     };
 
     const handleSendClick = () => {
-        if (!input.trim() && attachments.length === 0) return;
-        onSend(input, attachments);
+        if (!input.trim() && attachments.length === 0 && attachedMessageCards.length === 0) return;
+        onSend(input, attachments, attachedMessageCards.length > 0 ? attachedMessageCards : undefined);
         setInput('');
+        // Clear attached message cards after sending
+        if (setAttachedMessageCards && attachedMessageCards.length > 0) {
+            setAttachedMessageCards([]);
+        }
         setAttachments([]);
     };
 
@@ -298,9 +341,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             event.stopPropagation();
             if (event.dataTransfer) {
                 event.dataTransfer.dropEffect = 'copy';
-                if (Array.from(event.dataTransfer.types || []).includes('Files')) {
+                const types = Array.from(event.dataTransfer.types || []);
+                // Check for card drag (message card or image card with JSON)
+                const isCardDrag = types.includes('application/x-message-card') || types.includes('application/json');
+                const isFileDrag = types.includes('Files');
+                
+                if (isCardDrag || isFileDrag) {
                     dragCounter += 1;
-                    if (!isDragOver) {
+                    if (isCardDrag) {
+                        setIsDraggingMessageCard(true);
+                    } else {
                         setIsDragOver(true);
                     }
                 }
@@ -312,19 +362,23 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             event.stopPropagation();
             if (event.dataTransfer) {
                 event.dataTransfer.dropEffect = 'copy';
-                if (Array.from(event.dataTransfer.types || []).includes('Files') && !isDragOver) {
-                    setIsDragOver(true);
-                }
+                // No state changes here - just maintain drop effect
+                // State is already set by dragenter
             }
         };
 
         const handleWindowDragLeave = (event: DragEvent) => {
             event.preventDefault();
             event.stopPropagation();
-            if (Array.from(event.dataTransfer?.types || []).includes('Files')) {
+            const types = Array.from(event.dataTransfer?.types || []);
+            const isCardDrag = types.includes('application/x-message-card') || types.includes('application/json');
+            const isFileDrag = types.includes('Files');
+            
+            if (isCardDrag || isFileDrag) {
                 dragCounter = Math.max(dragCounter - 1, 0);
                 if (dragCounter === 0) {
                     setIsDragOver(false);
+                    setIsDraggingMessageCard(false);
                 }
             }
         };
@@ -335,13 +389,112 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             event.stopPropagation();
 
             const dt = event.dataTransfer;
-            if (!dt || !dt.files || dt.files.length === 0) {
-                return;
-            }
-
+            if (!dt) return;
+            
             dragCounter = 0;
             setIsDragOver(false);
-            await processFiles(dt.files as any);
+            setIsDraggingMessageCard(false);
+            
+            // Check for message card drop - could have both message context AND image data
+            const msgCardData = dt.getData('application/x-message-card');
+            const jsonData = dt.getData('application/json');
+            
+            // If it has image data (from message card with thumbnail or image card), add as attachment
+            if (jsonData) {
+                try {
+                    const cardData = JSON.parse(jsonData);
+                    const imageUrl = cardData.image?.dataUrl || cardData.thumbnail;
+                    
+                    if (imageUrl && imageUrl.startsWith('data:')) {
+                        // Extract base64 and create attachment (like library method)
+                        const base64Match = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
+                        if (base64Match) {
+                            const mimeType = base64Match[1];
+                            const base64 = base64Match[2];
+                            const file = new File(
+                                [Uint8Array.from(atob(base64), c => c.charCodeAt(0))],
+                                cardData.name || `card-${cardData.cardId || 'image'}`,
+                                { type: mimeType }
+                            );
+                            
+                            const newAttachment: Attachment = {
+                                file,
+                                preview: imageUrl,
+                                base64,
+                                mimeType,
+                                fromCard: cardData.cardId ? {
+                                    cardId: cardData.cardId,
+                                    coreName: cardData.coreName,
+                                    mediaKind: cardData.mediaKind || 'image',
+                                    name: cardData.name,
+                                } : undefined,
+                            };
+                            
+                            setAttachments(prev => [...prev, newAttachment]);
+                            console.log('Added card image as attachment:', newAttachment.mimeType);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to parse card JSON data', e);
+                }
+            }
+            
+            // If it's just a message card (for context reference, no image)
+            if (msgCardData && setAttachedMessageCards && !jsonData) {
+                try {
+                    const card: AttachedMessageCard = JSON.parse(msgCardData);
+                    // Avoid duplicates
+                    setAttachedMessageCards(prev => {
+                        if (prev.some(c => c.cardId === card.cardId)) return prev;
+                        return [...prev, card];
+                    });
+                    return;
+                } catch (e) {
+                    console.error('Failed to parse message card data', e);
+                }
+            }
+            
+            // Handle file drops
+            if (dt.files && dt.files.length > 0) {
+                await processFiles(dt.files as any);
+            }
+        };
+
+        // Clipboard paste handler for images
+        const handleWindowPaste = async (event: ClipboardEvent) => {
+            const clipboardData = event.clipboardData;
+            if (!clipboardData) return;
+            
+            const items = clipboardData.items;
+            const imageItems: DataTransferItem[] = [];
+            
+            // Check for image items in clipboard
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.type.startsWith('image/')) {
+                    imageItems.push(item);
+                }
+            }
+            
+            // If no images, let the default paste behavior handle it
+            if (imageItems.length === 0) return;
+            
+            // Prevent default paste (we're handling images)
+            event.preventDefault();
+            
+            // Process each image from clipboard
+            for (const item of imageItems) {
+                const blob = item.getAsFile();
+                if (blob) {
+                    // Generate a filename based on timestamp
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    const extension = item.type.split('/')[1] || 'png';
+                    const fileName = `clipboard-${timestamp}.${extension}`;
+                    
+                    await addAttachmentFromBlob(blob, item.type, fileName);
+                }
+            }
         };
 
         // Use capture phase (true) to intercept events before they hit elements
@@ -349,14 +502,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         window.addEventListener('dragover', handleWindowDragOver, true);
         window.addEventListener('dragleave', handleWindowDragLeave, true);
         window.addEventListener('drop', handleWindowDrop, true);
+        window.addEventListener('paste', handleWindowPaste, true);
 
         return () => {
             window.removeEventListener('dragenter', handleWindowDragEnter, true);
             window.removeEventListener('dragover', handleWindowDragOver, true);
             window.removeEventListener('dragleave', handleWindowDragLeave, true);
             window.removeEventListener('drop', handleWindowDrop, true);
+            window.removeEventListener('paste', handleWindowPaste, true);
         };
-    }, [isDragOver, processFiles]);
+    }, [isDragOver, processFiles, addAttachmentFromBlob]);
 
     return (
         <div className="flex-none p-4 bg-gray-900/95 backdrop-blur border-t border-astro-border relative z-10">
@@ -372,6 +527,71 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     </div>
                 )}
 
+                {/* Attached Message Cards - Context Reference */}
+                {(attachedMessageCards.length > 0 || isDraggingMessageCard) && (
+                    <div className={`mb-2 p-2 rounded-lg border-2 transition-all duration-300 ${
+                        isDraggingMessageCard 
+                            ? 'border-purple-400 bg-purple-500/10 border-dashed shadow-[0_0_15px_rgba(168,85,247,0.3)]' 
+                            : 'border-purple-500/50 bg-gradient-to-r from-purple-900/30 to-gray-900/50'
+                    } ${attachedMessageCards.length > 0 ? 'animate-[contextGlow_2s_ease-in-out_infinite]' : ''}`}
+                    style={{
+                        '--context-glow-color': 'rgba(168,85,247,0.2)',
+                    } as React.CSSProperties}
+                    >
+                        <div className="flex items-center gap-2 mb-2">
+                            <rux-icon icon="chat" size="12px" className="text-purple-400"></rux-icon>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-300">
+                                {isDraggingMessageCard ? 'Drop to Attach Context' : 'Context Attached'}
+                            </span>
+                            {attachedMessageCards.length > 0 && (
+                                <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/30 rounded text-purple-300">
+                                    {attachedMessageCards.length}
+                                </span>
+                            )}
+                        </div>
+                        {attachedMessageCards.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                                {attachedMessageCards.map((card) => (
+                                    <div 
+                                        key={card.cardId}
+                                        className="group flex items-center gap-2 px-2 py-1.5 bg-gray-800/60 rounded border border-purple-500/30 hover:border-purple-400 transition-all"
+                                    >
+                                        <rux-icon 
+                                            icon={card.role === 'user' ? 'person' : 'smart-toy'} 
+                                            size="12px" 
+                                            className={card.role === 'user' ? 'text-cyan-400' : 'text-purple-400'}
+                                        ></rux-icon>
+                                        <span className="text-[10px] text-gray-300 max-w-[150px] truncate">
+                                            {card.preview}
+                                        </span>
+                                        {(card.attachmentCount || 0) > 0 && (
+                                            <span className="text-[8px] px-1 py-0.5 bg-gray-700 rounded text-gray-400">
+                                                +{card.attachmentCount}
+                                            </span>
+                                        )}
+                                        <button
+                                            onClick={() => {
+                                                if (setAttachedMessageCards) {
+                                                    setAttachedMessageCards(prev => prev.filter(c => c.cardId !== card.cardId));
+                                                }
+                                            }}
+                                            className="ml-1 text-gray-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                            title="Remove context"
+                                        >
+                                            <rux-icon icon="close" size="12px"></rux-icon>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {isDraggingMessageCard && attachedMessageCards.length === 0 && (
+                            <div className="text-center py-2 text-[10px] text-purple-400/70">
+                                Drop message card here to reference in your prompt
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Attachment Preview Bar */}
                 {attachments.length > 0 && (
                     <div className="flex gap-2 overflow-x-auto pb-2 px-1">
@@ -381,13 +601,33 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                                     <img
                                         src={att.preview}
                                         alt="preview"
-                                        className="h-12 w-12 object-cover rounded border border-astro-border shadow-lg"
+                                        className={`h-12 w-12 object-cover rounded shadow-lg ${
+                                            att.fromCard 
+                                                ? 'border-2 border-purple-500/70 ring-1 ring-purple-500/30' 
+                                                : 'border border-astro-border'
+                                        }`}
                                     />
                                 ) : (
-                                    <div className="h-12 w-12 flex items-center justify-center bg-astro-dark rounded border border-astro-border shadow-lg">
+                                    <div className={`h-12 w-12 flex items-center justify-center bg-astro-dark rounded shadow-lg ${
+                                        att.fromCard 
+                                            ? 'border-2 border-purple-500/70 ring-1 ring-purple-500/30' 
+                                            : 'border border-astro-border'
+                                    }`}>
                                         <span className="text-[9px] font-mono text-astro-off uppercase">
                                             {att.mimeType.split('/')[1] || 'FILE'}
                                         </span>
+                                    </div>
+                                )}
+                                {/* Card source badge */}
+                                {att.fromCard && (
+                                    <div className="absolute -bottom-1 -left-1 bg-purple-600 rounded-full p-0.5 shadow-sm border border-purple-400/50" title={`From card: ${att.fromCard.name || att.fromCard.cardId}`}>
+                                        <rux-icon icon="photo-library" size="10px" className="text-white"></rux-icon>
+                                    </div>
+                                )}
+                                {/* Upload badge for non-card attachments */}
+                                {!att.fromCard && (
+                                    <div className="absolute -bottom-1 -left-1 bg-cyan-600 rounded-full p-0.5 shadow-sm border border-cyan-400/50" title="Uploaded file">
+                                        <rux-icon icon="cloud-upload" size="10px" className="text-white"></rux-icon>
                                     </div>
                                 )}
                                 <button
@@ -432,17 +672,64 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     />
 
                     {/* Left Actions */}
-                    <div className="flex-none">
-                        <rux-button
-                            icon="attach-file"
-                            size="small"
-                            secondary
-                            borderless
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={isLoading}
-                            title="Attach File"
-                            className="hover:text-astro-primary transition-colors"
-                        ></rux-button>
+                    <div className="flex-none flex items-center">
+                        {/* Attachment Button with Dropdown */}
+                        <div className="relative" ref={attachMenuRef}>
+                            <rux-button
+                                icon="attach-file"
+                                size="small"
+                                secondary
+                                borderless
+                                onClick={() => setShowAttachMenu(!showAttachMenu)}
+                                disabled={isLoading}
+                                title="Attach Media"
+                                className="hover:text-astro-primary transition-colors"
+                            ></rux-button>
+                            
+                            {/* Attachment Menu Dropdown */}
+                            {showAttachMenu && (
+                                <div 
+                                    className="absolute bottom-full left-0 mb-2 rounded-lg shadow-2xl overflow-hidden z-50 min-w-[200px]"
+                                    style={{ backgroundColor: '#1b2d3e', border: '1px solid #2b4a63' }}
+                                >
+                                    <button
+                                        onClick={() => {
+                                            fileInputRef.current?.click();
+                                            setShowAttachMenu(false);
+                                        }}
+                                        className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm transition-colors"
+                                        style={{ color: '#ffffff', backgroundColor: 'transparent' }}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(43, 74, 99, 0.5)'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                    >
+                                        <rux-icon icon="folder-open" size="small" style={{ color: '#22d3ee' }}></rux-icon>
+                                        <div>
+                                            <div style={{ fontWeight: 600, color: '#ffffff' }}>Upload File</div>
+                                            <div style={{ fontSize: '10px', color: '#9ca3af' }}>From your device</div>
+                                        </div>
+                                    </button>
+                                    {onOpenCardPicker && (
+                                        <button
+                                            onClick={() => {
+                                                onOpenCardPicker();
+                                                setShowAttachMenu(false);
+                                            }}
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm transition-colors"
+                                            style={{ color: '#ffffff', backgroundColor: 'transparent', borderTop: '1px solid #2b4a63' }}
+                                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(43, 74, 99, 0.5)'}
+                                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                        >
+                                            <rux-icon icon="photo-library" size="small" style={{ color: '#a855f7' }}></rux-icon>
+                                            <div>
+                                                <div style={{ fontWeight: 600, color: '#ffffff' }}>From Library</div>
+                                                <div style={{ fontSize: '10px', color: '#9ca3af' }}>Select a card</div>
+                                            </div>
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        
                         <rux-button
                             icon="camera-alt"
                             size="small"

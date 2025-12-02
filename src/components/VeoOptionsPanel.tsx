@@ -33,6 +33,7 @@ const VeoOptionsPanel: React.FC<VeoOptionsPanelProps> = ({
   const [startFramePreview, setStartFramePreview] = useState<string | null>(null);
   const [endFramePreview, setEndFramePreview] = useState<string | null>(null);
   const [showImagePicker, setShowImagePicker] = useState<'start' | 'end' | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<'start' | 'end' | null>(null);
 
   // Determine model capabilities
   const isVeo31 = modelName.includes('3.1');
@@ -96,6 +97,107 @@ const VeoOptionsPanel: React.FC<VeoOptionsPanelProps> = ({
     }
   };
 
+  // Drag and drop handlers for frame slots
+  const handleDragOver = (e: React.DragEvent, target: 'start' | 'end') => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTarget(target);
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTarget(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, target: 'start' | 'end') => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTarget(null);
+
+    // Try to get card data from the drag event
+    const cardDataStr = e.dataTransfer.getData('application/json');
+    const cardId = e.dataTransfer.getData('text/plain');
+    
+    let imageData: { base64: string; mimeType: string; name: string } | null = null;
+
+    if (cardDataStr) {
+      try {
+        const cardData = JSON.parse(cardDataStr);
+        // Card has image data directly
+        if (cardData.image?.dataUrl) {
+          const [header, base64] = cardData.image.dataUrl.split(',');
+          const mimeType = header.match(/data:(.*?);/)?.[1] || 'image/png';
+          imageData = {
+            base64,
+            mimeType,
+            name: cardData.name || cardData.title || 'Dropped Frame'
+          };
+        } else if (cardData.mediaLocalPath && window.electronAPI?.readFileAsBase64) {
+          // Read from local path
+          const result = await window.electronAPI.readFileAsBase64(cardData.mediaLocalPath);
+          if (result?.base64) {
+            imageData = {
+              base64: result.base64,
+              mimeType: result.mimeType || 'image/png',
+              name: cardData.name || cardData.title || 'Dropped Frame'
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse dropped card data:', err);
+      }
+    }
+
+    // If we got a cardId but no image data, try to fetch from card library
+    if (!imageData && cardId && window.electronAPI?.p2pRead) {
+      try {
+        const cardDataResponse = await window.electronAPI.p2pRead(cardId);
+        if (cardDataResponse?.length > 0) {
+          const lastEntry = cardDataResponse[cardDataResponse.length - 1];
+          const parsed = typeof lastEntry.data === 'string' ? JSON.parse(lastEntry.data) : lastEntry.data;
+          
+          if (parsed.image?.dataUrl) {
+            const [header, base64] = parsed.image.dataUrl.split(',');
+            const mimeType = header.match(/data:(.*?);/)?.[1] || 'image/png';
+            imageData = { base64, mimeType, name: parsed.title || 'Frame' };
+          } else if (parsed.image?.localPath && window.electronAPI?.readFileAsBase64) {
+            const result = await window.electronAPI.readFileAsBase64(parsed.image.localPath);
+            if (result?.base64) {
+              imageData = { base64: result.base64, mimeType: result.mimeType || 'image/png', name: parsed.title || 'Frame' };
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch card data:', err);
+      }
+    }
+
+    // Also handle file drops
+    if (!imageData && e.dataTransfer.files?.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const [header, base64] = dataUrl.split(',');
+          handleImageSelect(target, {
+            base64,
+            mimeType: file.type,
+            name: file.name
+          });
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+    }
+
+    if (imageData) {
+      handleImageSelect(target, imageData);
+    }
+  };
+
   // Update image mode when frames change
   useEffect(() => {
     if (options.imageMode === 'loop') return; // Don't auto-change loop mode
@@ -108,6 +210,36 @@ const VeoOptionsPanel: React.FC<VeoOptionsPanelProps> = ({
       onOptionsChange({ ...options, imageMode: 'none' });
     }
   }, [options.startFrameBase64, options.endFrameBase64]);
+
+  // Handle clipboard paste for frame slots
+  const handlePaste = async (e: React.ClipboardEvent, target: 'start' | 'end') => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (blob) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const [header, base64] = dataUrl.split(',');
+            const mimeType = header.match(/data:(.*?);/)?.[1] || item.type;
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            handleImageSelect(target, {
+              base64,
+              mimeType,
+              name: `pasted-${timestamp}.${item.type.split('/')[1] || 'png'}`
+            });
+          };
+          reader.readAsDataURL(blob);
+        }
+        return; // Only process first image
+      }
+    }
+  };
 
   return (
     <div className="bg-purple-900/30 border border-purple-500/30 rounded-lg p-4 mb-4">
@@ -201,7 +333,19 @@ const VeoOptionsPanel: React.FC<VeoOptionsPanelProps> = ({
         {options.imageMode !== 'none' && (
           <div className="col-span-2 grid grid-cols-2 gap-3">
             {/* Start Frame */}
-            <div className="border border-dashed border-purple-500/30 rounded-lg p-3 bg-purple-900/20">
+            <div 
+              tabIndex={0}
+              className={`border-2 border-dashed rounded-lg p-3 transition-all outline-none focus:ring-2 focus:ring-cyan-400/50 ${
+                dragOverTarget === 'start'
+                  ? 'border-cyan-400 bg-cyan-500/20 scale-[1.02]'
+                  : 'border-purple-500/30 bg-purple-900/20'
+              }`}
+              onDragOver={(e) => handleDragOver(e, 'start')}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, 'start')}
+              onPaste={(e) => handlePaste(e, 'start')}
+              title="Click to focus, then Ctrl+V to paste an image"
+            >
               <label className="block text-xs text-purple-300 mb-2">
                 Start Frame {options.imageMode === 'loop' && '(will also be end frame)'}
               </label>
@@ -237,18 +381,36 @@ const VeoOptionsPanel: React.FC<VeoOptionsPanelProps> = ({
               ) : (
                 <button
                   onClick={() => setShowImagePicker('start')}
-                  className="flex flex-col items-center justify-center w-full h-24 cursor-pointer hover:bg-purple-800/20 rounded transition-colors border border-transparent hover:border-purple-500/30"
+                  className={`flex flex-col items-center justify-center w-full h-24 cursor-pointer rounded transition-colors border-2 border-dashed ${
+                    dragOverTarget === 'start'
+                      ? 'border-cyan-400 bg-cyan-500/10'
+                      : 'border-transparent hover:border-purple-500/30 hover:bg-purple-800/20'
+                  }`}
                 >
-                  <rux-icon icon="folder-open" size="small" className="text-purple-400"></rux-icon>
-                  <span className="text-xs text-purple-400 mt-1">Select from Library</span>
-                  <span className="text-[10px] text-purple-400/50">or upload new</span>
+                  <rux-icon icon={dragOverTarget === 'start' ? 'file-download' : 'folder-open'} size="small" className={dragOverTarget === 'start' ? 'text-cyan-400' : 'text-purple-400'}></rux-icon>
+                  <span className={`text-xs mt-1 ${dragOverTarget === 'start' ? 'text-cyan-400 font-bold' : 'text-purple-400'}`}>
+                    {dragOverTarget === 'start' ? 'Drop Here!' : 'Drag frame here'}
+                  </span>
+                  <span className="text-[10px] text-purple-400/50">or click to browse</span>
                 </button>
               )}
             </div>
 
             {/* End Frame (only for start-end-frame mode) */}
             {options.imageMode === 'start-end-frame' && (
-              <div className="border border-dashed border-purple-500/30 rounded-lg p-3 bg-purple-900/20">
+              <div 
+                tabIndex={0}
+                className={`border-2 border-dashed rounded-lg p-3 transition-all outline-none focus:ring-2 focus:ring-pink-400/50 ${
+                  dragOverTarget === 'end'
+                    ? 'border-pink-400 bg-pink-500/20 scale-[1.02]'
+                    : 'border-purple-500/30 bg-purple-900/20'
+                }`}
+                onDragOver={(e) => handleDragOver(e, 'end')}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, 'end')}
+                onPaste={(e) => handlePaste(e, 'end')}
+                title="Click to focus, then Ctrl+V to paste an image"
+              >
                 <label className="block text-xs text-purple-300 mb-2">End Frame</label>
                 {endFramePreview || options.endFrameBase64 ? (
                   <div className="relative group">
@@ -282,11 +444,17 @@ const VeoOptionsPanel: React.FC<VeoOptionsPanelProps> = ({
                 ) : (
                   <button
                     onClick={() => setShowImagePicker('end')}
-                    className="flex flex-col items-center justify-center w-full h-24 cursor-pointer hover:bg-purple-800/20 rounded transition-colors border border-transparent hover:border-purple-500/30"
+                    className={`flex flex-col items-center justify-center w-full h-24 cursor-pointer rounded transition-colors border-2 border-dashed ${
+                      dragOverTarget === 'end'
+                        ? 'border-pink-400 bg-pink-500/10'
+                        : 'border-transparent hover:border-purple-500/30 hover:bg-purple-800/20'
+                    }`}
                   >
-                    <rux-icon icon="folder-open" size="small" className="text-purple-400"></rux-icon>
-                    <span className="text-xs text-purple-400 mt-1">Select from Library</span>
-                    <span className="text-[10px] text-purple-400/50">or upload new</span>
+                    <rux-icon icon={dragOverTarget === 'end' ? 'file-download' : 'folder-open'} size="small" className={dragOverTarget === 'end' ? 'text-pink-400' : 'text-purple-400'}></rux-icon>
+                    <span className={`text-xs mt-1 ${dragOverTarget === 'end' ? 'text-pink-400 font-bold' : 'text-purple-400'}`}>
+                      {dragOverTarget === 'end' ? 'Drop Here!' : 'Drag frame here'}
+                    </span>
+                    <span className="text-[10px] text-purple-400/50">or click to browse</span>
                   </button>
                 )}
               </div>
