@@ -188,7 +188,12 @@ const VeoOptionsPanel: React.FC<VeoOptionsPanelProps> = ({
             {options.imageMode === 'none' && 'Generate video from text prompt only'}
             {options.imageMode === 'start-frame' && 'Use an image as the first frame'}
             {options.imageMode === 'start-end-frame' && 'Interpolate between two images (Veo 3.1 only)'}
-            {options.imageMode === 'loop' && 'Start and end on the same frame for seamless looping'}
+            {options.imageMode === 'loop' && (
+              <>
+                Start and end on the same frame for seamless looping
+                {!isVeo31 && <span className="text-yellow-400 ml-1">⚠️ Requires Veo 3.1</span>}
+              </>
+            )}
           </p>
         </div>
 

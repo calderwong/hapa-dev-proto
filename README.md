@@ -35,6 +35,11 @@ The app is built with **Electron**, **React + TypeScript**, and **Vite**.
   - **Optimized Loading**: Fast, backend-aggregated loading of thousands of wiki entries.
   - **Search & Filter**: Quickly find terms or related concepts.
 
+- **Profile Page**
+  - **Identity Hub**: Manage your agent's display name, avatar, and neural persona context.
+  - **System Stats**: View real-time storage usage, card/wiki counts, and P2P network status.
+  - **Data Management**: (Planned) Tools to export data or clear local storage.
+
 - **Settings**
   - Store a Gemini API key.
   - Store an OpenAI API key.

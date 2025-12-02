@@ -511,3 +511,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </div>
     );
 };
+
+// Memoize to prevent re-renders when parent state changes (like veoOptions with large base64 images)
+export default React.memo(ChatInput);

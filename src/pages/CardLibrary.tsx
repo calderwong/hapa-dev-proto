@@ -3,6 +3,15 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 import CardWorkspace from '../components/CardWorkspace';
+import { 
+    calculateCardQuality, 
+    getCardType, 
+    getTierBadge,
+    getAllTiers,
+    getAllCardTypes,
+    type CardQualityTier,
+    type CardType 
+} from '../utils/cardQuality';
 
 interface CardIndexEntry {
     cardId: string;
@@ -64,6 +73,12 @@ const CardLibrary: React.FC = () => {
     const [draggedCard, setDraggedCard] = useState<CardIndexEntry | null>(null);
     const [isOverDropZone, setIsOverDropZone] = useState(false);
     const [activeWorkspaceCard, setActiveWorkspaceCard] = useState<CardIndexEntry | null>(null);
+
+    // Filter & Sort State
+    const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'quality-high' | 'quality-low' | 'name-az' | 'name-za'>('newest');
+    const [filterTiers, setFilterTiers] = useState<CardQualityTier[]>([]);
+    const [filterTypes, setFilterTypes] = useState<CardType[]>([]);
+    const [showFilters, setShowFilters] = useState(false);
 
     const emitWormholeRunEvent = (
         type: 'start' | 'end',
@@ -498,15 +513,70 @@ const CardLibrary: React.FC = () => {
         );
     };
 
+    // Enhanced filtering and sorting with quality system
     const filteredCards = useMemo(() => {
-        if (!search) return cards;
-        const q = search.toLowerCase();
-        return cards.filter(c =>
-            (c.name && c.name.toLowerCase().includes(q)) ||
-            c.cardId.toLowerCase().includes(q) ||
-            (c.provider && c.provider.toLowerCase().includes(q))
-        );
-    }, [cards, search]);
+        let result = [...cards];
+
+        // Text search filter
+        if (search) {
+            const q = search.toLowerCase();
+            result = result.filter(c =>
+                (c.name && c.name.toLowerCase().includes(q)) ||
+                c.cardId.toLowerCase().includes(q) ||
+                (c.provider && c.provider.toLowerCase().includes(q))
+            );
+        }
+
+        // Filter by tier
+        if (filterTiers.length > 0) {
+            result = result.filter(c => {
+                const quality = calculateCardQuality(c);
+                return filterTiers.includes(quality.tier);
+            });
+        }
+
+        // Filter by type
+        if (filterTypes.length > 0) {
+            result = result.filter(c => {
+                const cardType = getCardType(c);
+                return filterTypes.includes(cardType);
+            });
+        }
+
+        // Sort
+        result.sort((a, b) => {
+            switch (sortBy) {
+                case 'newest':
+                    return (b.createdAt || '').localeCompare(a.createdAt || '');
+                case 'oldest':
+                    return (a.createdAt || '').localeCompare(b.createdAt || '');
+                case 'quality-high':
+                    return calculateCardQuality(b).score - calculateCardQuality(a).score;
+                case 'quality-low':
+                    return calculateCardQuality(a).score - calculateCardQuality(b).score;
+                case 'name-az':
+                    return (a.name || 'Untitled').localeCompare(b.name || 'Untitled');
+                case 'name-za':
+                    return (b.name || 'Untitled').localeCompare(a.name || 'Untitled');
+                default:
+                    return 0;
+            }
+        });
+
+        return result;
+    }, [cards, search, filterTiers, filterTypes, sortBy]);
+
+    // Calculate tier distribution for stats
+    const tierStats = useMemo(() => {
+        const stats: Record<CardQualityTier, number> = {
+            common: 0, uncommon: 0, rare: 0, epic: 0, legendary: 0, mythic: 0
+        };
+        cards.forEach(c => {
+            const quality = calculateCardQuality(c);
+            stats[quality.tier]++;
+        });
+        return stats;
+    }, [cards]);
 
     // Drag Handlers
     const handleDragStart = (e: React.DragEvent, card: CardIndexEntry) => {
@@ -596,7 +666,175 @@ const CardLibrary: React.FC = () => {
     }
 
     return (
-        <PageContainer>
+        <div className="flex flex-col h-full bg-gray-900 text-white overflow-hidden">
+            {/* Status Header Bar */}
+            <div className="flex-none px-6 py-3 bg-gray-900/80 backdrop-blur border-b border-gray-700 flex items-center justify-between z-10">
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center border border-purple-500/30">
+                            <rux-icon icon="photo-library" size="small" className="text-purple-400"></rux-icon>
+                        </div>
+                        <div className="flex flex-col">
+                            <h2 className="text-sm font-bold text-white tracking-widest uppercase leading-none">Card Library</h2>
+                            <span className="text-[10px] text-purple-400/80 font-mono tracking-wider">MEMORY CORE</span>
+                        </div>
+                    </div>
+
+                    <div className="h-6 w-px bg-gray-700 mx-2"></div>
+
+                    <div className="flex items-center gap-2">
+                        <rux-status status={loading ? 'caution' : 'standby'} className="mt-1"></rux-status>
+                        <span className="text-xs text-gray-400 font-mono uppercase">
+                            {loading ? 'Syncing...' : `${cards.length} Cards`}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className="relative group">
+                        <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
+                        <rux-input
+                            type="text"
+                            value={search}
+                            onInput={(e: any) => setSearch(e.target.value)}
+                            placeholder="Search cards..."
+                            className="relative min-w-[200px]"
+                        >
+                            <rux-icon slot="prefix" icon="search" size="small"></rux-icon>
+                        </rux-input>
+                    </div>
+                    <rux-button
+                        onClick={() => setShowFilters(!showFilters)}
+                        icon="filter-list"
+                        secondary
+                        size="small"
+                        className={filterTiers.length > 0 || filterTypes.length > 0 ? 'ring-2 ring-purple-500' : ''}
+                    >
+                        Filter
+                    </rux-button>
+                    <rux-button
+                        onClick={() => loadCards(selected?.cardId || null)}
+                        disabled={loading}
+                        icon="refresh"
+                        secondary
+                        size="small"
+                    >
+                        Sync
+                    </rux-button>
+                </div>
+            </div>
+
+            {/* Filter & Sort Panel */}
+            {showFilters && (
+                <div className="flex-none px-6 py-3 bg-gray-800/50 border-b border-gray-700/50 flex flex-wrap items-center gap-4">
+                    {/* Sort By */}
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Sort:</span>
+                        <select 
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as any)}
+                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
+                            title="Sort order"
+                        >
+                            <option value="newest">Newest First</option>
+                            <option value="oldest">Oldest First</option>
+                            <option value="quality-high">Quality ↓</option>
+                            <option value="quality-low">Quality ↑</option>
+                            <option value="name-az">Name A-Z</option>
+                            <option value="name-za">Name Z-A</option>
+                        </select>
+                    </div>
+
+                    <div className="h-4 w-px bg-gray-700"></div>
+
+                    {/* Tier Filter */}
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Tier:</span>
+                        <div className="flex gap-1">
+                            {[
+                                { value: 'common' as CardQualityTier, label: 'Common', activeClass: 'bg-gray-500/30 text-gray-400 ring-1 ring-gray-500' },
+                                { value: 'uncommon' as CardQualityTier, label: 'Uncommon', activeClass: 'bg-emerald-500/30 text-emerald-400 ring-1 ring-emerald-500' },
+                                { value: 'rare' as CardQualityTier, label: 'Rare', activeClass: 'bg-blue-500/30 text-blue-400 ring-1 ring-blue-500' },
+                                { value: 'epic' as CardQualityTier, label: 'Epic', activeClass: 'bg-purple-500/30 text-purple-400 ring-1 ring-purple-500' },
+                                { value: 'legendary' as CardQualityTier, label: 'Legendary', activeClass: 'bg-orange-500/30 text-orange-400 ring-1 ring-orange-500' },
+                                { value: 'mythic' as CardQualityTier, label: 'Mythic', activeClass: 'bg-rose-500/30 text-rose-400 ring-1 ring-rose-500' },
+                            ].map(tier => (
+                                <button
+                                    key={tier.value}
+                                    onClick={() => {
+                                        setFilterTiers(prev => 
+                                            prev.includes(tier.value) 
+                                                ? prev.filter(t => t !== tier.value)
+                                                : [...prev, tier.value]
+                                        );
+                                    }}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all ${
+                                        filterTiers.includes(tier.value)
+                                            ? tier.activeClass
+                                            : 'bg-gray-800 text-gray-500 hover:text-gray-300'
+                                    }`}
+                                    data-tooltip={`${tier.label} (${tierStats[tier.value]} cards)`}
+                                    data-tooltip-tier={tier.value}
+                                >
+                                    {getTierBadge(tier.value)} <span className="opacity-60">{tierStats[tier.value]}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="h-4 w-px bg-gray-700"></div>
+
+                    {/* Type Filter */}
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Type:</span>
+                        <div className="flex gap-1">
+                            {getAllCardTypes().map(type => (
+                                <button
+                                    key={type.value}
+                                    onClick={() => {
+                                        setFilterTypes(prev => 
+                                            prev.includes(type.value) 
+                                                ? prev.filter(t => t !== type.value)
+                                                : [...prev, type.value]
+                                        );
+                                    }}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all flex items-center gap-1 ${
+                                        filterTypes.includes(type.value)
+                                            ? 'bg-purple-500/30 text-purple-400 ring-1 ring-purple-500'
+                                            : 'bg-gray-800 text-gray-500 hover:text-gray-300'
+                                    }`}
+                                    data-tooltip={type.label}
+                                >
+                                    <rux-icon icon={type.icon} size="extra-small"></rux-icon>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Clear Filters */}
+                    {(filterTiers.length > 0 || filterTypes.length > 0) && (
+                        <>
+                            <div className="h-4 w-px bg-gray-700"></div>
+                            <button
+                                onClick={() => {
+                                    setFilterTiers([]);
+                                    setFilterTypes([]);
+                                }}
+                                className="text-[10px] uppercase tracking-wider text-red-400 hover:text-red-300 font-bold"
+                            >
+                                Clear Filters
+                            </button>
+                        </>
+                    )}
+
+                    {/* Results Count */}
+                    <div className="ml-auto text-[10px] text-gray-500 font-mono">
+                        Showing {filteredCards.length} of {cards.length}
+                    </div>
+                </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-6">
             <style>{`
                 .card-grid {
                     display: grid;
@@ -629,41 +867,6 @@ const CardLibrary: React.FC = () => {
             `}</style>
 
             <div className="w-full text-white h-full flex flex-col max-w-[1800px] mx-auto relative">
-                {/* Header */}
-                <div className="flex items-end justify-between border-b border-gray-800 pb-6 mb-6">
-                    <div>
-                        <h2 className="text-4xl font-bold tracking-tight text-white flex items-center gap-3">
-                            <rux-icon icon="photo-library" size="large"></rux-icon>
-                            CARD LIBRARY <span className="text-purple-400 text-lg font-mono font-normal opacity-80">// MEMORY CORE</span>
-                        </h2>
-                        <p className="text-gray-400 mt-1 font-mono text-xs tracking-wide">
-                            PERSISTENT HOLOGRAPHIC STORAGE
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <div className="relative group">
-                            <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
-                            <rux-input
-                                type="text"
-                                value={search}
-                                onInput={(e: any) => setSearch(e.target.value)}
-                                placeholder="Search memory core..."
-                                className="relative min-w-[300px]"
-                            >
-                                <rux-icon slot="prefix" icon="search" size="small"></rux-icon>
-                            </rux-input>
-                        </div>
-                        <rux-button
-                            onClick={() => loadCards(selected?.cardId || null)}
-                            disabled={loading}
-                            icon="refresh"
-                            secondary
-                        >
-                            Sync
-                        </rux-button>
-                    </div>
-                </div>
-
                 {error && (
                     <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg flex items-center gap-3 text-red-300">
                         <rux-icon icon="warning" size="small"></rux-icon>
@@ -692,14 +895,25 @@ const CardLibrary: React.FC = () => {
 
                 <div className="flex-1 overflow-y-auto custom-scrollbar pb-10 relative">
                     <div className="card-grid pb-32">
-                        {filteredCards.map((card) => (
+                        {filteredCards.map((card) => {
+                            const quality = calculateCardQuality(card);
+                            return (
                             <div
                                 key={card.cardId + card.createdAt}
                                 draggable
                                 onDragStart={(e) => handleDragStart(e, card)}
                                 onClick={() => handleCardClick(card)}
-                                className="group relative bg-gray-900/40 border border-gray-700/50 rounded-lg cursor-grab active:cursor-grabbing hover:border-purple-500/50 hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] transition-all duration-300 flex flex-col overflow-hidden"
+                                className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${quality.borderClass} ${quality.glowClass}`}
                             >
+                                {/* Tier Badge */}
+                                <div 
+                                    className={`absolute top-2 right-2 z-10 tier-badge ${quality.badgeClass}`} 
+                                    data-tooltip={`${quality.tierLabel} • Score: ${quality.score}/13`}
+                                    data-tooltip-tier={quality.tier}
+                                    data-tooltip-pos="bottom"
+                                >
+                                    {getTierBadge(quality.tier)}
+                                </div>
                                 {renderThumbnail(card)}
                                 <div className="p-4 flex flex-col gap-1">
                                     <div className="font-bold text-sm text-gray-200 truncate group-hover:text-purple-300 transition-colors">
@@ -713,38 +927,40 @@ const CardLibrary: React.FC = () => {
                                             {card.provider || 'SYSTEM'}
                                         </span>
                                         <div className="flex items-center gap-2">
-                                            {/* Badges */}
+                                            {/* Affix Badges */}
                                             {(() => {
                                                 const summaryCount = card.cardRecord?.summaries?.length || 0;
                                                 const keyTermCount = card.cardRecord?.keyTerms?.length || 0;
                                                 const wikiCount = card.cardRecord?.wormhole?.wikiEntries?.length || 0;
+                                                const transcriptCount = card.cardRecord?.transcripts?.length || 0;
 
-                                                if (summaryCount === 0 && keyTermCount === 0 && wikiCount === 0) return null;
+                                                if (summaryCount === 0 && keyTermCount === 0 && wikiCount === 0 && transcriptCount === 0 && !card.derivedGif && card.subType !== 'sprite-sheet') return null;
 
                                                 return (
                                                     <div className="flex items-center gap-2 mr-2 border-r border-gray-700 pr-2">
-                                                        {card.subType === 'sprite-sheet' && (
-                                                            <div className="flex items-center gap-1 text-pink-400" title="Sprite Sheet">
+                                                        {(card.derivedGif || card.subType === 'sprite-sheet') && (
+                                                            <div className="flex items-center gap-1 text-pink-400" data-tooltip="Animated Loop">
                                                                 <rux-icon icon="animation" size="extra-small"></rux-icon>
-                                                                <span className="text-[10px] font-mono font-bold">GIF</span>
+                                                            </div>
+                                                        )}
+                                                        {transcriptCount > 0 && (
+                                                            <div className="flex items-center gap-1 text-yellow-400" data-tooltip={`${transcriptCount} Transcript${transcriptCount > 1 ? 's' : ''}`}>
+                                                                <rux-icon icon="mic" size="extra-small"></rux-icon>
                                                             </div>
                                                         )}
                                                         {summaryCount > 0 && (
-                                                            <div className="flex items-center gap-1 text-cyan-400" title={`${summaryCount} Summaries`}>
+                                                            <div className="flex items-center gap-1 text-cyan-400" data-tooltip={`${summaryCount} Summar${summaryCount > 1 ? 'ies' : 'y'}`}>
                                                                 <rux-icon icon="subject" size="extra-small"></rux-icon>
-                                                                <span className="text-[10px] font-mono font-bold">{summaryCount}</span>
                                                             </div>
                                                         )}
                                                         {keyTermCount > 0 && (
-                                                            <div className="flex items-center gap-1 text-purple-400" title={`${keyTermCount} Key Term Sets`}>
+                                                            <div className="flex items-center gap-1 text-purple-400" data-tooltip={`${keyTermCount} Key Term Set${keyTermCount > 1 ? 's' : ''}`}>
                                                                 <rux-icon icon="local-offer" size="extra-small"></rux-icon>
-                                                                <span className="text-[10px] font-mono font-bold">{keyTermCount}</span>
                                                             </div>
                                                         )}
                                                         {wikiCount > 0 && (
-                                                            <div className="flex items-center gap-1 text-emerald-400" title={`${wikiCount} Wiki Entries`}>
+                                                            <div className="flex items-center gap-1 text-emerald-400" data-tooltip={`${wikiCount} Wiki Entr${wikiCount > 1 ? 'ies' : 'y'}`}>
                                                                 <rux-icon icon="public" size="extra-small"></rux-icon>
-                                                                <span className="text-[10px] font-mono font-bold">{wikiCount}</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -757,7 +973,8 @@ const CardLibrary: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                        );
+                        })}
                     </div>
                 </div>
 
@@ -793,9 +1010,9 @@ const CardLibrary: React.FC = () => {
                                     type="button"
                                     aria-label="Close card inspector"
                                     onClick={() => setSelected(null)}
-                                    className="text-gray-500 hover:text-white transition-colors"
+                                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors text-xl font-light"
                                 >
-                                    <rux-icon icon="close" size="small"></rux-icon>
+                                    ✕
                                 </button>
                             </div>
 
@@ -977,7 +1194,8 @@ const CardLibrary: React.FC = () => {
                     </div>
                 )}
             </div>
-        </PageContainer>
+            </div>
+        </div>
     );
 };
 

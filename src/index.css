@@ -116,3 +116,188 @@ button:focus-visible {
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }
+
+/* ===== Card Quality Tier Animations ===== */
+
+/* Epic - Subtle pulse */
+@keyframes epic-pulse {
+  0%, 100% { 
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.5);
+  }
+  50% { 
+    box-shadow: 0 0 24px rgba(168, 85, 247, 0.7);
+  }
+}
+
+.animate-epic-pulse {
+  animation: epic-pulse 3s ease-in-out infinite;
+}
+
+/* Legendary - Shimmer effect */
+@keyframes legendary-shimmer {
+  0%, 100% { 
+    box-shadow: 0 0 20px rgba(249, 115, 22, 0.6);
+    filter: brightness(1);
+  }
+  50% { 
+    box-shadow: 0 0 28px rgba(249, 115, 22, 0.8);
+    filter: brightness(1.05);
+  }
+}
+
+.animate-legendary-shimmer {
+  animation: legendary-shimmer 2.5s ease-in-out infinite;
+}
+
+/* Mythic - Breathing glow with gradient shift */
+@keyframes mythic-breathe {
+  0%, 100% { 
+    box-shadow: 
+      0 0 24px rgba(244, 63, 94, 0.6),
+      0 0 48px rgba(245, 158, 11, 0.3);
+    filter: brightness(1) saturate(1);
+  }
+  33% {
+    box-shadow: 
+      0 0 32px rgba(245, 158, 11, 0.7),
+      0 0 56px rgba(244, 63, 94, 0.4);
+    filter: brightness(1.05) saturate(1.1);
+  }
+  66% {
+    box-shadow: 
+      0 0 28px rgba(244, 63, 94, 0.7),
+      0 0 52px rgba(168, 85, 247, 0.3);
+    filter: brightness(1.02) saturate(1.05);
+  }
+}
+
+.animate-mythic-breathe {
+  animation: mythic-breathe 4s ease-in-out infinite;
+}
+
+/* Tier badge styling */
+.tier-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ===== Custom Astro-styled Tooltips ===== */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::before,
+[data-tooltip]::after {
+  position: absolute;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: all 0.2s ease;
+  z-index: 100;
+}
+
+/* Tooltip arrow */
+[data-tooltip]::before {
+  content: '';
+  border: 6px solid transparent;
+  border-top-color: rgba(30, 41, 59, 0.98);
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Tooltip content */
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(77, 172, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+[data-tooltip]:hover::after {
+  transform: translateX(-50%) translateY(-4px);
+}
+
+/* Tooltip positioned below */
+[data-tooltip-pos="bottom"]::before {
+  border-top-color: transparent;
+  border-bottom-color: rgba(30, 41, 59, 0.98);
+  bottom: auto;
+  top: 100%;
+}
+
+[data-tooltip-pos="bottom"]::after {
+  bottom: auto;
+  top: calc(100% + 10px);
+}
+
+[data-tooltip-pos="bottom"]:hover::after {
+  transform: translateX(-50%) translateY(4px);
+}
+
+/* Tier-specific tooltip colors */
+[data-tooltip-tier="common"]::after {
+  border-color: rgba(107, 114, 128, 0.4);
+}
+
+[data-tooltip-tier="uncommon"]::after {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+[data-tooltip-tier="rare"]::after {
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 12px rgba(59, 130, 246, 0.15);
+}
+
+[data-tooltip-tier="epic"]::after {
+  border-color: rgba(168, 85, 247, 0.4);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 12px rgba(168, 85, 247, 0.2);
+}
+
+[data-tooltip-tier="legendary"]::after {
+  border-color: rgba(249, 115, 22, 0.4);
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 16px rgba(249, 115, 22, 0.25);
+}
+
+[data-tooltip-tier="mythic"]::after {
+  border-image: linear-gradient(135deg, rgba(244, 63, 94, 0.6), rgba(245, 158, 11, 0.6)) 1;
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 0 20px rgba(244, 63, 94, 0.2),
+    0 0 30px rgba(245, 158, 11, 0.15);
+}

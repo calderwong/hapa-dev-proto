@@ -367,3 +367,93 @@
 
 **Tags:** #feature #veo #card-library #image-picker #ux #modal
 **Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 22 – Card Quality/Rarity System Design
+**Prompt:** "Design a sort/filter system for the card library based on Type relationships, and create a Quality system with color-coded borders based on filled attributes (image, looping video, summary, key terms, wiki entries, transcript). Draw inspiration from card rarities, action-RPGs, and gear progression systems."
+
+**Summary of actions:**
+- Analyzed current card structure in CardLibrary.tsx to identify:
+  - mediaKind: 'image' | 'video' | 'audio'
+  - subType: 'sprite-sheet', 'first-frame', 'last-frame', 'audio-extract'
+  - cardRecord.summaries, keyTerms, transcripts
+  - cardRecord.wormhole.wikiEntries
+  - derivedGif for looping content
+- Created comprehensive design document: `docs/CARD_QUALITY_SYSTEM_DESIGN.md`
+
+**Design Highlights:**
+- **6 Card Types**: IMAGE, VIDEO, AUDIO, TEXT, EXTRACTED, SPRITE
+- **8 Quality Affixes**: Media, Loop, Summary, Key Terms, Wiki, Transcript, Named, Linked
+- **6 Rarity Tiers**: Common → Uncommon → Rare → Epic → Legendary → Mythic
+- **Point-based scoring**: Max 13 points, tier thresholds at 2, 4, 6, 9, 12
+- **Visual effects**: Color-coded borders, glow animations, tier badges
+- **Filter/Sort system**: Multi-select type/tier filters, affix toggles, 8 sort options
+- **5 Implementation phases** with checkboxes
+
+**Inspiration sources:**
+- Diablo/Path of Exile loot affixes and quality
+- Borderlands weapon rarity glow effects
+- Destiny engram masterwork system
+- TCG card rarity tiers
+
+**Tags:** #design #card-library #quality-system #ux #gamification
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 23 – Card Quality System Implementation
+**Prompt:** "Implement away!"
+
+**Summary of actions:**
+- Created `src/utils/cardQuality.ts` with:
+  - `calculateCardQuality()` - Scores cards based on 8 affixes (max 13 points)
+  - `getCardType()` - Classifies cards into 6 types
+  - `getTierBadge()` - Returns tier abbreviation (C/U/R/E/L/M)
+  - Type definitions for `CardQualityTier` and `CardType`
+
+- Added CSS animations to `src/index.css`:
+  - `animate-epic-pulse` - Subtle purple glow pulse
+  - `animate-legendary-shimmer` - Orange shimmer with brightness
+  - `animate-mythic-breathe` - Multi-color breathing glow
+
+- Updated `src/pages/CardLibrary.tsx`:
+  - Added filter/sort state (sortBy, filterTiers, filterTypes, showFilters)
+  - Enhanced `filteredCards` memo with tier/type filtering and 6 sort options
+  - Added `tierStats` memo for distribution counts
+  - Updated card grid to show quality borders and glow effects
+  - Added tier badge (C/U/R/E/L/M) in top-right of cards
+  - Added Filter button in header with toggle panel
+  - Filter panel includes: Sort dropdown, Tier toggles, Type toggles, Clear button
+  - Added affix badges: loop/GIF, transcript, summary, key terms, wiki
+
+**Files created:**
+- `src/utils/cardQuality.ts`
+
+**Files modified:**
+- `src/index.css` (added tier animations)
+- `src/pages/CardLibrary.tsx` (quality integration)
+- `docs/CARD_QUALITY_SYSTEM_DESIGN.md` (marked phases complete)
+
+**Tags:** #feature #card-library #quality-system #implementation #gamification
+**Est. Avg. Human Dev Time:** 2.0 hours
+
+## Entry 24 – Custom Astro-styled Tooltips
+**Prompt:** "Make the on-hover tooltips use Astro's theme/font/components to pop more, be more readable, and more congruent with the application"
+
+**Summary of actions:**
+- Created CSS-based custom tooltip system in `src/index.css`
+- Uses `data-tooltip` attribute instead of native `title`
+- Replaced all `title` attributes in CardLibrary with `data-tooltip`
+
+**Tooltip Styling:**
+- Dark gradient background (#1e293b → #0f172a)
+- Roboto Mono font for consistency
+- Subtle blur backdrop effect
+- Smooth slide-up animation on hover
+- Tier-specific glow colors (gray → emerald → blue → purple → orange → rose)
+
+**Updated Elements:**
+- Tier badges: "Epic • Score: 7/13"
+- Tier filter buttons: "Epic (5 cards)"
+- Type filter buttons: Type names
+- Affix badges: "2 Summaries", "1 Wiki Entry", etc.
+
+**Tags:** #feature #card-library #tooltips #ux #css
+**Est. Avg. Human Dev Time:** 0.5 hours

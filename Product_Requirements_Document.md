@@ -55,6 +55,10 @@ Goals:
   - Never hard-code API keys; store them only locally on the user's machine.
   - Minimize logging of sensitive data to console or disk.
   - Keep Electron `contextIsolation` enabled and expose a narrow, typed preload bridge.
+- **UX/UI Standards**:
+  - **Drag & Drop**: Any feature involving file ingestion (uploading images, documents, media) MUST support drag-and-drop functionality in addition to standard file pickers.
+  - **Feedback**: Provide immediate visual feedback for user actions (hover states, loading spinners, success/error toasts).
+
 - **Maintainability**:
   - TypeScript across renderer and Electron where possible.
   - Flat ESLint config enforced via `npm run lint`.

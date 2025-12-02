@@ -1,12 +1,73 @@
 
 // @ts-nocheck
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useNavigate } from 'react-router-dom';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import { ChatInput, type Attachment } from '../components/ChatInput';
 import VeoOptionsPanel, { type VeoOptions } from '../components/VeoOptionsPanel';
+
+// Memoized component for Veo options bar to prevent expensive base64 re-processing
+const VeoOptionsBar = memo(({ 
+  veoOptions, 
+  onExpand 
+}: { 
+  veoOptions: VeoOptions; 
+  onExpand: () => void;
+}) => {
+  // Memoize data URLs to avoid recomputing on every render
+  const startFrameDataUrl = useMemo(() => 
+    veoOptions.startFrameBase64 
+      ? `data:${veoOptions.startFrameMimeType};base64,${veoOptions.startFrameBase64}`
+      : null,
+    [veoOptions.startFrameBase64, veoOptions.startFrameMimeType]
+  );
+
+  const endFrameDataUrl = useMemo(() => 
+    veoOptions.endFrameBase64 
+      ? `data:${veoOptions.endFrameMimeType};base64,${veoOptions.endFrameBase64}`
+      : null,
+    [veoOptions.endFrameBase64, veoOptions.endFrameMimeType]
+  );
+
+  return (
+    <button
+      onClick={onExpand}
+      className="flex items-center gap-2 px-3 py-2 mb-2 text-xs text-purple-400 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/30 rounded-lg transition-all w-full justify-center"
+    >
+      <rux-icon icon="videocam" size="extra-small"></rux-icon>
+      <span>Configure Video Options</span>
+      <span className="text-purple-400/60">
+        ({veoOptions.aspectRatio} • {veoOptions.resolution} • {veoOptions.durationSeconds}s • {veoOptions.imageMode === 'none' ? 'Text only' : veoOptions.imageMode})
+      </span>
+      {/* Start frame thumbnail indicator */}
+      {startFrameDataUrl && (
+        <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-purple-500/30">
+          <img
+            src={startFrameDataUrl}
+            alt="Start frame"
+            className="w-6 h-6 rounded object-cover border border-purple-500/50"
+          />
+          <span className="text-purple-300 text-[10px]">
+            {veoOptions.imageMode === 'loop' ? '🔄' : '▶'}
+          </span>
+          {endFrameDataUrl && veoOptions.imageMode === 'start-end-frame' && (
+            <>
+              <span className="text-purple-400/40">→</span>
+              <img
+                src={endFrameDataUrl}
+                alt="End frame"
+                className="w-6 h-6 rounded object-cover border border-purple-500/50"
+              />
+            </>
+          )}
+        </div>
+      )}
+      <rux-icon icon="keyboard-arrow-down" size="extra-small"></rux-icon>
+    </button>
+  );
+});
 
 interface ChatAttachmentPreview {
   mimeType: string;
@@ -74,6 +135,7 @@ const CHAT_ARCHIVES_STORAGE_KEY = 'chatArchives';
 const CHAT_THREAD_ID_STORAGE_KEY = 'currentChatThreadId';
 const CARD_LIBRARY_CORE_NAME = 'card-library';
 const CHAT_IMAGE_CARD_STATE_STORAGE_PREFIX = 'chatImageCardState';
+const CHAT_EXTRACTED_CARDS_STORAGE_KEY = 'chatExtractedCards';
 
 const formatProviderLabel = (value: 'gemini' | 'openai' | 'llama') => {
   if (value === 'gemini') return 'Gemini';
@@ -123,6 +185,22 @@ const Chat: React.FC = () => {
 
   // Veo video generation options
   const [showVeoPanel, setShowVeoPanel] = useState(false);
+  // Track video save states: 'idle' | 'saving' | 'saved'
+  const [videoSaveStates, setVideoSaveStates] = useState<Record<string, 'idle' | 'saving' | 'saved'>>({});
+  // Track extracted cards: { msgId: { firstFrame: { cardId, coreName, dataUrl }, ... } }
+  type ExtractedCard = { cardId: string; coreName: string; dataUrl: string; kind: 'image' | 'audio' };
+  const [extractedCards, setExtractedCards] = useState<Record<string, Record<string, ExtractedCard>>>(() => {
+    // Load from localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(CHAT_EXTRACTED_CARDS_STORAGE_KEY);
+        return saved ? JSON.parse(saved) : {};
+      } catch { return {}; }
+    }
+    return {};
+  });
+  // Track in-progress extractions
+  const [extractingStates, setExtractingStates] = useState<Record<string, Record<string, boolean>>>({});
   const [veoOptions, setVeoOptions] = useState<VeoOptions>({
     imageMode: 'none',
     aspectRatio: '16:9',
@@ -824,6 +902,12 @@ const Chat: React.FC = () => {
             ? m.provider
             : undefined,
         model: typeof m.model === 'string' ? m.model : undefined,
+        // Restore video metadata
+        video: m.video?.localPath ? {
+          localPath: m.video.localPath,
+          fileName: m.video.fileName,
+          mimeType: m.video.mimeType,
+        } : undefined,
       }));
 
       if (restored.length > 0) {
@@ -845,6 +929,12 @@ const Chat: React.FC = () => {
           content: m.content,
           provider: m.provider,
           model: m.model,
+          // Persist video metadata (without large base64 to save space)
+          video: m.video ? {
+            localPath: m.video.localPath,
+            fileName: m.video.fileName,
+            mimeType: m.video.mimeType,
+          } : undefined,
         }));
         window.localStorage.setItem(
           CHAT_MESSAGES_STORAGE_KEY,
@@ -859,6 +949,16 @@ const Chat: React.FC = () => {
       window.clearTimeout(handle);
     };
   }, [messages]);
+
+  // Persist extracted cards to localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(CHAT_EXTRACTED_CARDS_STORAGE_KEY, JSON.stringify(extractedCards));
+    } catch (err) {
+      console.error('Failed to persist extracted cards:', err);
+    }
+  }, [extractedCards]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1123,36 +1223,219 @@ const Chat: React.FC = () => {
                                 Your browser does not support video playback.
                               </video>
                               <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-200 flex gap-2">
-                                <button
-                                  onClick={async () => {
-                                    if (msg.video?.localPath) {
-                                      const cardId = await createVideoCard({
-                                        videoPath: msg.video.localPath,
-                                        mimeType: msg.video.mimeType || 'video/mp4',
-                                        source: 'generation',
-                                        message: msg,
-                                        fileName: msg.video.fileName,
-                                      });
-                                      if (cardId) {
-                                        alert('Video saved to library!');
-                                      }
-                                    }
-                                  }}
-                                  className="group/btn flex items-center bg-black/80 hover:bg-purple-500 text-purple-400 hover:text-black rounded backdrop-blur-sm border border-white/10 transition-all duration-300 ease-out overflow-hidden h-9 w-9 hover:w-[130px] p-0"
-                                  title="Save to Library"
-                                >
-                                  <div className="w-9 h-full flex items-center justify-center flex-none">
-                                    <rux-icon icon="add-to-photos" size="small"></rux-icon>
-                                  </div>
-                                  <span className="text-xs font-bold whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity duration-200 pr-3">
-                                    Save to Lib
-                                  </span>
-                                </button>
+                                {(() => {
+                                  const saveState = videoSaveStates[msg.id] || 'idle';
+                                  const isSaving = saveState === 'saving';
+                                  const isSaved = saveState === 'saved';
+                                  
+                                  return (
+                                    <button
+                                      onClick={async () => {
+                                        if (isSaving || isSaved) return;
+                                        if (msg.video?.localPath) {
+                                          setVideoSaveStates(prev => ({ ...prev, [msg.id]: 'saving' }));
+                                          const cardId = await createVideoCard({
+                                            videoPath: msg.video.localPath,
+                                            mimeType: msg.video.mimeType || 'video/mp4',
+                                            source: 'generation',
+                                            message: msg,
+                                            fileName: msg.video.fileName,
+                                          });
+                                          if (cardId) {
+                                            setVideoSaveStates(prev => ({ ...prev, [msg.id]: 'saved' }));
+                                          } else {
+                                            setVideoSaveStates(prev => ({ ...prev, [msg.id]: 'idle' }));
+                                          }
+                                        }
+                                      }}
+                                      disabled={isSaving || isSaved}
+                                      className={`group/btn flex items-center rounded backdrop-blur-sm border transition-all duration-300 ease-out overflow-hidden h-9 p-0 ${
+                                        isSaved 
+                                          ? 'bg-emerald-500/90 text-white border-emerald-400/50 w-[100px] cursor-default' 
+                                          : isSaving
+                                            ? 'bg-amber-500/80 text-black border-amber-400/50 w-[100px] cursor-wait'
+                                            : 'bg-black/80 hover:bg-purple-500 text-purple-400 hover:text-black border-white/10 w-9 hover:w-[130px]'
+                                      }`}
+                                      title={isSaved ? 'Already saved' : isSaving ? 'Saving...' : 'Save to Library'}
+                                    >
+                                      <div className="w-9 h-full flex items-center justify-center flex-none">
+                                        {isSaved ? (
+                                          <rux-icon icon="check" size="small"></rux-icon>
+                                        ) : isSaving ? (
+                                          <div className="w-4 h-4 border-2 border-black/50 border-t-black rounded-full animate-spin"></div>
+                                        ) : (
+                                          <rux-icon icon="add-to-photos" size="small"></rux-icon>
+                                        )}
+                                      </div>
+                                      <span className={`text-xs font-bold whitespace-nowrap transition-opacity duration-200 pr-3 ${
+                                        isSaved || isSaving ? 'opacity-100' : 'opacity-0 group-hover/btn:opacity-100'
+                                      }`}>
+                                        {isSaved ? 'Saved ✓' : isSaving ? 'Saving...' : 'Save to Lib'}
+                                      </span>
+                                    </button>
+                                  );
+                                })()}
                               </div>
                               <div className="absolute bottom-2 left-2 px-2 py-1 bg-purple-900/80 rounded text-xs text-purple-200 flex items-center gap-1">
                                 <rux-icon icon="videocam" size="extra-small"></rux-icon>
                                 Veo Generated
                               </div>
+                            </div>
+                            {/* Extraction buttons and previews */}
+                            <div className="mt-2 space-y-2">
+                              <div className="flex gap-2">
+                                {(['firstFrame', 'lastFrame', 'audio'] as const).map((extractType) => {
+                                  const msgCards = extractedCards[msg.id] || {};
+                                  const card = msgCards[extractType];
+                                  const isExtracting = extractingStates[msg.id]?.[extractType] || false;
+                                  const isDone = !!card;
+                                  
+                                  const labels = {
+                                    firstFrame: { icon: 'first-page', label: 'First Frame', doneLabel: 'Extracted' },
+                                    lastFrame: { icon: 'last-page', label: 'Last Frame', doneLabel: 'Extracted' },
+                                    audio: { icon: 'audiotrack', label: 'Audio', doneLabel: 'Extracted' },
+                                  };
+                                  const config = labels[extractType];
+                                  
+                                  return (
+                                    <button
+                                      key={extractType}
+                                      onClick={async () => {
+                                        if (isExtracting || isDone) return;
+                                        if (!msg.video?.localPath) return;
+                                        
+                                        setExtractingStates(prev => ({
+                                          ...prev,
+                                          [msg.id]: { ...prev[msg.id], [extractType]: true }
+                                        }));
+                                        
+                                        try {
+                                          let result: any;
+                                          if (extractType === 'audio') {
+                                            result = await window.electronAPI.extractVideoAudio({ videoPath: msg.video.localPath });
+                                          } else {
+                                            const frameType = extractType === 'firstFrame' ? 'first' : 'last';
+                                            result = await window.electronAPI.extractVideoFrame({ 
+                                              videoPath: msg.video.localPath, 
+                                              frameType 
+                                            });
+                                          }
+                                          
+                                          // Create card core name (matches library pattern)
+                                          const coreName = `card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                                          const parentVideoCardId = videoSaveStates[msg.id] === 'saved' ? msg.id : undefined;
+                                          const dataUrl = extractType === 'audio' 
+                                            ? `data:${result.mimeType};base64,${result.audioBase64}`
+                                            : `data:${result.mimeType};base64,${result.imageBase64}`;
+                                          
+                                          // Create the card record
+                                          const cardRecord = extractType === 'audio' ? {
+                                            type: 'card',
+                                            id: coreName,
+                                            kind: 'audio',
+                                            title: `Audio from ${msg.video.fileName || 'Veo Video'}`,
+                                            audio: { dataUrl },
+                                            mimeType: result.mimeType,
+                                            parentVideoId: parentVideoCardId,
+                                            tags: ['extracted', 'audio', 'veo'],
+                                            createdAt: new Date().toISOString(),
+                                          } : {
+                                            type: 'card',
+                                            id: coreName,
+                                            kind: 'image',
+                                            title: `${extractType === 'firstFrame' ? 'First' : 'Last'} Frame from ${msg.video.fileName || 'Veo Video'}`,
+                                            image: { dataUrl },
+                                            mimeType: result.mimeType,
+                                            parentVideoId: parentVideoCardId,
+                                            tags: ['extracted', 'frame', extractType === 'firstFrame' ? 'first' : 'last', 'veo'],
+                                            createdAt: new Date().toISOString(),
+                                          };
+                                          
+                                          // Create core and save card
+                                          await window.electronAPI.p2pCreateCore(coreName);
+                                          await window.electronAPI.p2pAppend({ name: coreName, data: JSON.stringify(cardRecord) });
+                                          
+                                          // Add to library index (cardId = coreName for proper lookup)
+                                          await window.electronAPI.p2pCreateCore('card-library');
+                                          await window.electronAPI.p2pAppend({ name: 'card-library', data: JSON.stringify({
+                                            type: 'card-index',
+                                            cardId: coreName,
+                                            coreName,
+                                            kind: extractType === 'audio' ? 'audio' : 'image',
+                                            parentVideoId: parentVideoCardId,
+                                          })});
+                                          
+                                          // Store in state for persistence and preview
+                                          setExtractedCards(prev => ({
+                                            ...prev,
+                                            [msg.id]: { 
+                                              ...prev[msg.id], 
+                                              [extractType]: { 
+                                                cardId: coreName, 
+                                                coreName, 
+                                                dataUrl,
+                                                kind: extractType === 'audio' ? 'audio' : 'image'
+                                              } 
+                                            }
+                                          }));
+                                        } catch (err) {
+                                          console.error('Extraction failed:', err);
+                                        } finally {
+                                          setExtractingStates(prev => ({
+                                            ...prev,
+                                            [msg.id]: { ...prev[msg.id], [extractType]: false }
+                                          }));
+                                        }
+                                      }}
+                                      disabled={isExtracting || isDone}
+                                      className={`flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded transition-all ${
+                                        isDone
+                                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                          : isExtracting
+                                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                            : 'bg-purple-900/30 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30'
+                                      }`}
+                                      title={isDone ? 'Already extracted' : `Extract ${config.label}`}
+                                    >
+                                      {isExtracting ? (
+                                        <div className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin"></div>
+                                      ) : isDone ? (
+                                        <rux-icon icon="check" size="extra-small"></rux-icon>
+                                      ) : (
+                                        <rux-icon icon={config.icon} size="extra-small"></rux-icon>
+                                      )}
+                                      {isDone ? config.doneLabel : isExtracting ? 'Extracting...' : config.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {/* Extracted content previews */}
+                              {Object.keys(extractedCards[msg.id] || {}).length > 0 && (
+                                <div className="flex gap-2 flex-wrap">
+                                  {Object.entries(extractedCards[msg.id] || {}).map(([type, card]) => (
+                                    <button
+                                      key={type}
+                                      onClick={() => navigate(`/cards?cardId=${card.coreName}`)}
+                                      className="group relative rounded border border-purple-500/30 overflow-hidden hover:border-purple-400 transition-all"
+                                      title={`View ${type === 'audio' ? 'audio' : type === 'firstFrame' ? 'first frame' : 'last frame'} in Card Library`}
+                                    >
+                                      {card.kind === 'image' ? (
+                                        <img src={card.dataUrl} alt={type} className="w-16 h-16 object-cover" />
+                                      ) : (
+                                        <div className="w-16 h-16 bg-purple-900/40 flex items-center justify-center">
+                                          <rux-icon icon="audiotrack" size="small" className="text-purple-400"></rux-icon>
+                                        </div>
+                                      )}
+                                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <rux-icon icon="open-in-new" size="extra-small" className="text-white"></rux-icon>
+                                      </div>
+                                      <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[8px] text-purple-300 px-1 py-0.5 text-center truncate">
+                                        {type === 'firstFrame' ? '1st Frame' : type === 'lastFrame' ? 'Last Frame' : 'Audio'}
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1375,40 +1658,10 @@ const Chat: React.FC = () => {
         <div className="px-4 pb-0">
           <div className="max-w-4xl mx-auto">
             {!showVeoPanel ? (
-              <button
-                onClick={() => setShowVeoPanel(true)}
-                className="flex items-center gap-2 px-3 py-2 mb-2 text-xs text-purple-400 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/30 rounded-lg transition-all w-full justify-center"
-              >
-                <rux-icon icon="videocam" size="extra-small"></rux-icon>
-                <span>Configure Video Options</span>
-                <span className="text-purple-400/60">
-                  ({veoOptions.aspectRatio} • {veoOptions.resolution} • {veoOptions.durationSeconds}s • {veoOptions.imageMode === 'none' ? 'Text only' : veoOptions.imageMode})
-                </span>
-                {/* Start frame thumbnail indicator */}
-                {veoOptions.startFrameBase64 && (
-                  <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-purple-500/30">
-                    <img
-                      src={`data:${veoOptions.startFrameMimeType};base64,${veoOptions.startFrameBase64}`}
-                      alt="Start frame"
-                      className="w-6 h-6 rounded object-cover border border-purple-500/50"
-                    />
-                    <span className="text-purple-300 text-[10px]">
-                      {veoOptions.imageMode === 'loop' ? '🔄' : '▶'}
-                    </span>
-                    {veoOptions.endFrameBase64 && veoOptions.imageMode === 'start-end-frame' && (
-                      <>
-                        <span className="text-purple-400/40">→</span>
-                        <img
-                          src={`data:${veoOptions.endFrameMimeType};base64,${veoOptions.endFrameBase64}`}
-                          alt="End frame"
-                          className="w-6 h-6 rounded object-cover border border-purple-500/50"
-                        />
-                      </>
-                    )}
-                  </div>
-                )}
-                <rux-icon icon="keyboard-arrow-down" size="extra-small"></rux-icon>
-              </button>
+              <VeoOptionsBar 
+                veoOptions={veoOptions} 
+                onExpand={() => setShowVeoPanel(true)} 
+              />
             ) : (
               <VeoOptionsPanel
                 modelName={selectedGeminiModel}
