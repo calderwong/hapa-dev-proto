@@ -417,12 +417,47 @@ export function parsePetDragData(dataTransfer: DataTransfer): { petCard: PetCard
   
   try {
     const parsed = JSON.parse(data);
+    
+    // Case 1: Native Pet Card Drag (from Sanctuary or Portal)
     if (parsed.type === 'pet-card' && parsed.petCard) {
       return {
         petCard: parsed.petCard,
         sourceZone: parsed.sourceZone || 'unknown',
       };
     }
+
+    // Case 2: Generic Card Library Drag
+    // CardLibrary drag data often has { type: 'card-transfer', ...CardIndexEntry }
+    // or sometimes just the CardIndexEntry itself
+    if ((parsed.type === 'card-transfer' || parsed.cardId) && (parsed.mediaKind === 'pet' || parsed.cardRecord?.type === 'pet')) {
+      // Convert CardIndexEntry to PetCard format if needed
+      const entry = parsed;
+      const record = entry.cardRecord || {};
+      
+      // Construct a valid PetCard from the library entry
+      const petCard: PetCard = {
+        type: 'pet',
+        id: entry.cardId,
+        coreName: entry.coreName || record.coreName || '',
+        name: entry.name || record.name || 'Unknown Pet',
+        species: record.species || entry.species || 'custom',
+        color: record.color || 'black',
+        thumbnail: entry.thumbnail || record.thumbnail || '',
+        animations: record.animations || { idle: '' },
+        modules: record.modules || {},
+        behavior: record.behavior || { speed: 1, scale: 1, restFrequency: 0.3, playfulness: 0.5 },
+        location: record.location || { zone: 'library', enteredAt: Date.now() },
+        createdAt: entry.createdAt ? new Date(entry.createdAt).getTime() : Date.now(),
+        updatedAt: Date.now(),
+        version: record.version || 1
+      };
+
+      return {
+        petCard,
+        sourceZone: 'library'
+      };
+    }
+
   } catch (e) {
     // Not valid pet drag data
   }

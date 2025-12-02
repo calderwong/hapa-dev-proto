@@ -1342,3 +1342,22 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 
 **Tags:** #ui #pets #theme #svg #animation #css-3d
 **Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 24 – Pet Drag & Drop Fixes (Library & Sanctuary)
+**Prompt:** "dropping from either card library or sanctuary into the pet zone doesn't work anymore" followed by "dropping from the sanctuary works now. But dragging and dropping a pet card from the library still does not work."
+
+**Summary of actions:**
+- **Problem Analysis:**
+    - Drag and drop from Sanctuary and Card Library to the Header Pet Portal was failing.
+    - Root cause 1: `parsePetDragData` utility was too strict, only looking for specific `pet-card` structure and missing generic `card-transfer` payloads.
+    - Root cause 2: `CardLibrary` drag handler was stripping essential pet data (contained in `cardRecord`) from the drag payload, preventing the portal from reconstructing the `PetCard`.
+
+- **Implementation:**
+    - **`src/utils/petCardUtils.ts`**: Updated `parsePetDragData` to handle generic `card-transfer` payloads. Added logic to reconstruct a valid `PetCard` from `CardIndexEntry` + `cardRecord` data if the specialized `pet-card` format is missing.
+    - **`src/pages/CardLibrary.tsx`**: Updated `handleDragStart` to explicitly include the full `cardRecord` object and `type: 'card-transfer'` in the `application/json` drag data.
+
+- **Outcome:**
+    - Validated that dragging pets from both the Sanctuary (specialized view) and Card Library (generic grid) now correctly populates the Pet Portal.
+
+**Tags:** #bugfix #drag-drop #pets #data-integrity
+**Est. Avg. Human Dev Time:** 1.0 hours

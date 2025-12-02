@@ -817,7 +817,7 @@ const CardLibrary: React.FC = () => {
     const handleDragStart = (e: React.DragEvent, card: CardIndexEntry) => {
         setDraggedCard(card);
         e.dataTransfer.setData('text/plain', card.cardId);
-        // Include full card data for cross-component drops (e.g., to Veo frame slots)
+        // Include full card data for cross-component drops (e.g., to Veo frame slots, Pet Portal)
         e.dataTransfer.setData('application/json', JSON.stringify({
             cardId: card.cardId,
             name: card.name,
@@ -826,6 +826,9 @@ const CardLibrary: React.FC = () => {
             thumbnail: card.thumbnail,
             image: card.cardRecord?.image,
             coreName: card.coreName,
+            // Pass full cardRecord to ensure PetPortal can reconstruct the pet config
+            cardRecord: card.cardRecord,
+            type: 'card-transfer'
         }));
         e.dataTransfer.effectAllowed = 'copyMove';
     };
@@ -1149,19 +1152,19 @@ const CardLibrary: React.FC = () => {
                                 onClick={() => handleCardClick(card)}
                                 className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${quality.borderClass} ${quality.glowClass}`}
                             >
-                                {/* Tier Badge */}
+                                {/* Tier Badge (Quality Bar) */}
                                 <div 
-                                    className={`absolute top-2 right-2 z-10 tier-badge ${quality.badgeClass}`} 
+                                    className={`absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-white/10 ${quality.badgeClass}`} 
                                     data-tooltip={`${quality.tierLabel} • Score: ${quality.score}/13`}
                                     data-tooltip-tier={quality.tier}
                                     data-tooltip-pos="bottom"
                                 >
-                                    {getTierBadge(quality.tier)}
+                                    {quality.tierLabel}
                                 </div>
                                 {/* Child Count Badge */}
                                 {(card.cardRecord?.childCardIds?.length > 0) && (
                                     <div 
-                                        className="absolute top-2 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-[9px] font-bold"
+                                        className="absolute top-7 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-[9px] font-bold"
                                         data-tooltip={`${card.cardRecord.childCardIds.length} extracted card${card.cardRecord.childCardIds.length > 1 ? 's' : ''}`}
                                     >
                                         <rux-icon icon="account-tree" size="extra-small"></rux-icon>
