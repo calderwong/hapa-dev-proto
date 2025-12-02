@@ -62,6 +62,91 @@ const MiniPet: React.FC<{
   );
 };
 
+// Special scene for Sunny Meadow
+const MeadowScene: React.FC = () => (
+  <div className="absolute inset-0 pointer-events-none overflow-hidden">
+    {/* Horizon/Sky gradient overlay to soften */}
+    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#87CEEB]/20" />
+    
+    {/* 3D Ground Plane */}
+    <div 
+      className="absolute bottom-0 left-0 right-0 h-[40%]"
+      style={{ 
+        background: 'linear-gradient(to bottom, #5a9c6f 0%, #3a7c4f 100%)',
+        transform: 'perspective(100px) rotateX(10deg) scaleY(1.5) translateY(2px)',
+        transformOrigin: 'bottom'
+      }}
+    />
+
+    {/* Tree - Left side background */}
+    <div className="absolute bottom-[35%] left-[8%] opacity-90" style={{ transform: 'scale(0.6)' }}>
+      <svg width="24" height="32" viewBox="0 0 24 32" fill="none">
+        {/* Trunk */}
+        <path d="M10 22h4v10h-4z" fill="#5D4037" />
+        {/* Leaves */}
+        <path d="M12 2L2 16h6v6h-4l8 10 8-10h-4v-6h6L12 2z" fill="#2E7D32" />
+        <path d="M12 2L2 16h6v6h-4l8 10 8-10h-4v-6h6L12 2z" fill="rgba(0,0,0,0.1)" style={{ mixBlendMode: 'overlay' }} />
+      </svg>
+    </div>
+
+    {/* Campfire Scene - Center */}
+    <div className="absolute bottom-[25%] left-1/2 -translate-x-1/2 flex items-end justify-center" style={{ transform: 'scale(0.7)' }}>
+      {/* Back Chair */}
+      <div className="absolute -top-3 opacity-80">
+         <svg width="16" height="16" viewBox="0 0 16 16">
+            <rect x="4" y="6" width="8" height="8" fill="#8D6E63" rx="1" />
+            <rect x="5" y="14" width="1" height="2" fill="#5D4037" />
+            <rect x="10" y="14" width="1" height="2" fill="#5D4037" />
+         </svg>
+      </div>
+
+      {/* Fire */}
+      <div className="relative z-10 mb-1">
+        {/* Logs */}
+        <svg width="24" height="8" viewBox="0 0 24 8" className="absolute bottom-0 left-1/2 -translate-x-1/2">
+           <path d="M2 6l20 0" stroke="#5D4037" strokeWidth="2" strokeLinecap="round" />
+           <path d="M5 7l14 -3" stroke="#4E342E" strokeWidth="2" strokeLinecap="round" />
+           <path d="M5 2l14 5" stroke="#3E2723" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+        
+        {/* Flames - Layered Animation */}
+        <div className="relative w-6 h-8 -mt-2">
+            {/* Outer Glow */}
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-6 bg-orange-600/40 rounded-full blur-sm animate-pulse" />
+            
+            {/* Main Flame */}
+            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-3 h-5 bg-gradient-to-t from-red-500 via-orange-500 to-yellow-400 rounded-full blur-[0.5px] animate-bounce" style={{ animationDuration: '0.6s' }} />
+            
+            {/* Inner Flame (Flicker) */}
+            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-2 h-3 bg-yellow-300 rounded-full animate-pulse" style={{ animationDuration: '0.2s' }} />
+            
+            {/* Sparks */}
+            <div className="absolute bottom-4 left-1/2 w-0.5 h-0.5 bg-yellow-200 rounded-full animate-ping" style={{ animationDuration: '1.5s', animationDelay: '0.1s' }} />
+            <div className="absolute bottom-3 left-[60%] w-0.5 h-0.5 bg-orange-300 rounded-full animate-ping" style={{ animationDuration: '1.2s', animationDelay: '0.5s' }} />
+        </div>
+      </div>
+
+      {/* Left Chair */}
+      <div className="absolute -left-8 bottom-0">
+         <svg width="16" height="16" viewBox="0 0 16 16">
+            <path d="M4 8h8v6h-8z" fill="#8D6E63" transform="skewY(-10)" />
+            <path d="M4 14h1v2h-1z" fill="#5D4037" />
+            <path d="M11 14h1v2h-1z" fill="#5D4037" />
+         </svg>
+      </div>
+
+      {/* Right Chair */}
+      <div className="absolute -right-8 bottom-0">
+         <svg width="16" height="16" viewBox="0 0 16 16">
+            <path d="M4 8h8v6h-8z" fill="#8D6E63" transform="skewY(10)" />
+            <path d="M4 14h1v2h-1z" fill="#5D4037" />
+            <path d="M11 14h1v2h-1z" fill="#5D4037" />
+         </svg>
+      </div>
+    </div>
+  </div>
+);
+
 interface PetPortalProps {
   onPetDropped?: (petCard: PetCard) => void;
   onPetRemoved?: (petCard: PetCard) => void;
@@ -226,11 +311,15 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
       onClick={cycleTheme}
       title={`Pet Portal - ${theme.name} (click to change)`}
     >
-      {/* Ground line */}
-      <div 
-        className="absolute bottom-0 left-0 right-0 h-1"
-        style={{ backgroundColor: theme.groundColor }}
-      />
+      {/* Render custom meadow scene or standard ground line */}
+      {theme.id === 'meadow' ? (
+        <MeadowScene />
+      ) : (
+        <div 
+          className="absolute bottom-0 left-0 right-0 h-1"
+          style={{ backgroundColor: theme.groundColor }}
+        />
+      )}
 
       {/* Ambient particles for night/space themes */}
       {theme.ambientParticles && (

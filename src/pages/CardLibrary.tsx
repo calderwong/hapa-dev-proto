@@ -124,7 +124,7 @@ const CardLibrary: React.FC = () => {
                         if (!raw || typeof raw !== 'string') continue;
                         try {
                             const parsed = JSON.parse(raw);
-                            if (parsed && parsed.type === 'card') {
+                            if (parsed && (parsed.type === 'card' || parsed.type === 'pet')) {
                                 cardRecord = parsed;
                                 break;
                             }
@@ -245,6 +245,7 @@ const CardLibrary: React.FC = () => {
                         coreDiscoveryKey:
                             typeof data.coreDiscoveryKey === 'string' ? data.coreDiscoveryKey : undefined,
                         thumbnail: typeof data.thumbnail === 'string' ? data.thumbnail : undefined,
+                        mediaKind: data.mediaKind,
                         raw: data,
                     };
 
@@ -596,6 +597,13 @@ const CardLibrary: React.FC = () => {
                     )}
                 </div>
             );
+        }
+
+        if (card.mediaKind === 'pet') {
+            const src = card.thumbnail || card.mediaRemoteUrl;
+            if (src) {
+                return <img src={src} alt={card.cardId} className={className} style={{ imageRendering: 'pixelated' }} />;
+            }
         }
 
         if (card.thumbnail) {
@@ -1226,7 +1234,8 @@ const CardLibrary: React.FC = () => {
                                                     icon={
                                                         card.mediaKind === 'video' ? 'videocam' : 
                                                         card.mediaKind === 'audio' ? 'audiotrack' : 
-                                                        card.mediaKind === 'message' ? 'chat' : 'image'
+                                                        card.mediaKind === 'message' ? 'chat' : 
+                                                        card.mediaKind === 'pet' ? 'pets' : 'image'
                                                     } 
                                                     size="extra-small" 
                                                     className={card.mediaKind === 'message' ? 'text-purple-500' : 'text-gray-600'}

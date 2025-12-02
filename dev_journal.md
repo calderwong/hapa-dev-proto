@@ -600,18 +600,6 @@
 ├─────────────────────────────────────────────────────────┤
 │  CHAT INPUT                                             │
 └─────────────────────────────────────────────────────────┘
-```
-
-**Files modified:**
-- `src/pages/Chat.tsx` (sidebar component + layout restructure)
-
-**Tags:** #feature #sidebar #media-gallery #drag-drop #ux
-**Est. Avg. Human Dev Time:** 2.0 hours
-
-## Entry 28 – Clipboard Paste for Images
-**Prompt:** "Can you make it so I can paste / ctrl+v images copied to the clipboard into the chat UI wherever I could drop a file in?"
-
-**Summary of actions:**
 - Added global clipboard paste handler to ChatInput component
 - Added paste support to Veo frame slots
 
@@ -1309,3 +1297,48 @@ Addressed two critical issues preventing the Pet Card System from functioning co
 
 **Tags:** #bugfix #pets #drag-drop #data-integrity
 **Est. Avg. Human Dev Time:** 1.0 hours
+
+## Entry 22 – Card Library Pet Visibility Fix
+**Prompt:** "I still don't see any pet type cards in the library."
+
+**Summary of actions:**
+Fixed a regression in `CardLibrary.tsx` where `enrichWithCardRecords` was inadvertently overwriting the `mediaKind` property with `undefined` for pet cards, causing them to fall back to 'text' type and often be filtered out or mis-rendered.
+
+**Fixes Implemented:**
+- **`src/pages/CardLibrary.tsx`**: 
+  - Updated `loadCards` to propagate `mediaKind` from the index.
+  - Updated `enrichWithCardRecords` to initialize `mediaKind` from the existing entry (instead of undefined) and added an explicit check for `cardRecord.type === 'pet'`.
+
+**Outcome:**
+Pets should now be correctly identified, filtered, and displayed in the Card Library.
+
+**Files modified:**
+- `src/pages/CardLibrary.tsx`
+
+**Tags:** #bugfix #card-library #pets
+**Est. Avg. Human Dev Time:** 0.25 hours
+
+## Entry 23 – Sunny Meadow Theme Upgrade (Pet Portal)
+**Prompt:** "Update the 'Sunny Meadow' background styling in the pet area... to be more three dimensional, with a horizon, have a campfire with three chairs around it. And one tree." followed by "can you add an animated campfire into the middle of it?"
+
+**Summary of actions:**
+- **Analysis:**
+    - User wanted a richer background for the "Sunny Meadow" theme with specific scenic elements (campfire, chairs, tree, horizon).
+    - Identified `PetPortal.tsx` as the active component using `ENVIRONMENT_THEMES`.
+
+- **Implementation (`src/components/pets/PetPortal.tsx`):**
+    - Created a `MeadowScene` internal component to encapsulate the scene logic.
+    - **3D Environment**: Added a ground plane with `perspective` and `rotateX` transforms to create depth and a visible horizon line with a sky gradient.
+    - **Scenery**: Added an SVG tree with semi-transparent shadow and three wooden chairs arranged around the center, using skew transforms to match the perspective.
+    - **Campfire**: Implemented a detailed campfire with SVG logs and a multi-layered CSS animation:
+        - Outer glow pulse for ambiance.
+        - Main gradient flame with bounce/flicker.
+        - Inner high-intensity core.
+        - Rising spark particles with fade-out effects (`animate-ping`).
+    - Conditionally rendered this scene only when `theme.id === 'meadow'`.
+
+- **Outcome:**
+    - The "Sunny Meadow" theme now features a cozy, lively 3D camping scene with a dynamic fire that pets can walk around.
+
+**Tags:** #ui #pets #theme #svg #animation #css-3d
+**Est. Avg. Human Dev Time:** 1.5 hours
