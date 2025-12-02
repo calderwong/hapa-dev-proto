@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { useNavigate } from 'react-router-dom';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import { ChatInput, type Attachment } from '../components/ChatInput';
+import VeoOptionsPanel, { type VeoOptions } from '../components/VeoOptionsPanel';
 
 interface ChatAttachmentPreview {
   mimeType: string;
@@ -26,12 +27,22 @@ interface Message {
     endTime?: number;
     duration?: number;
   };
+  // Video generation fields
+  video?: {
+    base64?: string;
+    localPath?: string;
+    fileName?: string;
+    mimeType?: string;
+  };
+  isVideoGenerating?: boolean;
+  videoProgress?: number;
 }
 
 interface ModelInfo {
   name: string;
   displayName: string;
   description: string;
+  isVideoModel?: boolean;
 }
 
 const ElapsedTime: React.FC<{ startTime: number }> = ({ startTime }) => {
@@ -107,7 +118,23 @@ const Chat: React.FC = () => {
   const activeRequestIdRef = useRef<string | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const [chatMode, setChatMode] = useState<ChatMode>('request-response');
+  const [inputAttachments, setInputAttachments] = useState<Attachment[]>([]);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
+
+  // Veo video generation options
+  const [showVeoPanel, setShowVeoPanel] = useState(false);
+  const [veoOptions, setVeoOptions] = useState<VeoOptions>({
+    imageMode: 'none',
+    aspectRatio: '16:9',
+    resolution: '720p',
+    durationSeconds: '8',
+    negativePrompt: '',
+    personGeneration: 'allow_adult',
+  });
+
+  // Check if current model is a Veo video model
+  const isVeoModelSelected = provider === 'gemini' && selectedGeminiModel?.toLowerCase().startsWith('veo-');
+  const selectedVeoModelInfo = geminiModels.find(m => m.name === selectedGeminiModel);
 
   const loadProfile = async () => {
     if (window.electronAPI?.getProfile) {
@@ -125,7 +152,10 @@ const Chat: React.FC = () => {
     return () => window.removeEventListener('user-profile-update', handleUpdate);
   }, []);
 
-
+  // Helper for image card state keys
+  const getAttachmentCardStateKey = (messageId: string, attachmentIndex: number) => {
+    return `${messageId}:${attachmentIndex}`;
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -300,6 +330,42 @@ const Chat: React.FC = () => {
     }
   };
 
+  // Create a video card in the library
+  const createVideoCard = async (params: {
+    videoPath: string;
+    videoBase64?: string;
+    mimeType: string;
+    source: 'chat' | 'generation';
+    message: Message;
+    fileName?: string;
+  }): Promise<string | null> => {
+    if (
+      typeof window === 'undefined' ||
+      !window.electronAPI ||
+      !window.electronAPI.wormholeIngestContent
+    ) {
+      console.warn('Wormhole API not available; cannot create Video Card');
+      return null;
+    }
+
+    try {
+      // Use wormhole ingest to create a video card
+      const result = await window.electronAPI.wormholeIngestContent({
+        path: params.videoPath,
+        mediaType: 'video',
+        sourceLabel: `chat-video-${params.source}`,
+        fileName: params.fileName || `video-${Date.now()}.mp4`,
+        tags: ['video', 'chat-generated', params.message.model || 'unknown'],
+      });
+
+      console.log('Video card created:', result);
+      return result?.cardId || null;
+    } catch (error) {
+      console.error('Failed to create Video Card:', error);
+      return null;
+    }
+  };
+
   const handleAddCardFromAttachment = async (
     message: Message,
     att: ChatAttachmentPreview,
@@ -343,8 +409,6 @@ const Chat: React.FC = () => {
       }));
     }
   };
-
-
 
   const handleStop = () => {
     if (!isLoading) return;
@@ -398,15 +462,122 @@ const Chat: React.FC = () => {
 
     console.log('Sending message with model:', modelName, 'Provider:', provider);
 
+    // Check if this is a Veo video generation model
+    const isVeoModel = modelName?.toLowerCase().startsWith('veo-');
+    const selectedModelInfo = geminiModels.find(m => m.name === modelName);
+    const isVideoGeneration = isVeoModel || selectedModelInfo?.isVideoModel;
+
     const history = [...messages, userMessage]
       .filter((m) => m.content && m.content.trim().length > 0)
       .map((m) => ({ role: m.role, content: m.content }));
+
+    // For video generation, mark the assistant message specially
+    if (isVideoGeneration) {
+      assistantMessage.isVideoGenerating = true;
+      assistantMessage.content = '🎬 Generating video...';
+    }
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setIsLoading(true);
 
     try {
       if (window.electronAPI) {
+        // Handle Veo video generation separately
+        if (isVideoGeneration && window.electronAPI.generateVideoWithGemini) {
+          console.log('Starting Veo video generation...');
+          
+          // Build video payload from veoOptions
+          const videoPayload: any = {
+            prompt: userMessage.content,
+            model: modelName,
+            // Video parameters from options panel
+            aspectRatio: veoOptions.aspectRatio,
+            resolution: veoOptions.resolution,
+            durationSeconds: veoOptions.durationSeconds,
+            negativePrompt: veoOptions.negativePrompt || undefined,
+            personGeneration: veoOptions.personGeneration,
+          };
+
+          // Handle image input based on selected mode
+          if (veoOptions.imageMode !== 'none') {
+            // Use image from veoOptions panel if set, otherwise fall back to chat attachment
+            const imageAttachment = currentAttachments.find(att => att.mimeType.startsWith('image/'));
+            
+            if (veoOptions.startFrameBase64 && veoOptions.startFrameMimeType) {
+              // Use image from Veo panel
+              videoPayload.imageBase64 = veoOptions.startFrameBase64;
+              videoPayload.imageMimeType = veoOptions.startFrameMimeType;
+            } else if (imageAttachment) {
+              // Fall back to chat attachment
+              videoPayload.imageBase64 = imageAttachment.base64;
+              videoPayload.imageMimeType = imageAttachment.mimeType;
+            }
+
+            // Handle end frame for interpolation mode
+            if (veoOptions.imageMode === 'start-end-frame' && veoOptions.endFrameBase64 && veoOptions.endFrameMimeType) {
+              videoPayload.lastFrameBase64 = veoOptions.endFrameBase64;
+              videoPayload.lastFrameMimeType = veoOptions.endFrameMimeType;
+            }
+
+            // Handle loop mode - uses same image for start and end
+            if (veoOptions.imageMode === 'loop') {
+              videoPayload.loopMode = true;
+            }
+          }
+
+          try {
+            const videoResult = await window.electronAPI.generateVideoWithGemini(videoPayload);
+            
+            if (activeRequestIdRef.current !== requestId) return;
+
+            const endTime = Date.now();
+            const duration = endTime - startTime;
+
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                    ...m,
+                    content: `✅ Video generated successfully! (${videoResult.durationSeconds}s)`,
+                    isVideoGenerating: false,
+                    video: {
+                      base64: videoResult.videoBase64,
+                      localPath: videoResult.videoPath,
+                      fileName: videoResult.videoFileName,
+                      mimeType: videoResult.mimeType,
+                    },
+                    model: videoResult.model,
+                    provider: 'gemini' as const,
+                    metrics: { startTime, endTime, duration }
+                  }
+                  : m,
+              ),
+            );
+          } catch (videoError: any) {
+            if (activeRequestIdRef.current !== requestId) return;
+            
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? {
+                    ...m,
+                    content: `❌ Video generation failed: ${videoError.message}`,
+                    isVideoGenerating: false,
+                  }
+                  : m,
+              ),
+            );
+          } finally {
+            // Clean up for video generation
+            if (activeRequestIdRef.current === requestId) {
+              assistantMessageIdRef.current = null;
+              activeRequestIdRef.current = null;
+              setIsLoading(false);
+            }
+          }
+          return;
+        }
+
         const payload = {
           message: userMessage.content,
           history,
@@ -549,8 +720,6 @@ const Chat: React.FC = () => {
     }
   };
 
-
-
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const raw = e.target.value as 'gemini' | 'openai' | 'llama';
     const value: 'gemini' | 'openai' | 'llama' =
@@ -637,8 +806,6 @@ const Chat: React.FC = () => {
 
     window.electronAPI.onChatStream(handler as any);
   }, []);
-
-
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -745,8 +912,6 @@ const Chat: React.FC = () => {
     <div
       className="flex flex-col h-full bg-astro-dark text-white relative overflow-hidden"
     >
-
-      {/* Header - Comms Panel */}
       {/* Header - Comms Panel */}
       <div className="flex-none px-6 py-3 bg-gray-900/80 backdrop-blur border-b border-astro-border flex items-center justify-between z-10">
         <div className="flex items-center gap-4">
@@ -831,6 +996,7 @@ const Chat: React.FC = () => {
         <div className="max-w-4xl mx-auto space-y-6">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-[60vh] text-center opacity-60">
+              {/* ... (Empty State) ... */}
               <div className="w-24 h-24 rounded-full bg-astro-surface border border-astro-border flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(79,172,254,0.1)]">
                 <rux-icon icon="satellite" size="large" className="text-astro-primary"></rux-icon>
               </div>
@@ -943,6 +1109,65 @@ const Chat: React.FC = () => {
                             })}
                           </div>
                         )}
+
+                        {/* Video display for Veo-generated videos */}
+                        {msg.video && msg.video.localPath && (
+                          <div className="mb-4 group relative">
+                            <div className="relative rounded-lg overflow-hidden border border-purple-500/50 bg-black/50 max-w-md">
+                              <video
+                                src={`file://${msg.video.localPath}`}
+                                controls
+                                className="w-full h-auto max-h-80"
+                                poster=""
+                              >
+                                Your browser does not support video playback.
+                              </video>
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-200 flex gap-2">
+                                <button
+                                  onClick={async () => {
+                                    if (msg.video?.localPath) {
+                                      const cardId = await createVideoCard({
+                                        videoPath: msg.video.localPath,
+                                        mimeType: msg.video.mimeType || 'video/mp4',
+                                        source: 'generation',
+                                        message: msg,
+                                        fileName: msg.video.fileName,
+                                      });
+                                      if (cardId) {
+                                        alert('Video saved to library!');
+                                      }
+                                    }
+                                  }}
+                                  className="group/btn flex items-center bg-black/80 hover:bg-purple-500 text-purple-400 hover:text-black rounded backdrop-blur-sm border border-white/10 transition-all duration-300 ease-out overflow-hidden h-9 w-9 hover:w-[130px] p-0"
+                                  title="Save to Library"
+                                >
+                                  <div className="w-9 h-full flex items-center justify-center flex-none">
+                                    <rux-icon icon="add-to-photos" size="small"></rux-icon>
+                                  </div>
+                                  <span className="text-xs font-bold whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity duration-200 pr-3">
+                                    Save to Lib
+                                  </span>
+                                </button>
+                              </div>
+                              <div className="absolute bottom-2 left-2 px-2 py-1 bg-purple-900/80 rounded text-xs text-purple-200 flex items-center gap-1">
+                                <rux-icon icon="videocam" size="extra-small"></rux-icon>
+                                Veo Generated
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Video generation progress indicator */}
+                        {msg.isVideoGenerating && (
+                          <div className="mb-4 p-4 rounded-lg border border-purple-500/30 bg-purple-900/20 flex items-center gap-3">
+                            <div className="animate-spin w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full"></div>
+                            <div className="flex-1">
+                              <div className="text-sm text-purple-300 font-medium">Generating video with Veo...</div>
+                              <div className="text-xs text-purple-400/70">This may take 1-3 minutes</div>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="prose prose-invert prose-sm max-w-none prose-p:my-2 prose-pre:bg-astro-dark prose-pre:border prose-pre:border-astro-border">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
@@ -1014,6 +1239,54 @@ const Chat: React.FC = () => {
                                   }
                                 };
 
+                                const handleReattach = async () => {
+                                  if (!src) return;
+                                  try {
+                                    let blob: Blob;
+                                    let mimeType = 'image/png';
+                                    let base64 = '';
+
+                                    if (src.startsWith('data:')) {
+                                      const arr = src.split(',');
+                                      const match = arr[0].match(/:(.*?);/);
+                                      mimeType = match ? match[1] : 'image/png';
+                                      const bstr = atob(arr[1]);
+                                      let n = bstr.length;
+                                      const u8arr = new Uint8Array(n);
+                                      while (n--) {
+                                        u8arr[n] = bstr.charCodeAt(n);
+                                      }
+                                      blob = new Blob([u8arr], { type: mimeType });
+                                      base64 = arr[1];
+                                    } else {
+                                      const response = await fetch(src);
+                                      blob = await response.blob();
+                                      mimeType = blob.type;
+                                      base64 = await new Promise<string>((resolve) => {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => {
+                                          const res = reader.result as string;
+                                          resolve(res.split(',')[1]);
+                                        };
+                                        reader.readAsDataURL(blob);
+                                      });
+                                    }
+
+                                    const fileName = alt || `reattached-${Date.now()}.png`;
+                                    const file = new File([blob], fileName, { type: mimeType });
+                                    const preview = URL.createObjectURL(blob);
+
+                                    setInputAttachments(prev => [...prev, {
+                                      file,
+                                      preview,
+                                      base64,
+                                      mimeType
+                                    }]);
+                                  } catch (err) {
+                                    console.error('Failed to re-attach image:', err);
+                                  }
+                                };
+
                                 return (
                                   <div
                                     className="relative group inline-block max-w-full"
@@ -1051,6 +1324,16 @@ const Chat: React.FC = () => {
                                           {isCarded ? "Saved" : "Save to Lib"}
                                         </span>
                                       </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleReattach(); }}
+                                        className="group/btn flex items-center bg-black/80 hover:bg-astro-primary text-astro-primary hover:text-black rounded backdrop-blur-sm border border-white/10 transition-all duration-300 ease-out overflow-hidden h-9 w-9 hover:w-[110px] p-0"
+                                        title="Use as Input"
+                                      >
+                                        <div className="w-9 h-full flex items-center justify-center flex-none">
+                                          <rux-icon icon="input" size="small"></rux-icon>
+                                        </div>
+                                        <span className="text-xs font-bold whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity duration-200 pr-3">Use Input</span>
+                                      </button>
                                     </div>
                                   </div>
                                 );
@@ -1087,7 +1370,57 @@ const Chat: React.FC = () => {
         </div>
       </div>
 
-      {/* Input Console */}
+      {/* Veo Video Options Panel */}
+      {isVeoModelSelected && (
+        <div className="px-4 pb-0">
+          <div className="max-w-4xl mx-auto">
+            {!showVeoPanel ? (
+              <button
+                onClick={() => setShowVeoPanel(true)}
+                className="flex items-center gap-2 px-3 py-2 mb-2 text-xs text-purple-400 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/30 rounded-lg transition-all w-full justify-center"
+              >
+                <rux-icon icon="videocam" size="extra-small"></rux-icon>
+                <span>Configure Video Options</span>
+                <span className="text-purple-400/60">
+                  ({veoOptions.aspectRatio} • {veoOptions.resolution} • {veoOptions.durationSeconds}s • {veoOptions.imageMode === 'none' ? 'Text only' : veoOptions.imageMode})
+                </span>
+                {/* Start frame thumbnail indicator */}
+                {veoOptions.startFrameBase64 && (
+                  <div className="flex items-center gap-1.5 ml-1 pl-2 border-l border-purple-500/30">
+                    <img
+                      src={`data:${veoOptions.startFrameMimeType};base64,${veoOptions.startFrameBase64}`}
+                      alt="Start frame"
+                      className="w-6 h-6 rounded object-cover border border-purple-500/50"
+                    />
+                    <span className="text-purple-300 text-[10px]">
+                      {veoOptions.imageMode === 'loop' ? '🔄' : '▶'}
+                    </span>
+                    {veoOptions.endFrameBase64 && veoOptions.imageMode === 'start-end-frame' && (
+                      <>
+                        <span className="text-purple-400/40">→</span>
+                        <img
+                          src={`data:${veoOptions.endFrameMimeType};base64,${veoOptions.endFrameBase64}`}
+                          alt="End frame"
+                          className="w-6 h-6 rounded object-cover border border-purple-500/50"
+                        />
+                      </>
+                    )}
+                  </div>
+                )}
+                <rux-icon icon="keyboard-arrow-down" size="extra-small"></rux-icon>
+              </button>
+            ) : (
+              <VeoOptionsPanel
+                modelName={selectedGeminiModel}
+                options={veoOptions}
+                onOptionsChange={setVeoOptions}
+                onClose={() => setShowVeoPanel(false)}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Input Console */}
       <ChatInput
         onSend={handleSend}
@@ -1095,6 +1428,8 @@ const Chat: React.FC = () => {
         chatMode={chatMode}
         provider={provider}
         onStop={handleStop}
+        attachments={inputAttachments}
+        setAttachments={setInputAttachments}
       />
       {/* Image Preview Modal */}
       {previewImage && (

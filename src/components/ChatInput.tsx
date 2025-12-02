@@ -14,6 +14,8 @@ interface ChatInputProps {
     chatMode: 'request-response' | 'realtime';
     provider: 'gemini' | 'openai' | 'llama';
     onStop: () => void;
+    attachments: Attachment[];
+    setAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
 }
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -39,9 +41,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     chatMode,
     provider,
     onStop,
+    attachments,
+    setAttachments,
 }) => {
     const [input, setInput] = useState('');
-    const [attachments, setAttachments] = useState<Attachment[]>([]);
+    // const [attachments, setAttachments] = useState<Attachment[]>([]); // Lifted up
     const [isRecording, setIsRecording] = useState(false);
     const [liveTranscript, setLiveTranscript] = useState('');
     const [isDragOver, setIsDragOver] = useState(false);

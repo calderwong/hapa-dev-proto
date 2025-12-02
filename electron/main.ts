@@ -1350,16 +1350,51 @@ app.whenReady().then(() => {
     },
   );
 
+  // Veo video generation models (image-to-video capable)
+  const VEO_VIDEO_MODELS = [
+    { 
+      name: 'veo-3.1-generate-preview', 
+      displayName: 'Veo 3.1 (Video)', 
+      description: '8s 720p/1080p video with audio. Supports text & image-to-video.',
+      isVideoModel: true,
+    },
+    { 
+      name: 'veo-3.1-fast-generate-preview', 
+      displayName: 'Veo 3.1 Fast (Video)', 
+      description: 'Fast 8s video generation with audio. Text & image input.',
+      isVideoModel: true,
+    },
+    { 
+      name: 'veo-3.0-generate-001', 
+      displayName: 'Veo 3 (Video)', 
+      description: 'High-quality video with audio. Supports image-to-video.',
+      isVideoModel: true,
+    },
+    { 
+      name: 'veo-3.0-fast-generate-001', 
+      displayName: 'Veo 3 Fast (Video)', 
+      description: 'Fast video generation with audio.',
+      isVideoModel: true,
+    },
+    { 
+      name: 'veo-2.0-generate-001', 
+      displayName: 'Veo 2 (Video)', 
+      description: 'Video generation (no audio). Image-to-video supported.',
+      isVideoModel: true,
+    },
+  ];
+
   // List available Gemini models
   ipcMain.handle('list-gemini-models', async () => {
     const apiKey = store.get('geminiKey') as string | undefined;
 
     if (!apiKey) {
-      // Fallback list when no API key is configured
+      // Fallback list when no API key is configured (include Veo models)
       return [
         { name: 'gemini-pro', displayName: 'Gemini Pro', description: 'Standard model' },
         { name: 'gemini-1.5-flash-001', displayName: 'Gemini 1.5 Flash', description: 'Fast model' },
         { name: 'gemini-1.5-pro-001', displayName: 'Gemini 1.5 Pro', description: 'Advanced model' },
+        ...VEO_VIDEO_MODELS,
       ];
     }
 
@@ -1376,19 +1411,24 @@ app.whenReady().then(() => {
             name: (m.name as string).replace('models/', ''),
             displayName: m.displayName || (m.name as string).replace('models/', ''),
             description: m.description || '',
+            isVideoModel: false,
           }));
-        console.log('Available Gemini Models:', mapped);
-        return mapped;
+        
+        // Add Veo video models to the list
+        const allModels = [...mapped, ...VEO_VIDEO_MODELS];
+        console.log('Available Gemini Models (including Veo):', allModels.length);
+        return allModels;
       }
     } catch (error) {
       console.error('Error fetching models from API:', error);
     }
 
-    // Fallback to common model names on error
+    // Fallback to common model names on error (include Veo models)
     return [
       { name: 'gemini-pro', displayName: 'Gemini Pro', description: 'Standard model' },
       { name: 'gemini-1.5-flash-001', displayName: 'Gemini 1.5 Flash', description: 'Fast model' },
       { name: 'gemini-1.5-pro-001', displayName: 'Gemini 1.5 Pro', description: 'Advanced model' },
+      ...VEO_VIDEO_MODELS,
     ];
   });
 
@@ -1687,6 +1727,214 @@ app.whenReady().then(() => {
       } catch (error: any) {
         console.error('Gemini Error:', error);
         throw new Error(`Gemini Error: ${error.message}`);
+      }
+    },
+  );
+
+  // Generate video with Veo models (async operation with polling)
+  // Supports: text-to-video, image-to-video (start frame), interpolation (start+end frame)
+  ipcMain.handle(
+    'generate-video-with-gemini',
+    async (
+      _event,
+      {
+        prompt,
+        model: modelName,
+        // Start frame image
+        imageBase64,
+        imageMimeType,
+        // End frame for interpolation (Veo 3.1 only)
+        lastFrameBase64,
+        lastFrameMimeType,
+        // Video parameters
+        aspectRatio,
+        resolution,
+        durationSeconds,
+        negativePrompt,
+        personGeneration,
+        // Loop mode - use same image for start and end
+        loopMode,
+      }: {
+        prompt: string;
+        model?: string;
+        imageBase64?: string;
+        imageMimeType?: string;
+        lastFrameBase64?: string;
+        lastFrameMimeType?: string;
+        aspectRatio?: '16:9' | '9:16';
+        resolution?: '720p' | '1080p';
+        durationSeconds?: '4' | '5' | '6' | '8';
+        negativePrompt?: string;
+        personGeneration?: 'allow_all' | 'allow_adult' | 'dont_allow';
+        loopMode?: boolean;
+      },
+    ) => {
+      const apiKey = store.get('geminiKey') as string | undefined;
+      if (!apiKey) {
+        throw new Error('Gemini API Key not found. Please configure it in Settings.');
+      }
+
+      const resolvedModel = modelName || 'veo-3.1-generate-preview';
+      console.log('Starting video generation with model:', resolvedModel, {
+        hasStartFrame: !!imageBase64,
+        hasEndFrame: !!lastFrameBase64,
+        loopMode,
+        aspectRatio,
+        resolution,
+        durationSeconds,
+      });
+
+      try {
+        // Build request body - config holds most optional params
+        const config: any = {};
+        const requestBody: any = { prompt };
+
+        // Add start frame image for image-to-video
+        if (imageBase64 && imageMimeType) {
+          requestBody.image = {
+            bytesBase64Encoded: imageBase64,
+            mimeType: imageMimeType,
+          };
+
+          // Loop mode: use same image as lastFrame to create seamless loop
+          if (loopMode) {
+            config.lastFrame = {
+              bytesBase64Encoded: imageBase64,
+              mimeType: imageMimeType,
+            };
+          }
+        }
+
+        // Add end frame for interpolation (start + end frame mode)
+        if (lastFrameBase64 && lastFrameMimeType && !loopMode) {
+          config.lastFrame = {
+            bytesBase64Encoded: lastFrameBase64,
+            mimeType: lastFrameMimeType,
+          };
+        }
+
+        // Add optional video parameters
+        if (aspectRatio) config.aspectRatio = aspectRatio;
+        if (resolution) config.resolution = resolution;
+        if (durationSeconds) config.durationSeconds = parseInt(durationSeconds, 10);
+        if (negativePrompt) config.negativePrompt = negativePrompt;
+        if (personGeneration) config.personGeneration = personGeneration;
+
+        // Only add config if it has properties
+        if (Object.keys(config).length > 0) {
+          requestBody.config = config;
+        }
+
+        // Start the video generation operation
+        const startUrl = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateVideos?key=${apiKey}`;
+        
+        const startResponse = await fetch(startUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        const startData = await startResponse.json();
+
+        if (!startResponse.ok) {
+          console.error('Video generation start error:', startData);
+          throw new Error(startData?.error?.message || 'Failed to start video generation');
+        }
+
+        // Get operation name for polling
+        const operationName = startData.name;
+        if (!operationName) {
+          throw new Error('No operation name returned from video generation');
+        }
+
+        console.log('Video generation started, operation:', operationName);
+
+        // Poll for completion (max 5 minutes)
+        const maxPolls = 60; // 60 * 5s = 5 minutes
+        const pollInterval = 5000; // 5 seconds
+
+        for (let i = 0; i < maxPolls; i++) {
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+          const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+          const pollResponse = await fetch(pollUrl);
+          const pollData = await pollResponse.json();
+
+          if (!pollResponse.ok) {
+            console.error('Video generation poll error:', pollData);
+            throw new Error(pollData?.error?.message || 'Failed to poll video generation');
+          }
+
+          // Broadcast progress
+          const [win] = BrowserWindow.getAllWindows();
+          if (win) {
+            win.webContents.send('video-generation-progress', {
+              model: resolvedModel,
+              progress: Math.min((i + 1) / maxPolls * 100, 95),
+              status: 'processing',
+            });
+          }
+
+          if (pollData.done) {
+            console.log('Video generation complete!');
+
+            const generatedVideos = pollData.response?.generatedVideos || [];
+            if (generatedVideos.length === 0) {
+              throw new Error('No videos were generated');
+            }
+
+            const video = generatedVideos[0];
+            const videoFile = video.video;
+
+            // Download the video
+            if (videoFile?.uri) {
+              const downloadUrl = `${videoFile.uri}&key=${apiKey}`;
+              const downloadResponse = await fetch(downloadUrl);
+              
+              if (!downloadResponse.ok) {
+                throw new Error('Failed to download generated video');
+              }
+
+              const videoBuffer = await downloadResponse.arrayBuffer();
+              const videoBase64 = Buffer.from(videoBuffer).toString('base64');
+
+              // Save to wormhole directory
+              const userDataDir = app.getPath('userData');
+              const wormholeDir = path.join(userDataDir, 'wormhole');
+              await fs.promises.mkdir(wormholeDir, { recursive: true });
+
+              const videoFileName = `veo-${Date.now()}.mp4`;
+              const videoPath = path.join(wormholeDir, videoFileName);
+              await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
+
+              // Broadcast completion
+              if (win) {
+                win.webContents.send('video-generation-progress', {
+                  model: resolvedModel,
+                  progress: 100,
+                  status: 'complete',
+                });
+              }
+
+              return {
+                success: true,
+                model: resolvedModel,
+                videoBase64,
+                videoPath,
+                videoFileName,
+                mimeType: 'video/mp4',
+                durationSeconds: durationSeconds || '8',
+              };
+            } else {
+              throw new Error('Video file URI not found in response');
+            }
+          }
+        }
+
+        throw new Error('Video generation timed out after 5 minutes');
+      } catch (error: any) {
+        console.error('Video generation error:', error);
+        throw new Error(`Video generation failed: ${error.message}`);
       }
     },
   );

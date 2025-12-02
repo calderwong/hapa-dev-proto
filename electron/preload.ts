@@ -78,6 +78,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveProfile: (profile: any) => ipcRenderer.invoke('save-profile', profile),
     saveProfileImage: (params: any) => ipcRenderer.invoke('save-profile-image', params),
     getSystemStats: () => ipcRenderer.invoke('get-system-stats'),
+    // Video generation with Veo models
+    // Supports: text-to-video, image-to-video (start frame), interpolation (start+end frame)
+    generateVideoWithGemini: (data: {
+        prompt: string;
+        model?: string;
+        // Start frame
+        imageBase64?: string;
+        imageMimeType?: string;
+        // End frame for interpolation
+        lastFrameBase64?: string;
+        lastFrameMimeType?: string;
+        // Video parameters
+        aspectRatio?: '16:9' | '9:16';
+        resolution?: '720p' | '1080p';
+        durationSeconds?: '4' | '5' | '6' | '8';
+        negativePrompt?: string;
+        personGeneration?: 'allow_all' | 'allow_adult' | 'dont_allow';
+        loopMode?: boolean;
+    }) => ipcRenderer.invoke('generate-video-with-gemini', data),
+    onVideoGenerationProgress: (listener: (payload: any) => void) => {
+        ipcRenderer.on('video-generation-progress', (_event, payload) => listener(payload));
+    },
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

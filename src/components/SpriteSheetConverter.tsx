@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from './Button';
+import type { RemovalProgress } from '../utils/backgroundRemoval';
 
 interface SpriteSheetConverterProps {
     imageUrl: string;
@@ -18,8 +19,15 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
     const [offsetLeft, setOffsetLeft] = useState(0);
     const [offsetRight, setOffsetRight] = useState(0);
 
+    // Background Removal
+    const [removeBackground, setRemoveBackground] = useState(false);
+    const [isRemovingBg, setIsRemovingBg] = useState(false);
+    const [bgRemovalProgress, setBgRemovalProgress] = useState<RemovalProgress | null>(null);
+    const [processedImage, setProcessedImage] = useState<HTMLImageElement | null>(null);
+
     // State
     const [image, setImage] = useState<HTMLImageElement | null>(null);
+    const [originalImage, setOriginalImage] = useState<HTMLImageElement | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const [progress, setProgress] = useState(0);
     const [status, setStatus] = useState('');
@@ -37,8 +45,66 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
         img.src = imageUrl;
         img.onload = () => {
             setImage(img);
+            setOriginalImage(img);
+            setProcessedImage(null); // Reset processed image when source changes
         };
     }, [imageUrl]);
+
+    // Handle background removal toggle
+    useEffect(() => {
+        if (!originalImage) return;
+
+        if (removeBackground && !processedImage && !isRemovingBg) {
+            // User enabled background removal - process the image
+            handleRemoveBackground();
+        } else if (!removeBackground) {
+            // User disabled background removal - use original
+            setImage(originalImage);
+        }
+    }, [removeBackground, originalImage]);
+
+    const handleRemoveBackground = async () => {
+        if (!originalImage) return;
+
+        setIsRemovingBg(true);
+        setBgRemovalProgress({ stage: 'loading', progress: 0, message: 'Loading AI model...' });
+
+        try {
+            // Dynamic import to avoid loading at startup
+            const { removeBackgroundFromElement } = await import('../utils/backgroundRemoval');
+            
+            const result = await removeBackgroundFromElement(originalImage, (progress) => {
+                setBgRemovalProgress(progress);
+            });
+
+            setProcessedImage(result);
+            setImage(result);
+            setBgRemovalProgress({ stage: 'done', progress: 100, message: 'Background removed!' });
+        } catch (error) {
+            console.error('Background removal failed:', error);
+            setBgRemovalProgress({ 
+                stage: 'error', 
+                progress: 0, 
+                message: error instanceof Error ? error.message : 'Failed to remove background' 
+            });
+            // Fall back to original
+            setImage(originalImage);
+            setRemoveBackground(false);
+        } finally {
+            setIsRemovingBg(false);
+        }
+    };
+
+    // Draw checkerboard pattern for transparency visualization
+    const drawCheckerboard = (ctx: CanvasRenderingContext2D, width: number, height: number, size: number = 10) => {
+        for (let y = 0; y < height; y += size) {
+            for (let x = 0; x < width; x += size) {
+                const isLight = ((x / size) + (y / size)) % 2 === 0;
+                ctx.fillStyle = isLight ? '#444' : '#333';
+                ctx.fillRect(x, y, size, size);
+            }
+        }
+    };
 
     // Draw Grid
     useEffect(() => {
@@ -51,6 +117,14 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
         // Set canvas size to match image
         canvas.width = image.width;
         canvas.height = image.height;
+
+        // Draw checkerboard background if transparency mode is on
+        if (removeBackground && processedImage) {
+            drawCheckerboard(ctx, image.width, image.height, 8);
+        } else {
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, image.width, image.height);
+        }
 
         // Draw Image
         ctx.drawImage(image, 0, 0);
@@ -88,7 +162,7 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
             ctx.stroke();
         }
 
-    }, [image, rows, cols, offsetTop, offsetBottom, offsetLeft, offsetRight]);
+    }, [image, rows, cols, offsetTop, offsetBottom, offsetLeft, offsetRight, removeBackground, processedImage]);
 
     const handleGenerate = () => {
         if (!image) return;
@@ -110,13 +184,21 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
         const frameWidth = Math.floor(effectiveWidth / cols);
         const frameHeight = Math.floor(effectiveHeight / rows);
 
-        const gif = new GIF({
+        // Configure GIF with transparency support
+        const gifOptions: any = {
             workers: 2,
             quality: 10,
             width: frameWidth,
             height: frameHeight,
             workerScript: './lib/gif.worker.js'
-        });
+        };
+
+        // Enable transparency if background was removed
+        if (removeBackground && processedImage) {
+            gifOptions.transparent = 0x00000000; // Transparent black
+        }
+
+        const gif = new GIF(gifOptions);
 
         // Create temp canvas for frame extraction
         const tempCanvas = document.createElement('canvas');
@@ -131,6 +213,7 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
         // Extract frames
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
+                // Clear with transparency
                 ctx.clearRect(0, 0, frameWidth, frameHeight);
 
                 const sourceX = offsetLeft + (c * frameWidth);
@@ -142,7 +225,8 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
                     0, 0, frameWidth, frameHeight
                 );
 
-                gif.addFrame(ctx, { copy: true, delay: frameDelay });
+                // Add frame with transparency preservation
+                gif.addFrame(ctx, { copy: true, delay: frameDelay, transparent: removeBackground ? 0x00000000 : null });
 
                 framesProcessed++;
                 setProgress((framesProcessed / totalFrames) * 50);
@@ -210,8 +294,63 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
                         </div>
                     </div>
 
+                    {/* Background Removal Toggle */}
+                    <div className="space-y-2 border-t border-gray-700 pt-4">
+                        <label className="text-xs uppercase text-gray-500 font-bold flex items-center gap-2">
+                            <rux-icon icon="auto-fix-high" size="extra-small"></rux-icon>
+                            Transparency
+                        </label>
+                        <button
+                            onClick={() => !isRemovingBg && setRemoveBackground(!removeBackground)}
+                            disabled={isRemovingBg}
+                            className={`
+                                w-full flex items-center justify-between p-3 rounded border transition-all
+                                ${removeBackground 
+                                    ? 'bg-green-900/30 border-green-500/50 text-green-300' 
+                                    : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:border-gray-500'}
+                                ${isRemovingBg ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                            `}
+                            title="Remove background using AI"
+                        >
+                            <span className="text-xs font-bold uppercase">Remove Background</span>
+                            <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${removeBackground ? 'bg-green-500' : 'bg-gray-600'}`}>
+                                <div className={`w-4 h-4 rounded-full bg-white transition-transform ${removeBackground ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                            </div>
+                        </button>
+                        {removeBackground && (
+                            <p className="text-[10px] text-gray-500">
+                                AI will remove the background, creating transparent areas for pet overlays.
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Background Removal Progress */}
+                    {isRemovingBg && bgRemovalProgress && (
+                        <div className="space-y-2 p-3 bg-blue-900/20 border border-blue-500/30 rounded">
+                            <div className="flex items-center gap-2 text-xs text-blue-300">
+                                <rux-icon icon="hourglass-empty" size="extra-small" className="animate-spin"></rux-icon>
+                                {bgRemovalProgress.message}
+                            </div>
+                            <rux-progress value={bgRemovalProgress.progress}></rux-progress>
+                        </div>
+                    )}
+
+                    {bgRemovalProgress?.stage === 'done' && !isRemovingBg && (
+                        <div className="p-2 bg-green-900/20 border border-green-500/30 rounded text-xs text-green-300 flex items-center gap-2">
+                            <rux-icon icon="check-circle" size="extra-small"></rux-icon>
+                            Background removed successfully!
+                        </div>
+                    )}
+
+                    {bgRemovalProgress?.stage === 'error' && !isRemovingBg && (
+                        <div className="p-2 bg-red-900/20 border border-red-500/30 rounded text-xs text-red-300 flex items-center gap-2">
+                            <rux-icon icon="error" size="extra-small"></rux-icon>
+                            {bgRemovalProgress.message}
+                        </div>
+                    )}
+
                     <div className="pt-4">
-                        <PrimaryButton onClick={handleGenerate} disabled={isGenerating || !image} className="w-full">
+                        <PrimaryButton onClick={handleGenerate} disabled={isGenerating || isRemovingBg || !image} className="w-full">
                             {isGenerating ? 'Processing...' : 'Generate Preview'}
                         </PrimaryButton>
                     </div>
@@ -227,13 +366,22 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
                 {/* Preview Area */}
                 <div className="flex-1 flex flex-col gap-4 overflow-hidden bg-black/40 rounded-lg p-4 items-center justify-center relative">
                     {!generatedGifUrl ? (
-                        <div className="relative max-w-full max-h-full overflow-auto">
+                        <div className={`relative max-w-full max-h-full overflow-auto rounded ${removeBackground && processedImage ? 'checkerboard-bg p-2' : ''}`}>
                             <canvas ref={canvasRef} className="max-w-full max-h-full object-contain border border-gray-800" />
                         </div>
                     ) : (
                         <div className="flex flex-col items-center gap-4">
-                            <div className="text-sm text-green-400 font-bold uppercase tracking-wider">Preview Generated</div>
-                            <img src={generatedGifUrl} alt="Generated GIF" className="max-w-full max-h-[400px] object-contain border border-green-500/50 rounded shadow-lg" />
+                            <div className="text-sm text-green-400 font-bold uppercase tracking-wider flex items-center gap-2">
+                                {removeBackground && <rux-icon icon="check-circle" size="extra-small"></rux-icon>}
+                                Preview Generated {removeBackground && '(Transparent)'}
+                            </div>
+                            <div className={`p-2 rounded ${removeBackground ? 'checkerboard-bg' : ''}`}>
+                                <img 
+                                    src={generatedGifUrl} 
+                                    alt="Generated GIF" 
+                                    className="max-w-full max-h-[400px] object-contain border border-green-500/50 rounded shadow-lg pixelated" 
+                                />
+                            </div>
                             <div className="flex gap-2">
                                 <SecondaryButton onClick={() => setGeneratedGifUrl(null)}>Back to Settings</SecondaryButton>
                                 <PrimaryButton onClick={handleConfirm}>Save & Append to Card</PrimaryButton>

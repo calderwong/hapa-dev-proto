@@ -82,7 +82,7 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave }) 
                 // Ingest GIF
                 const result = await window.electronAPI.wormholeIngestContent({
                     bytesBase64: base64,
-                    fileName: 'sprite-animation.gif',
+                    fileName: `sprite-animation-${Date.now()}.gif`,
                     mediaType: 'image',
                     sourceLabel: 'sprite-sheet-gif'
                 });

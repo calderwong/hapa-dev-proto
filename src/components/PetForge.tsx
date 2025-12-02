@@ -134,7 +134,7 @@ const PetForge: React.FC<PetForgeProps> = ({ onClose, onSave }) => {
         }
     });
 
-    // Load Assets (Mock for now, should integrate with CardLibrary)
+    // Load Assets (Integrated with CardLibrary)
     useEffect(() => {
         const loadLibraryAssets = async () => {
             if (window.electronAPI?.p2pRead) {
@@ -142,23 +142,51 @@ const PetForge: React.FC<PetForgeProps> = ({ onClose, onSave }) => {
                     const libraryCore = await window.electronAPI.p2pRead('card-library');
                     const loadedAssets: Asset[] = [];
 
+                    // We need to fetch the actual card data for each index entry to get the full metadata
+                    // This mirrors the enrichment logic in CardLibrary.tsx
                     for (const record of libraryCore) {
                         try {
-                            const data = JSON.parse(record);
-                            // Filter for cards that are images/gifs or specifically tagged as sprites
-                            // We check for 'image' mimeType OR 'sprite-sheet' subType
-                            const isImage = data.mimeType?.startsWith('image/');
-                            const isSprite = data.subType === 'sprite-sheet' || data.tags?.includes('sprite');
+                            const indexData = JSON.parse(record);
+                            if (indexData.type === 'card-index' && indexData.coreName) {
+                                // Fetch the actual card core
+                                const cardRecords = await window.electronAPI.p2pRead(indexData.coreName);
+                                let cardData: any = null;
 
-                            if (data.type === 'card-index' && data.thumbnail && (isImage || isSprite)) {
-                                loadedAssets.push({
-                                    id: data.cardId,
-                                    url: data.thumbnail,
-                                    name: data.model || data.title || 'Unknown Asset',
-                                    type: 'image'
-                                });
+                                // Find the latest 'card' type record
+                                for (const r of cardRecords) {
+                                    try {
+                                        const p = JSON.parse(r);
+                                        if (p.type === 'card') cardData = p;
+                                    } catch { }
+                                }
+
+                                if (cardData) {
+                                    // Determine if this is a valid asset for the forge
+                                    const isImage = cardData.mediaType === 'image' || cardData.mimeType?.startsWith('image/');
+                                    const isSprite = cardData.subType === 'sprite-sheet' || cardData.tags?.includes('sprite');
+
+                                    // Resolve the image URL
+                                    let imageUrl = cardData.thumbnail || cardData.imageUrl || cardData.url;
+
+                                    // If it's a Wormhole ingestion, use the local path
+                                    if (!imageUrl && cardData.wormhole?.ingest?.originalPath) {
+                                        // Convert local path to file:// URL for rendering
+                                        imageUrl = `file://${cardData.wormhole.ingest.originalPath.replace(/\\/g, '/')}`;
+                                    }
+
+                                    if (imageUrl && (isImage || isSprite)) {
+                                        loadedAssets.push({
+                                            id: cardData.id || indexData.cardId,
+                                            url: imageUrl,
+                                            name: cardData.title || cardData.model || 'Unknown Asset',
+                                            type: 'image'
+                                        });
+                                    }
+                                }
                             }
-                        } catch (e) { }
+                        } catch (e) {
+                            console.warn("Failed to process library record", e);
+                        }
                     }
                     setAssets(loadedAssets.reverse()); // Newest first
                 } catch (e) {
@@ -281,80 +309,82 @@ const PetForge: React.FC<PetForgeProps> = ({ onClose, onSave }) => {
                             </div>
                         </div>
 
-                        {/* The "Paper Doll" Layout */}
-                        <div className="flex-1 flex items-center justify-center relative w-full max-w-2xl z-10">
+                        {/* The "Paper Doll" Layout - Fixed Container for Stability */}
+                        <div className="flex-1 flex items-center justify-center w-full z-10 overflow-hidden">
+                            <div className="relative w-[500px] h-[500px] flex-none">
 
-                            {/* Center Preview */}
-                            <div className="relative w-64 h-64 border border-astro-primary/30 rounded-full flex items-center justify-center bg-astro-primary/5 shadow-[0_0_50px_rgba(79,172,254,0.1)]">
-                                {config.modules.idle.asset ? (
-                                    <img
-                                        src={config.modules.idle.asset.url}
-                                        alt="Preview"
-                                        style={{ transform: `scale(${config.scale})` }}
-                                        className="max-w-[80%] max-h-[80%] object-contain pixelated"
+                                {/* Center Preview (Absolute Center of Wrapper) */}
+                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border border-astro-primary/30 rounded-full flex items-center justify-center bg-astro-primary/5 shadow-[0_0_50px_rgba(79,172,254,0.1)]">
+                                    {config.modules.idle.asset ? (
+                                        <img
+                                            src={config.modules.idle.asset.url}
+                                            alt="Preview"
+                                            style={{ transform: `scale(${config.scale})` }}
+                                            className="max-w-[80%] max-h-[80%] object-contain pixelated"
+                                        />
+                                    ) : (
+                                        <div className="text-astro-primary/30 text-6xl opacity-20">?</div>
+                                    )}
+
+                                    {/* Connecting Lines */}
+                                    <div className="absolute top-1/2 left-[-80px] right-[-80px] h-px bg-astro-primary/20 -z-10"></div>
+                                    <div className="absolute top-[-80px] bottom-[-80px] left-1/2 w-px bg-astro-primary/20 -z-10"></div>
+                                </div>
+
+                                {/* Slots Positioning - Relative to the 500x500 Wrapper */}
+
+                                {/* Top: Idle (Core) */}
+                                <div className="absolute top-0 left-1/2 -translate-x-1/2">
+                                    <ChassisSlot
+                                        id="idle" label="Idle Core" module={config.modules.idle}
+                                        onDrop={(a) => handleDrop('idle', a)}
+                                        onSelect={() => setSelectedSlot('idle')}
+                                        isSelected={selectedSlot === 'idle'}
+                                        required
                                     />
-                                ) : (
-                                    <div className="text-astro-primary/30 text-6xl opacity-20">?</div>
-                                )}
+                                </div>
 
-                                {/* Connecting Lines */}
-                                <div className="absolute top-1/2 left-0 w-full h-px bg-astro-primary/20 -z-10"></div>
-                                <div className="absolute top-0 left-1/2 w-px h-full bg-astro-primary/20 -z-10"></div>
+                                {/* Left: Walk */}
+                                <div className="absolute left-0 top-1/2 -translate-y-1/2">
+                                    <ChassisSlot
+                                        id="walk" label="Locomotion" module={config.modules.walk}
+                                        onDrop={(a) => handleDrop('walk', a)}
+                                        onSelect={() => setSelectedSlot('walk')}
+                                        isSelected={selectedSlot === 'walk'}
+                                    />
+                                </div>
+
+                                {/* Right: Run */}
+                                <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                                    <ChassisSlot
+                                        id="run" label="Sprint" module={config.modules.run}
+                                        onDrop={(a) => handleDrop('run', a)}
+                                        onSelect={() => setSelectedSlot('run')}
+                                        isSelected={selectedSlot === 'run'}
+                                    />
+                                </div>
+
+                                {/* Bottom Left: Sit */}
+                                <div className="absolute bottom-0 left-12">
+                                    <ChassisSlot
+                                        id="sit" label="Rest Mode" module={config.modules.sit}
+                                        onDrop={(a) => handleDrop('sit', a)}
+                                        onSelect={() => setSelectedSlot('sit')}
+                                        isSelected={selectedSlot === 'sit'}
+                                    />
+                                </div>
+
+                                {/* Bottom Right: Special */}
+                                <div className="absolute bottom-0 right-12">
+                                    <ChassisSlot
+                                        id="special" label="Special" module={config.modules.special}
+                                        onDrop={(a) => handleDrop('special', a)}
+                                        onSelect={() => setSelectedSlot('special')}
+                                        isSelected={selectedSlot === 'special'}
+                                    />
+                                </div>
+
                             </div>
-
-                            {/* Slots Positioning - Spaced out more to prevent bleeding */}
-
-                            {/* Top: Idle (Core) */}
-                            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[110%]">
-                                <ChassisSlot
-                                    id="idle" label="Idle Core" module={config.modules.idle}
-                                    onDrop={(a) => handleDrop('idle', a)}
-                                    onSelect={() => setSelectedSlot('idle')}
-                                    isSelected={selectedSlot === 'idle'}
-                                    required
-                                />
-                            </div>
-
-                            {/* Left: Walk */}
-                            <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[120%]">
-                                <ChassisSlot
-                                    id="walk" label="Locomotion" module={config.modules.walk}
-                                    onDrop={(a) => handleDrop('walk', a)}
-                                    onSelect={() => setSelectedSlot('walk')}
-                                    isSelected={selectedSlot === 'walk'}
-                                />
-                            </div>
-
-                            {/* Right: Run */}
-                            <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[120%]">
-                                <ChassisSlot
-                                    id="run" label="Sprint" module={config.modules.run}
-                                    onDrop={(a) => handleDrop('run', a)}
-                                    onSelect={() => setSelectedSlot('run')}
-                                    isSelected={selectedSlot === 'run'}
-                                />
-                            </div>
-
-                            {/* Bottom Left: Sit */}
-                            <div className="absolute bottom-0 left-10 translate-y-[120%] -translate-x-1/2">
-                                <ChassisSlot
-                                    id="sit" label="Rest Mode" module={config.modules.sit}
-                                    onDrop={(a) => handleDrop('sit', a)}
-                                    onSelect={() => setSelectedSlot('sit')}
-                                    isSelected={selectedSlot === 'sit'}
-                                />
-                            </div>
-
-                            {/* Bottom Right: Special */}
-                            <div className="absolute bottom-0 right-10 translate-y-[120%] translate-x-1/2">
-                                <ChassisSlot
-                                    id="special" label="Special" module={config.modules.special}
-                                    onDrop={(a) => handleDrop('special', a)}
-                                    onSelect={() => setSelectedSlot('special')}
-                                    isSelected={selectedSlot === 'special'}
-                                />
-                            </div>
-
                         </div>
 
                         {/* Footer Actions */}
