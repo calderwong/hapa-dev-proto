@@ -92,6 +92,10 @@ const CardLibrary: React.FC = () => {
     const [imageGenState, setImageGenState] = useState<'idle' | 'crafting' | 'generating' | 'complete' | 'error'>('idle');
     const [imageGenError, setImageGenError] = useState<string | null>(null);
     
+    // Loop Video State
+    const [loopGenStatus, setLoopGenStatus] = useState<{ [imageId: string]: { status: string; progress?: number; message?: string } }>({});
+    const [hoveredImageId, setHoveredImageId] = useState<string | null>(null);
+    
     // Navigation Animation State
     const [navAnimation, setNavAnimation] = useState<'none' | 'zoom-to-child' | 'zoom-to-parent' | 'slide-left' | 'slide-right'>('none');
     const [pendingCard, setPendingCard] = useState<CardIndexEntry | null>(null);
@@ -318,6 +322,29 @@ const CardLibrary: React.FC = () => {
 
         loadGeminiModels();
     }, []);
+    
+    // Listen for loop video generation progress
+    useEffect(() => {
+        if (!window.electronAPI?.onLoopVideoProgress) return;
+        
+        window.electronAPI.onLoopVideoProgress((payload: any) => {
+            if (payload.imageId) {
+                setLoopGenStatus(prev => ({
+                    ...prev,
+                    [payload.imageId]: {
+                        status: payload.status,
+                        progress: payload.progress,
+                        message: payload.message,
+                    },
+                }));
+                
+                // If complete, reload cards to get updated data
+                if (payload.status === 'complete' && selected) {
+                    loadCards(selected.cardId);
+                }
+            }
+        });
+    }, [selected]);
 
     // Helper to find text content from various possible fields
     const findTextContent = (record: any, raw: any) => {
@@ -1109,6 +1136,90 @@ const CardLibrary: React.FC = () => {
     const getImageCount = (card: CardIndexEntry): number => {
         return getImageSet(card).images.length;
     };
+    
+    // Create looping video from an image
+    const handleCreateLoopVideo = async (imgIdx: number) => {
+        if (!selected || !window.electronAPI?.createLoopVideoForImage) return;
+        
+        const imageSet = getImageSet(selected);
+        const img = imageSet.images[imgIdx];
+        if (!img) return;
+        
+        // Set generating status
+        setLoopGenStatus(prev => ({
+            ...prev,
+            [img.id]: { status: 'generating', message: 'Starting loop generation...' },
+        }));
+        
+        try {
+            const result = await window.electronAPI.createLoopVideoForImage({
+                parentCardId: selected.cardId,
+                imageId: img.id,
+                imagePath: img.localPath,
+                originalPrompt: img.craftedPrompt || '',
+                cardName: selected.name || 'Untitled',
+                imageOrder: img.creationOrder,
+            });
+            
+            if (result.success) {
+                // Update the image with loop video reference
+                const updatedImages = [...imageSet.images];
+                updatedImages[imgIdx] = {
+                    ...img,
+                    loopVideo: {
+                        cardId: result.videoCardId,
+                        localPath: result.videoPath,
+                        generatedAt: new Date().toISOString(),
+                        status: 'complete' as const,
+                    },
+                };
+                
+                const updatedRecord = {
+                    ...selected.cardRecord,
+                    updatedAt: new Date().toISOString(),
+                    imageSet: {
+                        ...imageSet,
+                        images: updatedImages,
+                    },
+                };
+                
+                // Save to Hypercore
+                const coreToUse = selected.coreName || selected.cardId;
+                if (window.electronAPI?.p2pAppend && coreToUse) {
+                    await window.electronAPI.p2pAppend({
+                        name: coreToUse,
+                        data: JSON.stringify(updatedRecord),
+                    });
+                }
+                
+                // Reload cards
+                await loadCards(selected.cardId);
+                
+                setLoopGenStatus(prev => ({
+                    ...prev,
+                    [img.id]: { status: 'complete', message: 'Loop video created!' },
+                }));
+            }
+        } catch (err: any) {
+            console.error('[LoopVideo] Error:', err);
+            setLoopGenStatus(prev => ({
+                ...prev,
+                [img.id]: { status: 'error', message: err?.message || 'Failed to create loop' },
+            }));
+        }
+    };
+    
+    // Navigate to a loop video's card page
+    const handleNavigateToLoopVideo = (loopVideoCardId: string) => {
+        // Find the video card and navigate to it
+        const videoCard = cards.find(c => c.cardId === loopVideoCardId);
+        if (videoCard) {
+            setSelected(videoCard);
+        } else {
+            // Card might not be in current filtered view, reload and navigate
+            loadCards(loopVideoCardId);
+        }
+    };
 
     // Drag Handlers
     const handleDragStart = (e: React.DragEvent, card: CardIndexEntry) => {
@@ -1669,20 +1780,68 @@ const CardLibrary: React.FC = () => {
                                                             const img = imageSet.images[imgIdx];
                                                             if (!img) return null;
                                                             const isHero = imgIdx === imageSet.heroIndex;
+                                                            const hasLoop = img.loopVideo?.status === 'complete';
+                                                            const loopStatus = loopGenStatus[img.id];
+                                                            const isGeneratingLoop = loopStatus?.status === 'generating' || loopStatus?.status === 'crafted';
+                                                            const isHovered = hoveredImageId === img.id;
+                                                            
                                                             return (
                                                                 <div 
                                                                     key={img.id || imgIdx}
-                                                                    className={`relative group aspect-square rounded-lg overflow-hidden border-2 transition-all ${
-                                                                        isHero 
-                                                                            ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
-                                                                            : 'border-gray-700 hover:border-cyan-500/50'
+                                                                    className={`relative group aspect-square rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
+                                                                        isGeneratingLoop
+                                                                            ? 'border-purple-500 animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]'
+                                                                            : isHero 
+                                                                                ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
+                                                                                : 'border-gray-700 hover:border-cyan-500/50'
                                                                     }`}
+                                                                    onMouseEnter={() => setHoveredImageId(img.id)}
+                                                                    onMouseLeave={() => setHoveredImageId(null)}
+                                                                    onClick={() => {
+                                                                        if (hasLoop && img.loopVideo?.cardId) {
+                                                                            handleNavigateToLoopVideo(img.loopVideo.cardId);
+                                                                        }
+                                                                    }}
                                                                 >
+                                                                    {/* Base Image */}
                                                                     <img 
                                                                         src={toFileUrl(img.localPath)} 
                                                                         alt={`Image #${img.creationOrder + 1}`}
-                                                                        className="w-full h-full object-cover"
+                                                                        className={`w-full h-full object-cover transition-opacity ${
+                                                                            hasLoop && isHovered ? 'opacity-0' : 'opacity-100'
+                                                                        }`}
                                                                     />
+                                                                    
+                                                                    {/* Loop Video Preview on Hover */}
+                                                                    {hasLoop && img.loopVideo?.localPath && isHovered && (
+                                                                        <video
+                                                                            src={toFileUrl(img.loopVideo.localPath)}
+                                                                            autoPlay
+                                                                            loop
+                                                                            muted
+                                                                            playsInline
+                                                                            className="absolute inset-0 w-full h-full object-cover"
+                                                                        />
+                                                                    )}
+                                                                    
+                                                                    {/* Loop Video Badge */}
+                                                                    {hasLoop && (
+                                                                        <div className="absolute top-1 right-1 bg-purple-500 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                                                                            <rux-icon icon="loop" size="extra-small"></rux-icon>
+                                                                            LOOP
+                                                                        </div>
+                                                                    )}
+                                                                    
+                                                                    {/* Generating Loop Overlay */}
+                                                                    {isGeneratingLoop && (
+                                                                        <div className="absolute inset-0 bg-purple-900/70 flex flex-col items-center justify-center">
+                                                                            <rux-icon icon="autorenew" size="small" className="animate-spin text-purple-300"></rux-icon>
+                                                                            <span className="text-[8px] text-purple-200 mt-1">
+                                                                                {loopStatus?.progress ? `${loopStatus.progress}%` : 'Creating...'}
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                    
                                                                     {/* Hero badge */}
                                                                     {isHero && (
                                                                         <div className="absolute top-1 left-1 bg-amber-500 text-black text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
@@ -1690,40 +1849,54 @@ const CardLibrary: React.FC = () => {
                                                                             HERO
                                                                         </div>
                                                                     )}
+                                                                    
                                                                     {/* Creation order badge */}
                                                                     <div className="absolute bottom-1 right-1 bg-black/70 text-gray-300 text-[10px] font-mono px-1.5 py-0.5 rounded">
                                                                         #{img.creationOrder + 1}
                                                                     </div>
+                                                                    
                                                                     {/* Hover controls */}
-                                                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                                                                        {!isHero && (
-                                                                            <button
-                                                                                onClick={() => handleSetHeroImage(imgIdx)}
-                                                                                className="p-1.5 bg-amber-500/20 hover:bg-amber-500/40 rounded text-amber-400"
-                                                                                title="Set as Hero"
-                                                                            >
-                                                                                <rux-icon icon="star" size="extra-small"></rux-icon>
-                                                                            </button>
-                                                                        )}
-                                                                        {displayPos > 0 && (
-                                                                            <button
-                                                                                onClick={() => handleMoveImage(imgIdx, 'up')}
-                                                                                className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
-                                                                                title="Move Left"
-                                                                            >
-                                                                                <rux-icon icon="chevron-left" size="extra-small"></rux-icon>
-                                                                            </button>
-                                                                        )}
-                                                                        {displayPos < imageCount - 1 && (
-                                                                            <button
-                                                                                onClick={() => handleMoveImage(imgIdx, 'down')}
-                                                                                className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
-                                                                                title="Move Right"
-                                                                            >
-                                                                                <rux-icon icon="chevron-right" size="extra-small"></rux-icon>
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
+                                                                    {!isGeneratingLoop && (
+                                                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                                                            {/* Create Loop Button */}
+                                                                            {!hasLoop && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); handleCreateLoopVideo(imgIdx); }}
+                                                                                    className="p-1.5 bg-purple-500/30 hover:bg-purple-500/50 rounded text-purple-300"
+                                                                                    title="Create Loop Video"
+                                                                                >
+                                                                                    <rux-icon icon="movie" size="extra-small"></rux-icon>
+                                                                                </button>
+                                                                            )}
+                                                                            {!isHero && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); handleSetHeroImage(imgIdx); }}
+                                                                                    className="p-1.5 bg-amber-500/20 hover:bg-amber-500/40 rounded text-amber-400"
+                                                                                    title="Set as Hero"
+                                                                                >
+                                                                                    <rux-icon icon="star" size="extra-small"></rux-icon>
+                                                                                </button>
+                                                                            )}
+                                                                            {displayPos > 0 && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); handleMoveImage(imgIdx, 'up'); }}
+                                                                                    className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
+                                                                                    title="Move Left"
+                                                                                >
+                                                                                    <rux-icon icon="chevron-left" size="extra-small"></rux-icon>
+                                                                                </button>
+                                                                            )}
+                                                                            {displayPos < imageCount - 1 && (
+                                                                                <button
+                                                                                    onClick={(e) => { e.stopPropagation(); handleMoveImage(imgIdx, 'down'); }}
+                                                                                    className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
+                                                                                    title="Move Right"
+                                                                                >
+                                                                                    <rux-icon icon="chevron-right" size="extra-small"></rux-icon>
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             );
                                                         })}

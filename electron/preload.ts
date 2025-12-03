@@ -120,6 +120,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
             previousImagePath?: string;
         };
     }) => ipcRenderer.invoke('generate-image-for-card', data),
+    
+    // Create looping video from an image
+    createLoopVideoForImage: (data: {
+        parentCardId: string;
+        imageId: string;
+        imagePath: string;
+        originalPrompt: string;
+        cardName: string;
+        imageOrder: number;
+    }) => ipcRenderer.invoke('create-loop-video-for-image', data),
+    
+    // Listen for loop video generation progress
+    onLoopVideoProgress: (listener: (payload: any) => void) => {
+        ipcRenderer.on('loop-video-progress', (_event, payload) => listener(payload));
+    },
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');
