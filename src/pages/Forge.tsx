@@ -329,17 +329,19 @@ const Forge: React.FC = () => {
             
             console.log('[Forge Video] Result:', result);
 
-            if (result && result.localPath) {
-                const path = result.localPath;
+            // Backend returns 'videoPath', not 'localPath'
+            const videoPath = result?.videoPath || result?.localPath;
+            
+            if (result && videoPath) {
                 // Ensure proper file URL format for Electron
-                const normalizedPath = path.replace(/\\/g, '/');
+                const normalizedPath = videoPath.replace(/\\/g, '/');
                 const url = normalizedPath.startsWith('file://') ? normalizedPath : `file:///${normalizedPath}`;
                 
-                console.log('[Forge Video] Path:', path);
+                console.log('[Forge Video] Path:', videoPath);
                 console.log('[Forge Video] URL:', url);
                 
                 // Update state
-                setGeneratedVisualPath(path);
+                setGeneratedVisualPath(videoPath);
                 setGeneratedVisualUrl(url);
                 
                 // Persist to avatar state immediately so it doesn't get lost
@@ -348,7 +350,7 @@ const Forge: React.FC = () => {
                     const updated = {
                         ...prev,
                         video: {
-                            localPath: path,
+                            localPath: videoPath,
                             mimeType: result.mimeType || 'video/mp4'
                         }
                     };
@@ -358,7 +360,7 @@ const Forge: React.FC = () => {
 
                 showToast('success', 'Manifestation Complete', 'The avatar has taken physical form.');
             } else {
-                console.error('[Forge Video] No localPath in result:', result);
+                console.error('[Forge Video] No videoPath in result:', result);
                 showToast('error', 'Video Error', 'Video was generated but path is missing.');
             }
         } catch (e) {
