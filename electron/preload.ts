@@ -105,7 +105,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('extract-video-frame', data),
     extractVideoAudio: (data: { videoPath: string }) => 
         ipcRenderer.invoke('extract-video-audio', data),
-    // Image generation for cards
+    // Image generation for cards (supports series continuation)
     generateImageForCard: (data: {
         cardContext: {
             name: string;
@@ -113,6 +113,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
             text?: string;
             tags?: string[];
             messageContent?: string;
+        };
+        seriesContext?: {
+            imageNumber: number;
+            previousPrompt?: string;
+            previousImagePath?: string;
         };
     }) => ipcRenderer.invoke('generate-image-for-card', data),
 });

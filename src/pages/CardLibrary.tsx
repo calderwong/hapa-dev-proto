@@ -848,7 +848,31 @@ const CardLibrary: React.FC = () => {
         });
     };
 
-    // Generate image for card using AI
+    // Get the image set from a card
+    const getImageSet = (card: CardIndexEntry): { images: any[]; heroIndex: number; displayOrder: number[] } => {
+        const rec = card.cardRecord || {};
+        if (rec.imageSet) {
+            return rec.imageSet;
+        }
+        // Migration: If card has single image, convert to imageSet format
+        if (rec.image?.localPath) {
+            return {
+                images: [{
+                    id: `img-${Date.now()}`,
+                    localPath: rec.image.localPath,
+                    mimeType: rec.image.mimeType || 'image/jpeg',
+                    craftedPrompt: rec.image.generatedPrompt || '',
+                    generatedAt: rec.image.generatedAt || new Date().toISOString(),
+                    creationOrder: 0,
+                }],
+                heroIndex: 0,
+                displayOrder: [0],
+            };
+        }
+        return { images: [], heroIndex: 0, displayOrder: [] };
+    };
+
+    // Generate image for card using AI (supports series continuation)
     const handleGenerateImage = async () => {
         if (!selected || !window.electronAPI?.generateImageForCard) return;
         
@@ -905,6 +929,18 @@ const CardLibrary: React.FC = () => {
             return;
         }
         
+        // Get existing image set for series continuation
+        const currentImageSet = getImageSet(selected);
+        const imageNumber = currentImageSet.images.length + 1;
+        const lastImage = currentImageSet.images[currentImageSet.images.length - 1];
+        
+        // Build series context if this is a continuation
+        const seriesContext = imageNumber > 1 && lastImage ? {
+            imageNumber,
+            previousPrompt: lastImage.craftedPrompt,
+            previousImagePath: lastImage.localPath,
+        } : undefined;
+        
         try {
             setImageGenState('crafting');
             setImageGenError(null);
@@ -913,29 +949,51 @@ const CardLibrary: React.FC = () => {
             await new Promise(r => setTimeout(r, 500));
             setImageGenState('generating');
             
-            const result = await window.electronAPI.generateImageForCard({ cardContext });
+            console.log('[ImageGen] Generating image #', imageNumber, seriesContext ? '(series continuation)' : '(first image)');
+            
+            const result = await window.electronAPI.generateImageForCard({ cardContext, seriesContext });
             
             if (result.success && result.localPath) {
-                // Update the card with the new image
+                // Create new image entry
+                const newImage = {
+                    id: `img-${Date.now()}`,
+                    localPath: result.localPath,
+                    mimeType: result.mimeType,
+                    craftedPrompt: result.craftedPrompt,
+                    generatedAt: new Date().toISOString(),
+                    creationOrder: imageNumber - 1,
+                };
+                
+                // Build updated image set
+                const updatedImages = [...currentImageSet.images, newImage];
+                const updatedDisplayOrder = [...currentImageSet.displayOrder, updatedImages.length - 1];
+                
+                const updatedImageSet = {
+                    images: updatedImages,
+                    heroIndex: currentImageSet.heroIndex, // Keep existing hero
+                    displayOrder: updatedDisplayOrder,
+                };
+                
+                // Update the card with the new image set
                 const updatedRecord = {
                     ...selected.cardRecord,
                     updatedAt: new Date().toISOString(),
+                    imageSet: updatedImageSet,
+                    // Keep legacy image field pointing to hero for backwards compatibility
                     image: {
-                        localPath: result.localPath,
-                        mimeType: result.mimeType,
-                        generatedPrompt: result.craftedPrompt,
-                        generatedAt: new Date().toISOString(),
+                        localPath: updatedImages[updatedImageSet.heroIndex]?.localPath,
+                        mimeType: updatedImages[updatedImageSet.heroIndex]?.mimeType,
+                        generatedPrompt: updatedImages[updatedImageSet.heroIndex]?.craftedPrompt,
+                        generatedAt: updatedImages[updatedImageSet.heroIndex]?.generatedAt,
                     },
                 };
                 
                 // Save to Hypercore - use cardId as the core name (standard pattern)
-                // coreName might be undefined for wormhole cards
                 const coreToUse = selected.coreName || selected.cardId;
-                console.log('[ImageGen] Saving to core:', coreToUse, 'coreName:', selected.coreName, 'cardId:', selected.cardId);
+                console.log('[ImageGen] Saving image #', imageNumber, 'to core:', coreToUse);
                 
                 if (window.electronAPI.p2pAppend && coreToUse) {
                     try {
-                        // p2pAppend expects { name, data } object
                         await window.electronAPI.p2pAppend({ 
                             name: coreToUse, 
                             data: JSON.stringify(updatedRecord) 
@@ -943,8 +1001,6 @@ const CardLibrary: React.FC = () => {
                         console.log('[ImageGen] Successfully saved to Hypercore');
                     } catch (saveErr: any) {
                         console.error('[ImageGen] Failed to save to Hypercore:', saveErr);
-                        // Image was generated successfully, just couldn't save to card
-                        // Still show success since image exists on disk
                     }
                 } else {
                     console.warn('[ImageGen] No valid core name, skipping Hypercore save. Image saved to:', result.localPath);
@@ -965,9 +1021,93 @@ const CardLibrary: React.FC = () => {
         }
     };
     
-    // Check if card already has an image
+    // Set hero image for a card
+    const handleSetHeroImage = async (imageIndex: number) => {
+        if (!selected) return;
+        
+        const currentImageSet = getImageSet(selected);
+        if (imageIndex < 0 || imageIndex >= currentImageSet.images.length) return;
+        
+        const updatedImageSet = {
+            ...currentImageSet,
+            heroIndex: imageIndex,
+        };
+        
+        const heroImage = currentImageSet.images[imageIndex];
+        const updatedRecord = {
+            ...selected.cardRecord,
+            updatedAt: new Date().toISOString(),
+            imageSet: updatedImageSet,
+            // Update legacy image field to point to new hero
+            image: {
+                localPath: heroImage?.localPath,
+                mimeType: heroImage?.mimeType,
+                generatedPrompt: heroImage?.craftedPrompt,
+                generatedAt: heroImage?.generatedAt,
+            },
+        };
+        
+        const coreToUse = selected.coreName || selected.cardId;
+        if (window.electronAPI?.p2pAppend && coreToUse) {
+            try {
+                await window.electronAPI.p2pAppend({ 
+                    name: coreToUse, 
+                    data: JSON.stringify(updatedRecord) 
+                });
+                await loadCards(selected.cardId);
+            } catch (err) {
+                console.error('[ImageGen] Failed to set hero:', err);
+            }
+        }
+    };
+    
+    // Move image in display order
+    const handleMoveImage = async (imageIndex: number, direction: 'up' | 'down') => {
+        if (!selected) return;
+        
+        const currentImageSet = getImageSet(selected);
+        const displayOrder = [...currentImageSet.displayOrder];
+        const currentPos = displayOrder.indexOf(imageIndex);
+        
+        if (currentPos === -1) return;
+        const newPos = direction === 'up' ? currentPos - 1 : currentPos + 1;
+        if (newPos < 0 || newPos >= displayOrder.length) return;
+        
+        // Swap positions
+        [displayOrder[currentPos], displayOrder[newPos]] = [displayOrder[newPos], displayOrder[currentPos]];
+        
+        const updatedRecord = {
+            ...selected.cardRecord,
+            updatedAt: new Date().toISOString(),
+            imageSet: {
+                ...currentImageSet,
+                displayOrder,
+            },
+        };
+        
+        const coreToUse = selected.coreName || selected.cardId;
+        if (window.electronAPI?.p2pAppend && coreToUse) {
+            try {
+                await window.electronAPI.p2pAppend({ 
+                    name: coreToUse, 
+                    data: JSON.stringify(updatedRecord) 
+                });
+                await loadCards(selected.cardId);
+            } catch (err) {
+                console.error('[ImageGen] Failed to reorder:', err);
+            }
+        }
+    };
+    
+    // Check if card has any images
     const cardHasImage = (card: CardIndexEntry): boolean => {
-        return !!(card.thumbnail || card.mediaLocalPath || card.cardRecord?.image?.localPath);
+        const imageSet = getImageSet(card);
+        return imageSet.images.length > 0 || !!(card.thumbnail || card.mediaLocalPath);
+    };
+    
+    // Get image count for a card
+    const getImageCount = (card: CardIndexEntry): number => {
+        return getImageSet(card).images.length;
     };
 
     // Drag Handlers
@@ -1508,56 +1648,134 @@ const CardLibrary: React.FC = () => {
                                     <div className="h-px bg-gray-800"></div>
 
                                     {/* AI Image Generation Panel */}
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2 text-cyan-400">
-                                            <rux-icon icon="auto-awesome" size="small"></rux-icon>
-                                            <h3 className="font-bold uppercase tracking-wider text-sm">AI Image</h3>
-                                        </div>
-                                        <button
-                                            onClick={handleGenerateImage}
-                                            disabled={imageGenState !== 'idle' && imageGenState !== 'error'}
-                                            className={`w-full p-4 rounded-lg border-2 transition-all duration-300 flex items-center justify-center gap-3 ${
-                                                imageGenState === 'complete'
-                                                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
-                                                    : imageGenState === 'error'
-                                                        ? 'bg-red-500/20 border-red-500/50 text-red-400'
-                                                        : imageGenState === 'crafting' || imageGenState === 'generating'
-                                                            ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 animate-neon-pulse'
-                                                            : cardHasImage(selected)
-                                                                ? 'bg-gray-800/50 border-gray-600 text-gray-400 hover:border-cyan-500/50 hover:text-cyan-400 hover:bg-cyan-500/10'
-                                                                : 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)]'
-                                            }`}
-                                        >
-                                            {imageGenState === 'crafting' ? (
-                                                <>
-                                                    <rux-icon icon="psychology" size="small" className="animate-pulse"></rux-icon>
-                                                    <span className="text-sm font-bold uppercase tracking-wider">Crafting Vision...</span>
-                                                </>
-                                            ) : imageGenState === 'generating' ? (
-                                                <>
-                                                    <rux-icon icon="brush" size="small" className="animate-spin"></rux-icon>
-                                                    <span className="text-sm font-bold uppercase tracking-wider">Manifesting Image...</span>
-                                                </>
-                                            ) : imageGenState === 'complete' ? (
-                                                <>
-                                                    <rux-icon icon="check-circle" size="small"></rux-icon>
-                                                    <span className="text-sm font-bold uppercase tracking-wider">Image Created!</span>
-                                                </>
-                                            ) : imageGenState === 'error' ? (
-                                                <>
-                                                    <rux-icon icon="error" size="small"></rux-icon>
-                                                    <span className="text-xs">{imageGenError || 'Generation failed'}</span>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <rux-icon icon="auto-awesome" size="small"></rux-icon>
-                                                    <span className="text-sm font-bold uppercase tracking-wider">
-                                                        {cardHasImage(selected) ? 'Regenerate Image' : 'Create Image'}
-                                                    </span>
-                                                </>
-                                            )}
-                                        </button>
-                                    </div>
+                                    {(() => {
+                                        const imageSet = getImageSet(selected);
+                                        const imageCount = imageSet.images.length;
+                                        return (
+                                            <div className="space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2 text-cyan-400">
+                                                        <rux-icon icon="auto-awesome" size="small"></rux-icon>
+                                                        <h3 className="font-bold uppercase tracking-wider text-sm">
+                                                            AI Images {imageCount > 0 && <span className="text-gray-500">({imageCount})</span>}
+                                                        </h3>
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Image Gallery - Show if images exist */}
+                                                {imageCount > 0 && (
+                                                    <div className="grid grid-cols-3 gap-2">
+                                                        {imageSet.displayOrder.map((imgIdx, displayPos) => {
+                                                            const img = imageSet.images[imgIdx];
+                                                            if (!img) return null;
+                                                            const isHero = imgIdx === imageSet.heroIndex;
+                                                            return (
+                                                                <div 
+                                                                    key={img.id || imgIdx}
+                                                                    className={`relative group aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                                                                        isHero 
+                                                                            ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
+                                                                            : 'border-gray-700 hover:border-cyan-500/50'
+                                                                    }`}
+                                                                >
+                                                                    <img 
+                                                                        src={toFileUrl(img.localPath)} 
+                                                                        alt={`Image #${img.creationOrder + 1}`}
+                                                                        className="w-full h-full object-cover"
+                                                                    />
+                                                                    {/* Hero badge */}
+                                                                    {isHero && (
+                                                                        <div className="absolute top-1 left-1 bg-amber-500 text-black text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                                                                            <rux-icon icon="star" size="extra-small"></rux-icon>
+                                                                            HERO
+                                                                        </div>
+                                                                    )}
+                                                                    {/* Creation order badge */}
+                                                                    <div className="absolute bottom-1 right-1 bg-black/70 text-gray-300 text-[10px] font-mono px-1.5 py-0.5 rounded">
+                                                                        #{img.creationOrder + 1}
+                                                                    </div>
+                                                                    {/* Hover controls */}
+                                                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                                                        {!isHero && (
+                                                                            <button
+                                                                                onClick={() => handleSetHeroImage(imgIdx)}
+                                                                                className="p-1.5 bg-amber-500/20 hover:bg-amber-500/40 rounded text-amber-400"
+                                                                                title="Set as Hero"
+                                                                            >
+                                                                                <rux-icon icon="star" size="extra-small"></rux-icon>
+                                                                            </button>
+                                                                        )}
+                                                                        {displayPos > 0 && (
+                                                                            <button
+                                                                                onClick={() => handleMoveImage(imgIdx, 'up')}
+                                                                                className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
+                                                                                title="Move Left"
+                                                                            >
+                                                                                <rux-icon icon="chevron-left" size="extra-small"></rux-icon>
+                                                                            </button>
+                                                                        )}
+                                                                        {displayPos < imageCount - 1 && (
+                                                                            <button
+                                                                                onClick={() => handleMoveImage(imgIdx, 'down')}
+                                                                                className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
+                                                                                title="Move Right"
+                                                                            >
+                                                                                <rux-icon icon="chevron-right" size="extra-small"></rux-icon>
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                                
+                                                {/* Generate Button */}
+                                                <button
+                                                    onClick={handleGenerateImage}
+                                                    disabled={imageGenState !== 'idle' && imageGenState !== 'error'}
+                                                    className={`w-full p-4 rounded-lg border-2 transition-all duration-300 flex items-center justify-center gap-3 ${
+                                                        imageGenState === 'complete'
+                                                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                                                            : imageGenState === 'error'
+                                                                ? 'bg-red-500/20 border-red-500/50 text-red-400'
+                                                                : imageGenState === 'crafting' || imageGenState === 'generating'
+                                                                    ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 animate-neon-pulse'
+                                                                    : 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)]'
+                                                    }`}
+                                                >
+                                                    {imageGenState === 'crafting' ? (
+                                                        <>
+                                                            <rux-icon icon="psychology" size="small" className="animate-pulse"></rux-icon>
+                                                            <span className="text-sm font-bold uppercase tracking-wider">Crafting Vision...</span>
+                                                        </>
+                                                    ) : imageGenState === 'generating' ? (
+                                                        <>
+                                                            <rux-icon icon="brush" size="small" className="animate-spin"></rux-icon>
+                                                            <span className="text-sm font-bold uppercase tracking-wider">Manifesting #{imageCount + 1}...</span>
+                                                        </>
+                                                    ) : imageGenState === 'complete' ? (
+                                                        <>
+                                                            <rux-icon icon="check-circle" size="small"></rux-icon>
+                                                            <span className="text-sm font-bold uppercase tracking-wider">Image #{imageCount} Created!</span>
+                                                        </>
+                                                    ) : imageGenState === 'error' ? (
+                                                        <>
+                                                            <rux-icon icon="error" size="small"></rux-icon>
+                                                            <span className="text-xs">{imageGenError || 'Generation failed'}</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <rux-icon icon="auto-awesome" size="small"></rux-icon>
+                                                            <span className="text-sm font-bold uppercase tracking-wider">
+                                                                {imageCount > 0 ? `Generate Next Image (#${imageCount + 1})` : 'Create Image'}
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        );
+                                    })()}
 
                                     <div className="h-px bg-gray-800"></div>
 

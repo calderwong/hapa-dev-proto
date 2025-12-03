@@ -1371,6 +1371,7 @@ app.whenReady().then(() => {
       _event,
       {
         cardContext,
+        seriesContext,
       }: {
         cardContext: {
           name: string;
@@ -1378,6 +1379,11 @@ app.whenReady().then(() => {
           text?: string;
           tags?: string[];
           messageContent?: string;
+        };
+        seriesContext?: {
+          imageNumber: number;           // Which image in the series (1, 2, 3...)
+          previousPrompt?: string;       // Previous LLM-crafted prompt
+          previousImagePath?: string;    // Path to previous image (for potential future use)
         };
       },
     ) => {
@@ -1392,7 +1398,11 @@ app.whenReady().then(() => {
         defaultPromptLLM: 'gemini-1.5-pro',
       };
 
+      const imageNumber = seriesContext?.imageNumber || 1;
+      const isSeriesContinuation = imageNumber > 1 && seriesContext?.previousPrompt;
+
       console.log('[ImageGen] Starting image generation for card:', cardContext.name);
+      console.log('[ImageGen] Image #', imageNumber, isSeriesContinuation ? '(series continuation)' : '(first image)');
       console.log('[ImageGen] Using LLM:', imageGenSettings.defaultPromptLLM);
       console.log('[ImageGen] Using Image Model:', imageGenSettings.defaultImageModel);
 
@@ -1425,7 +1435,31 @@ app.whenReady().then(() => {
           ? contentParts.join('\n\n')
           : `Card Type: ${cardContext.mediaKind || 'document'}\nTitle: ${cardContext.name || 'Untitled'}`;
 
-        const promptCraftingRequest = `
+        // Build prompt based on whether this is a series continuation or first image
+        let promptCraftingRequest: string;
+        
+        if (isSeriesContinuation && seriesContext?.previousPrompt) {
+          // Series continuation - build on previous image
+          promptCraftingRequest = `
+You are crafting image #${imageNumber} in a visual series representing this content.
+
+PREVIOUS IMAGE (#${imageNumber - 1}) was created with this prompt:
+"${seriesContext.previousPrompt}"
+
+Now create a NEW, DIFFERENT prompt for image #${imageNumber} that:
+1. Continues the visual narrative/theme established in the series
+2. Explores a DIFFERENT aspect, angle, or perspective of the content
+3. Maintains stylistic consistency with the previous image(s)
+4. Adds new visual elements while honoring the series aesthetic
+5. Output ONLY the new image prompt, no explanations
+
+Document/Card Context (for reference):
+${contextSummary}
+
+Create prompt for image #${imageNumber} in the series:`;
+        } else {
+          // First image - original prompt
+          promptCraftingRequest = `
 You are an expert at crafting image generation prompts. Given context about a data card/document, create a detailed, evocative prompt for an AI image generator.
 
 Rules:
@@ -1441,6 +1475,7 @@ Document/Card Context:
 ${contextSummary}
 
 Create a vivid image prompt that visually represents this content:`;
+        }
 
         // Call LLM to craft the prompt
         const llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultPromptLLM}:generateContent?key=${apiKey}`;

@@ -394,3 +394,93 @@ Card Inspector
 2. **`electron/main.ts`**
    - Enhanced context handling in `generate-image-for-card`
    - Better prompt construction using all available context
+
+---
+
+## Feature: Image Set Generation (Dec 2, 2025)
+
+### Concept: "Generate Next Image" as Set Continuation
+
+After the first image is created, subsequent generations build on the series:
+- Button changes from "Create Image" → "Generate Next Image"
+- Each new image uses previous LLM prompt + previous image as context
+- Creates a coherent visual series representing the card content
+
+### Data Model
+
+```typescript
+interface GeneratedImage {
+  id: string;              // Unique ID (e.g., "img-{timestamp}")
+  localPath: string;       // Path to saved image
+  mimeType: string;        // e.g., "image/jpeg"
+  craftedPrompt: string;   // LLM-crafted prompt used
+  generatedAt: string;     // ISO timestamp
+  creationOrder: number;   // Order created (0, 1, 2...)
+}
+
+interface ImageSet {
+  images: GeneratedImage[];
+  heroIndex: number;        // Index of hero image (default 0)
+  displayOrder: number[];   // Custom display order [2, 0, 1] means show img2 first
+}
+
+// In cardRecord:
+cardRecord.imageSet: ImageSet
+```
+
+### UI Components
+
+#### 1. Generation Button States
+- No images: "✨ Create Image"
+- Has images: "✨ Generate Next Image (#N)"
+
+#### 2. Image Gallery (when imageSet.images.length > 0)
+```
+┌─────────────────────────────────────────────┐
+│ AI IMAGES (3)                      [+ Add]  │
+├─────────────────────────────────────────────┤
+│ ┌──────┐  ┌──────┐  ┌──────┐               │
+│ │ ★    │  │      │  │      │  <- Hero star │
+│ │ img1 │  │ img2 │  │ img3 │               │
+│ │ #1   │  │ #2   │  │ #3   │  <- Counter   │
+│ └──────┘  └──────┘  └──────┘               │
+│ [Set Hero] [↑] [↓]  <- Controls            │
+└─────────────────────────────────────────────┘
+```
+
+#### 3. Hero Selection
+- Click star or "Set Hero" to mark image as hero
+- Hero image becomes the card's primary thumbnail
+- Hero shows first in display order
+
+### Series Continuation Logic
+
+When generating image N+1:
+```typescript
+const continuationPrompt = `
+You are crafting the NEXT image in a visual series representing this content.
+
+PREVIOUS IMAGE in the series was created with this prompt:
+"${previousImage.craftedPrompt}"
+
+Now create a NEW, DIFFERENT prompt that:
+1. Continues the visual narrative/theme
+2. Explores a different aspect or perspective
+3. Maintains stylistic consistency
+4. Adds new visual elements while honoring the series
+
+Document Context:
+${contextSummary}
+
+Create prompt for image #${imageNumber} in the series:
+`;
+```
+
+### Implementation Steps
+
+1. **Update data model** - Add imageSet structure to cardRecord
+2. **Update frontend** - Track multiple images, show gallery
+3. **Update backend** - Accept series context, continuation prompts
+4. **Add reordering** - Drag-drop or arrow buttons to reorder
+5. **Add hero selection** - Star icon to set hero image
+6. **Update thumbnails** - Use hero image across the app
