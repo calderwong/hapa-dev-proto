@@ -66,7 +66,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     // Video extraction utilities
     extractVideoFrame: (data) => electron_1.ipcRenderer.invoke('extract-video-frame', data),
     extractVideoAudio: (data) => electron_1.ipcRenderer.invoke('extract-video-audio', data),
-    // Image generation for cards
+    // Image generation for cards (supports series continuation)
     generateImageForCard: (data) => electron_1.ipcRenderer.invoke('generate-image-for-card', data),
 });
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? window.electronAPI : 'window not defined');
