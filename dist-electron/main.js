@@ -758,9 +758,16 @@ function createWindow() {
         },
         autoHideMenuBar: true,
     });
+    // Add F12 keyboard shortcut to toggle dev tools
+    win.webContents.on('before-input-event', (event, input) => {
+        if (input.key === 'F12') {
+            win.webContents.toggleDevTools();
+            event.preventDefault();
+        }
+    });
     if (electron_is_dev_1.default) {
         win.loadURL('http://localhost:5173');
-        // win.webContents.openDevTools(); // Disabled automatic opening
+        win.webContents.openDevTools(); // Temporarily enable for debugging icons
     }
     else {
         win.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
