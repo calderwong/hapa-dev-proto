@@ -1,4 +1,4 @@
-import { PetState, type PetInstance, type PetConfig, type EnvironmentTheme, type CardRef } from './types';
+import { PetState, type PetInstance, type PetConfig, type EnvironmentTheme } from './types';
 
 interface PetPhysicsState {
     velocity: { x: number; y: number };
@@ -59,7 +59,7 @@ class PetBehaviorEngine {
         return this.weightedRandom(weights);
     }
 
-    public getNextStateDuration(state: PetState, pet: PetInstance): number {
+    public getNextStateDuration(state: PetState, _pet: PetInstance): number {
         const base = 2000;
         const rand = Math.random() * 2000;
         
@@ -95,6 +95,7 @@ export class HeaderPetController {
     private physicsState: Map<string, PetPhysicsState> = new Map();
     private brain: PetBehaviorEngine;
     private containerWidth: number = 0;
+    // @ts-ignore - Reserved for future vertical physics
     private containerHeight: number = 0;
     private environment: EnvironmentTheme;
 

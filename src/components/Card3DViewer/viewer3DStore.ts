@@ -48,7 +48,7 @@ interface Viewer3DState {
 const DEFAULT_CAMERA_POSITION: [number, number, number] = [0, 0, 8];
 const DEFAULT_CAMERA_TARGET: [number, number, number] = [0, 0, 0];
 
-export const useViewer3DStore = create<Viewer3DState>((set, get) => ({
+export const useViewer3DStore = create<Viewer3DState>((set) => ({
     // Initial state
     viewMode: 'focus',
     focusedCardId: null,
@@ -76,7 +76,6 @@ export const useViewer3DStore = create<Viewer3DState>((set, get) => ({
     }),
     
     setViewMode: (mode) => {
-        const positions = calculatePositionsForMode(mode, get().focusedCardId);
         set({ 
             viewMode: mode,
             cameraTransitioning: true,
@@ -108,10 +107,3 @@ export const useViewer3DStore = create<Viewer3DState>((set, get) => ({
         cameraTransitioning: true,
     }),
 }));
-
-// Helper function to calculate card positions based on view mode
-function calculatePositionsForMode(mode: ViewMode, focusedCardId: string | null): Map<string, CardPosition> {
-    const positions = new Map<string, CardPosition>();
-    // Will be implemented when we have cards data
-    return positions;
-}
