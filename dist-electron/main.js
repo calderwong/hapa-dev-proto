@@ -1165,6 +1165,231 @@ Create a vivid image prompt that visually represents this content:`;
             throw new Error(`Image generation failed: ${error.message}`);
         }
     });
+    // Create looping video from an image (one-click loop generation)
+    electron_1.ipcMain.handle('create-loop-video-for-image', async (_event, { parentCardId, imageId, imagePath, originalPrompt, cardName, imageOrder, }) => {
+        const apiKey = store.get('geminiKey');
+        if (!apiKey) {
+            throw new Error('Gemini API Key not found. Please configure it in Settings.');
+        }
+        console.log('[LoopVideo] Starting loop video creation for image:', imageId);
+        console.log('[LoopVideo] Original prompt:', originalPrompt?.substring(0, 100));
+        try {
+            // Step 1: Read the source image and convert to base64
+            const imageBuffer = await fs.promises.readFile(imagePath);
+            const imageBase64 = imageBuffer.toString('base64');
+            const imageMimeType = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
+            // Step 2: Craft a loop-optimized prompt using LLM
+            const adminSettings = getAdminSettings();
+            const promptLLM = adminSettings.imageGenSettings?.defaultPromptLLM || 'gemini-1.5-pro';
+            const loopPromptRequest = `You are crafting a prompt for a SEAMLESS LOOPING VIDEO that will be generated from a still image.
+
+The still image was created with this prompt:
+"${originalPrompt || 'A visually striking image'}"
+
+Create a video prompt that describes SUBTLE, CONTINUOUS motion for a seamless loop:
+
+1. Focus on gentle, ambient movements that loop naturally
+2. Good loop elements to include:
+   - Floating particles, dust motes, or light specks
+   - Gentle pulsing or breathing of light sources
+   - Slow atmospheric effects (fog, mist, aurora glow)
+   - Subtle environmental motion (swaying, ripples, flickering)
+   - Soft camera drift or parallax effect
+3. Keep the main subject relatively STATIC while the environment feels ALIVE
+4. Avoid: sudden movements, drastic changes, scene transitions, fast motion
+5. The motion should feel hypnotic and calming
+
+Output ONLY the video motion prompt, under 80 words. Focus purely on describing the motion/animation, not the static scene.`;
+            const llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${promptLLM}:generateContent?key=${apiKey}`;
+            const llmResponse = await fetch(llmUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ role: 'user', parts: [{ text: loopPromptRequest }] }],
+                }),
+            });
+            if (!llmResponse.ok) {
+                const errText = await llmResponse.text();
+                throw new Error(`LLM prompt crafting failed: ${errText}`);
+            }
+            const llmData = await llmResponse.json();
+            const loopPrompt = llmData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            if (!loopPrompt) {
+                throw new Error('Failed to craft loop video prompt');
+            }
+            console.log('[LoopVideo] Crafted loop prompt:', loopPrompt.substring(0, 150));
+            // Broadcast progress to renderer
+            const broadcastLoopProgress = (data) => {
+                const [mainWin] = electron_1.BrowserWindow.getAllWindows();
+                if (mainWin) {
+                    mainWin.webContents.send('loop-video-progress', data);
+                }
+            };
+            broadcastLoopProgress({
+                imageId,
+                status: 'crafted',
+                message: 'Crafted loop motion prompt',
+            });
+            // Step 3: Generate the video using Veo with loop mode
+            // Use Veo 3.1 for best loop quality (supports last_frame for seamless looping)
+            const videoModel = 'veo-3.1-generate-preview';
+            const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
+            // Build instance with image as start frame and loop mode
+            const instance = {
+                prompt: loopPrompt,
+                image: {
+                    bytesBase64Encoded: imageBase64,
+                    mimeType: imageMimeType,
+                },
+                // For loop mode: use same image as lastFrame for seamless loop
+                lastFrame: {
+                    bytesBase64Encoded: imageBase64,
+                    mimeType: imageMimeType,
+                },
+            };
+            const parameters = {
+                aspectRatio: '16:9',
+                durationSeconds: 5, // Shorter for seamless loops
+            };
+            const videoRequestBody = {
+                instances: [instance],
+                parameters,
+            };
+            console.log('[LoopVideo] Calling Veo API for loop generation...');
+            broadcastLoopProgress({
+                imageId,
+                status: 'generating',
+                message: 'Generating loop video...',
+            });
+            const videoResponse = await fetch(videoUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(videoRequestBody),
+            });
+            if (!videoResponse.ok) {
+                const errText = await videoResponse.text();
+                throw new Error(`Video generation request failed: ${errText}`);
+            }
+            const videoOpData = await videoResponse.json();
+            const operationName = videoOpData.name;
+            if (!operationName) {
+                throw new Error('No operation name returned from video generation');
+            }
+            console.log('[LoopVideo] Video generation started, operation:', operationName);
+            // Step 4: Poll for completion
+            const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+            const maxAttempts = 60; // 5 minutes with 5 second intervals
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                const pollResponse = await fetch(pollUrl);
+                if (!pollResponse.ok)
+                    continue;
+                const pollData = await pollResponse.json();
+                if (pollData.done) {
+                    console.log('[LoopVideo] Video generation complete!');
+                    // Extract video from response
+                    const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples ||
+                        pollData.response?.generatedVideos || [];
+                    if (generatedSamples.length === 0) {
+                        throw new Error('No video generated');
+                    }
+                    const sample = generatedSamples[0];
+                    const videoUri = sample.video?.uri || sample.uri;
+                    if (!videoUri) {
+                        throw new Error('No video URI in response');
+                    }
+                    // Download the video
+                    const downloadResponse = await fetch(videoUri, {
+                        headers: { 'x-goog-api-key': apiKey },
+                        redirect: 'follow',
+                    });
+                    if (!downloadResponse.ok) {
+                        throw new Error('Failed to download generated video');
+                    }
+                    const videoBuffer = await downloadResponse.arrayBuffer();
+                    // Save video to card-videos directory
+                    const userDataDir = electron_1.app.getPath('userData');
+                    const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
+                    await fs.promises.mkdir(videosDir, { recursive: true });
+                    const videoCardId = `loop-video-${Date.now()}`;
+                    const videoFileName = `${videoCardId}.mp4`;
+                    const videoPath = path.join(videosDir, videoFileName);
+                    await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
+                    console.log('[LoopVideo] Saved video to:', videoPath);
+                    // Step 5: Create child video card
+                    const videoCardRecord = {
+                        cardId: videoCardId,
+                        name: `${cardName} - Loop #${imageOrder + 1}`,
+                        mediaKind: 'video',
+                        mediaLocalPath: videoPath,
+                        createdAt: new Date().toISOString(),
+                        parentCardId: parentCardId,
+                        sourceImage: {
+                            imageId,
+                            imagePath,
+                            craftedPrompt: originalPrompt,
+                        },
+                        generationParams: {
+                            model: videoModel,
+                            loopMode: true,
+                            loopPrompt,
+                            durationSeconds: 5,
+                        },
+                    };
+                    // Save video card to Hypercore
+                    await (0, p2p_1.createCore)(videoCardId);
+                    await (0, p2p_1.appendToCore)(videoCardId, JSON.stringify(videoCardRecord));
+                    // Add to card library index
+                    const libraryEntry = {
+                        cardId: videoCardId,
+                        name: videoCardRecord.name,
+                        mediaKind: 'video',
+                        createdAt: videoCardRecord.createdAt,
+                        parentCardId: parentCardId,
+                        thumbnail: imagePath, // Use source image as thumbnail
+                        mediaLocalPath: videoPath,
+                    };
+                    await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+                    // Broadcast completion
+                    broadcastLoopProgress({
+                        imageId,
+                        status: 'complete',
+                        message: 'Loop video created!',
+                    });
+                    return {
+                        success: true,
+                        videoCardId,
+                        videoPath,
+                        loopPrompt,
+                        parentCardId,
+                        imageId,
+                    };
+                }
+                // Broadcast progress
+                const progress = Math.min(90, Math.round((attempt / maxAttempts) * 100));
+                broadcastLoopProgress({
+                    imageId,
+                    status: 'generating',
+                    progress,
+                    message: `Generating loop video... ${progress}%`,
+                });
+            }
+            throw new Error('Loop video generation timed out');
+        }
+        catch (error) {
+            console.error('[LoopVideo] Error:', error);
+            // Broadcast error - need to create helper here since it might not be defined yet
+            const [errWin] = electron_1.BrowserWindow.getAllWindows();
+            if (errWin) {
+                errWin.webContents.send('loop-video-progress', {
+                    imageId,
+                    status: 'error',
+                    message: error.message,
+                });
+            }
+            throw new Error(`Loop video creation failed: ${error.message}`);
+        }
+    });
     // Veo video generation models (image-to-video capable)
     const VEO_VIDEO_MODELS = [
         {

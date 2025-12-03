@@ -68,5 +68,11 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     extractVideoAudio: (data) => electron_1.ipcRenderer.invoke('extract-video-audio', data),
     // Image generation for cards (supports series continuation)
     generateImageForCard: (data) => electron_1.ipcRenderer.invoke('generate-image-for-card', data),
+    // Create looping video from an image
+    createLoopVideoForImage: (data) => electron_1.ipcRenderer.invoke('create-loop-video-for-image', data),
+    // Listen for loop video generation progress
+    onLoopVideoProgress: (listener) => {
+        electron_1.ipcRenderer.on('loop-video-progress', (_event, payload) => listener(payload));
+    },
 });
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? window.electronAPI : 'window not defined');
