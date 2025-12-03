@@ -11,6 +11,16 @@ interface GeminiRequestEntry {
     [key: string]: any;
 }
 
+interface ImageGenSettings {
+    defaultImageModel: string;
+    defaultPromptLLM: string;
+}
+
+const DEFAULT_IMAGE_GEN_SETTINGS: ImageGenSettings = {
+    defaultImageModel: 'gemini-2.0-flash-preview-image-generation',
+    defaultPromptLLM: 'gemini-1.5-pro',
+};
+
 const Admin: React.FC = () => {
     const [entries, setEntries] = useState<GeminiRequestEntry[]>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -20,6 +30,11 @@ const Admin: React.FC = () => {
     const [audioMode, setAudioMode] = useState<'transcribe' | 'realtime'>('transcribe');
     const [settingsStatus, setSettingsStatus] = useState('');
     const [settingsSaving, setSettingsSaving] = useState(false);
+    
+    // Image Generation Settings
+    const [imageGenSettings, setImageGenSettings] = useState<ImageGenSettings>(DEFAULT_IMAGE_GEN_SETTINGS);
+    const [availableModels, setAvailableModels] = useState<{name: string, displayName: string}[]>([]);
+    const [imageGenStatus, setImageGenStatus] = useState('');
 
     const loadEntries = async () => {
         if (!window.electronAPI || !window.electronAPI.geminiListRequests) {
@@ -56,11 +71,31 @@ const Admin: React.FC = () => {
                 if (settings && (settings.audioMode === 'transcribe' || settings.audioMode === 'realtime')) {
                     setAudioMode(settings.audioMode);
                 }
+                // Load image gen settings
+                if (settings?.imageGenSettings) {
+                    setImageGenSettings({
+                        defaultImageModel: settings.imageGenSettings.defaultImageModel || DEFAULT_IMAGE_GEN_SETTINGS.defaultImageModel,
+                        defaultPromptLLM: settings.imageGenSettings.defaultPromptLLM || DEFAULT_IMAGE_GEN_SETTINGS.defaultPromptLLM,
+                    });
+                }
             } catch (err) {
                 console.error('Failed to load admin settings', err);
             }
         };
         loadAdminSettings();
+        
+        // Load available models
+        const loadModels = async () => {
+            if (window.electronAPI?.listGeminiModels) {
+                try {
+                    const models = await window.electronAPI.listGeminiModels();
+                    setAvailableModels(models.filter((m: any) => !m.isVideoModel));
+                } catch (e) {
+                    console.error('Failed to load models', e);
+                }
+            }
+        };
+        loadModels();
     }, []);
 
     const handleSelect = (entry: GeminiRequestEntry) => {
@@ -87,6 +122,36 @@ const Admin: React.FC = () => {
             setSettingsSaving(false);
         }
     };
+    
+    const handleImageGenSettingsChange = async (key: keyof ImageGenSettings, value: string) => {
+        const newSettings = { ...imageGenSettings, [key]: value };
+        setImageGenSettings(newSettings);
+        
+        if (!window.electronAPI || !window.electronAPI.saveAdminSettings) {
+            return;
+        }
+        try {
+            setImageGenStatus('Saving...');
+            await window.electronAPI.saveAdminSettings({ imageGenSettings: newSettings });
+            setImageGenStatus('Saved');
+            setTimeout(() => setImageGenStatus(''), 2000);
+        } catch (err) {
+            console.error('Failed to save image gen settings', err);
+            setImageGenStatus('Failed to save');
+        }
+    };
+    
+    // Filter models for image generation (contains 'image' or 'nano-banana')
+    const imageModels = availableModels.filter(m => 
+        m.name.toLowerCase().includes('image') || m.name.toLowerCase().includes('nano-banana')
+    );
+    
+    // Filter models for LLM (text models, not image or video)
+    const llmModels = availableModels.filter(m => 
+        !m.name.toLowerCase().includes('image') && 
+        !m.name.toLowerCase().includes('nano-banana') &&
+        !m.name.toLowerCase().includes('veo')
+    );
 
     const handleSave = async () => {
         if (!window.electronAPI || !window.electronAPI.geminiSaveRequest) {
@@ -237,6 +302,77 @@ const Admin: React.FC = () => {
                                             <span className="text-xs font-mono text-gray-300">REALTIME</span>
                                         </div>
                                     </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {/* Image Generation Settings */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-cyan-400 font-bold tracking-widest text-xs uppercase mb-2">
+                                <rux-icon icon="image" size="extra-small"></rux-icon>
+                                Image Generation
+                            </div>
+                            <div className="glass-panel p-4 rounded-xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 opacity-60"></div>
+                                <div className="flex items-center justify-between mb-3">
+                                    <span className="text-xs font-bold text-white">AI IMAGE DEFAULTS</span>
+                                    {imageGenStatus && (
+                                        <span className={`text-[10px] font-mono animate-pulse ${imageGenStatus === 'Saved' ? 'text-green-400' : 'text-cyan-400'}`}>
+                                            {imageGenStatus}
+                                        </span>
+                                    )}
+                                </div>
+                                
+                                {/* Image Model Selector */}
+                                <div className="mb-4">
+                                    <label className="text-[10px] text-gray-400 uppercase tracking-wider block mb-1">
+                                        Image Generation Model
+                                    </label>
+                                    <select
+                                        value={imageGenSettings.defaultImageModel}
+                                        onChange={(e) => handleImageGenSettingsChange('defaultImageModel', e.target.value)}
+                                        className="w-full bg-gray-900/80 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200 focus:border-cyan-500 focus:outline-none"
+                                        title="Select the model for generating images"
+                                    >
+                                        {imageModels.length > 0 ? (
+                                            imageModels.map(m => (
+                                                <option key={m.name} value={m.name}>{m.displayName}</option>
+                                            ))
+                                        ) : (
+                                            <>
+                                                <option value="gemini-2.0-flash-preview-image-generation">Gemini 2.0 Flash Image</option>
+                                                <option value="imagen-3.0-generate-002">Imagen 3</option>
+                                            </>
+                                        )}
+                                    </select>
+                                </div>
+                                
+                                {/* Prompt LLM Selector */}
+                                <div>
+                                    <label className="text-[10px] text-gray-400 uppercase tracking-wider block mb-1">
+                                        Prompt Crafting LLM
+                                    </label>
+                                    <select
+                                        value={imageGenSettings.defaultPromptLLM}
+                                        onChange={(e) => handleImageGenSettingsChange('defaultPromptLLM', e.target.value)}
+                                        className="w-full bg-gray-900/80 border border-gray-700 rounded px-3 py-2 text-xs text-gray-200 focus:border-cyan-500 focus:outline-none"
+                                        title="Select the LLM model for crafting image prompts"
+                                    >
+                                        {llmModels.length > 0 ? (
+                                            llmModels.map(m => (
+                                                <option key={m.name} value={m.name}>{m.displayName}</option>
+                                            ))
+                                        ) : (
+                                            <>
+                                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                                                <option value="gemini-pro-latest">Gemini Pro Latest</option>
+                                            </>
+                                        )}
+                                    </select>
+                                </div>
+                                
+                                <div className="mt-3 text-[9px] text-gray-500 font-mono">
+                                    Used for one-click "Create Image" on cards
                                 </div>
                             </div>
                         </div>

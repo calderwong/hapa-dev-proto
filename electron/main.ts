@@ -21,8 +21,14 @@ const WIKI_CORE_NAME = 'wormhole-wiki-entries';
 
 type AudioMode = 'transcribe' | 'realtime';
 
+interface ImageGenSettings {
+  defaultImageModel: string;
+  defaultPromptLLM: string;
+}
+
 interface AdminSettings {
   audioMode: AudioMode;
+  imageGenSettings?: ImageGenSettings;
 }
 
 interface LlamaSettingsInternal {
@@ -411,11 +417,14 @@ const getAdminSettings = (): AdminSettings => {
   const audioMode: AudioMode = stored.audioMode === 'realtime' ? 'realtime' : 'transcribe';
   return {
     audioMode,
+    imageGenSettings: stored.imageGenSettings,
   };
 };
 
-const saveAdminSettings = (settings: AdminSettings) => {
-  store.set(ADMIN_SETTINGS_KEY, settings);
+const saveAdminSettings = (settings: Partial<AdminSettings>) => {
+  const existing = getAdminSettings();
+  const merged = { ...existing, ...settings };
+  store.set(ADMIN_SETTINGS_KEY, merged);
 };
 
 const OPENAI_CHAT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
