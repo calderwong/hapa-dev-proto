@@ -767,7 +767,7 @@ function createWindow() {
     });
     if (electron_is_dev_1.default) {
         win.loadURL('http://localhost:5173');
-        win.webContents.openDevTools(); // Temporarily enable for debugging icons
+        // win.webContents.openDevTools(); // Use F12 to toggle
     }
     else {
         win.loadFile(path.join(__dirname, '../dist-renderer/index.html'));

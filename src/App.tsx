@@ -5,7 +5,7 @@ import Layout from './components/Layout';
 import Chat from './pages/Chat';
 import Settings from './pages/Settings';
 import { initFirebase } from './firebase';
-import { ToastProvider } from './context/ToastContext';
+// import { ToastProvider } from './context/ToastContext'; // Temporarily disabled - causes white screen
 
 import P2P from './pages/P2P';
 import Admin from './pages/Admin';
@@ -35,28 +35,26 @@ function App() {
   }, []);
 
   return (
-    <ToastProvider>
-      <Router>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Chat />} />
-            <Route path="archives" element={<Archives />} />
-            <Route path="p2p" element={<P2P />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="admin" element={<Admin />} />
-            <Route path="local-llama" element={<LocalLlama />} />
-            <Route path="revid" element={<Revid />} />
-            <Route path="revid-media" element={<RevidMedia />} />
-            <Route path="cards" element={<CardLibrary />} />
-            <Route path="forge" element={<Forge />} />
-            <Route path="wormhole" element={<WormholeAstro />} />
-            <Route path="wiki" element={<Wiki />} />
-            <Route path="profile" element={<Profile />} />
-            <Route path="pets" element={<Pets />} />
-          </Route>
-        </Routes>
-      </Router>
-    </ToastProvider>
+    <Router>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Chat />} />
+          <Route path="archives" element={<Archives />} />
+          <Route path="p2p" element={<P2P />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="admin" element={<Admin />} />
+          <Route path="local-llama" element={<LocalLlama />} />
+          <Route path="revid" element={<Revid />} />
+          <Route path="revid-media" element={<RevidMedia />} />
+          <Route path="cards" element={<CardLibrary />} />
+          <Route path="forge" element={<Forge />} />
+          <Route path="wormhole" element={<WormholeAstro />} />
+          <Route path="wiki" element={<Wiki />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="pets" element={<Pets />} />
+        </Route>
+      </Routes>
+    </Router>
   );
 }
 

@@ -15,6 +15,20 @@
 - Icons still missing
 **Conclusion:** This was NOT the root cause.
 
+### Hypothesis 5: ToastProvider/Context Causes White Screen (CONFIRMED ✅)
+**Theory:** Importing ToastProvider and wrapping the app causes a runtime crash
+**Evidence:**
+- Build passes without errors
+- App shows white screen with native Electron menu (renderer crash)
+- Removing ToastProvider wrapper fixes the app
+**Root Cause:** Unknown runtime issue in ToastContext or Toast component. Possibly:
+- Something in Toast.tsx that fails at runtime
+- Import cycle issue
+- Component that throws during render
+**Fix:** Do NOT use ToastProvider until properly debugged
+
+---
+
 ### Hypothesis 2: Vite Dev Server Stale State (CONFIRMED ✅)
 **Theory:** The running Vite dev server or Electron process has cached stale state. File changes don't take effect until full restart.
 **Evidence:**

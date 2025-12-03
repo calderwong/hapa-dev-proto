@@ -83,8 +83,8 @@ const Forge: React.FC = () => {
     const [generatedVisualUrl, setGeneratedVisualUrl] = useState<string | null>(null);
     const [generatedVisualPath, setGeneratedVisualPath] = useState<string | null>(null);
     
-    // Model Selection
-    const [selectedModel, setSelectedModel] = useState<string>('gemini-2.0-flash-exp');
+    // Model Selection - Default to 1.5 Pro for better JSON compliance
+    const [selectedModel, setSelectedModel] = useState<string>('gemini-1.5-pro');
     const [availableModels, setAvailableModels] = useState<{name: string, displayName: string}[]>([]);
 
     useEffect(() => {
@@ -95,11 +95,11 @@ const Forge: React.FC = () => {
                     const models = await window.electronAPI.listGeminiModels();
                     const textModels = models.filter((m: any) => !m.isVideoModel);
                     setAvailableModels(textModels);
-                    // Default to 2.0 Flash Exp if available, else 1.5 Pro
-                    if (textModels.some((m: any) => m.name === 'gemini-2.0-flash-exp')) {
-                        setSelectedModel('gemini-2.0-flash-exp');
-                    } else if (textModels.some((m: any) => m.name === 'gemini-1.5-pro')) {
+                    // Default to 1.5 Pro for best JSON instruction following
+                    if (textModels.some((m: any) => m.name === 'gemini-1.5-pro')) {
                         setSelectedModel('gemini-1.5-pro');
+                    } else if (textModels.some((m: any) => m.name === 'gemini-2.0-flash-exp')) {
+                        setSelectedModel('gemini-2.0-flash-exp');
                     }
                 } catch (e) {
                     console.error("Failed to fetch models", e);
@@ -313,35 +313,56 @@ const Forge: React.FC = () => {
         if (!forgedAvatar || !window.electronAPI?.generateVideoWithGemini) return;
         
         setManifesting(true);
+        console.log('[Forge Video] Starting video generation for:', forgedAvatar.name);
+        
         try {
             // Use Veo to generate a "Motion Portrait"
+            const videoPrompt = `A cinematic, mystical portrait of ${forgedAvatar.name}, ${forgedAvatar.archetype}. ${forgedAvatar.visualPrompt}. 8k resolution, highly detailed, rpg character art style.`;
+            console.log('[Forge Video] Prompt:', videoPrompt);
+            
             const result = await window.electronAPI.generateVideoWithGemini({
-                prompt: `A cinematic, mystical portrait of ${forgedAvatar.name}, ${forgedAvatar.archetype}. ${forgedAvatar.visualPrompt}. 8k resolution, highly detailed, rpg character art style.`,
+                prompt: videoPrompt,
                 durationSeconds: '8', // Use 8s as it's a standard supported duration
                 aspectRatio: '9:16', // Portrait mode
                 loopMode: true // Implicitly handled by backend if supported, or we just loop the video
             });
+            
+            console.log('[Forge Video] Result:', result);
 
             if (result && result.localPath) {
                 const path = result.localPath;
-                const url = `file:///${path.replace(/\\/g, '/')}`;
+                // Ensure proper file URL format for Electron
+                const normalizedPath = path.replace(/\\/g, '/');
+                const url = normalizedPath.startsWith('file://') ? normalizedPath : `file:///${normalizedPath}`;
                 
+                console.log('[Forge Video] Path:', path);
+                console.log('[Forge Video] URL:', url);
+                
+                // Update state
                 setGeneratedVisualPath(path);
                 setGeneratedVisualUrl(url);
                 
                 // Persist to avatar state immediately so it doesn't get lost
-                setForgedAvatar(prev => prev ? ({
-                    ...prev,
-                    video: {
-                        localPath: path,
-                        mimeType: result.mimeType || 'video/mp4'
-                    }
-                }) : null);
+                setForgedAvatar(prev => {
+                    if (!prev) return null;
+                    const updated = {
+                        ...prev,
+                        video: {
+                            localPath: path,
+                            mimeType: result.mimeType || 'video/mp4'
+                        }
+                    };
+                    console.log('[Forge Video] Updated avatar state:', updated.video);
+                    return updated;
+                });
 
                 showToast('success', 'Manifestation Complete', 'The avatar has taken physical form.');
+            } else {
+                console.error('[Forge Video] No localPath in result:', result);
+                showToast('error', 'Video Error', 'Video was generated but path is missing.');
             }
         } catch (e) {
-            console.error("Manifestation failed:", e);
+            console.error("[Forge Video] Manifestation failed:", e);
             showToast('error', 'Manifestation Failed', 'The visual form could not be stabilized.');
         } finally {
             setManifesting(false);
@@ -523,17 +544,36 @@ const Forge: React.FC = () => {
 
         try {
             // 1. Compile Inputs
-            const formatStack = (stack: StackedCard[]) => stack.map((item, i) => {
+            const formatStack = (stack: StackedCard[], stackName: string) => stack.map((item, i) => {
                 const card = item.card;
-                const rec = card.cardRecord || {};
+                const rec = card.cardRecord || card.raw || {};
                 
-                // Extract rich context
+                // DEBUG: Log what we have
+                console.log(`[Forge Debug] ${stackName} Card ${i+1}:`, {
+                    name: card.name,
+                    mediaKind: card.mediaKind,
+                    hasCardRecord: !!card.cardRecord,
+                    hasRaw: !!card.raw,
+                    recordKeys: Object.keys(rec)
+                });
+                
+                // Extract rich context - try multiple sources
                 let context = '';
+                
+                // Try card record fields
                 if (rec.text) context = rec.text;
                 else if (rec.content) context = rec.content; // Message/Note
                 else if (rec.description) context = rec.description; // Wiki/Entity
                 else if (rec.bio) context = rec.bio; // Pet/Avatar
+                else if (rec.messageContent) context = rec.messageContent;
                 else if (card.messageContent) context = card.messageContent;
+                
+                // Try raw data if no context yet
+                if (!context && card.raw) {
+                    if (card.raw.text) context = card.raw.text;
+                    else if (card.raw.content) context = card.raw.content;
+                    else if (card.raw.description) context = card.raw.description;
+                }
                 
                 // Fallback to extracted text or tags
                 if (!context && rec.extractedText) context = `[OCR]: ${rec.extractedText.slice(0, 300)}...`;
@@ -543,22 +583,29 @@ const Forge: React.FC = () => {
                 if (!context) {
                     if (card.mediaKind === 'image') context = `[Visual Memory] ${card.name}`;
                     else if (card.mediaKind === 'video') context = `[Motion Memory] ${card.name}`;
-                    else context = 'No decipherable content';
+                    else context = `[Data Card] ${card.name || 'Untitled'} - No text content found`;
                 }
 
+                console.log(`[Forge Debug] ${stackName} Card ${i+1} Context:`, context.slice(0, 200));
                 return `[${i+1}] ${card.name || 'Untitled'} | Type: ${card.mediaKind || 'Data'} | Context: ${context.slice(0, 500)}`;
             }).join('\n');
             
+            const redContent = formatStack(redStack, 'RED');
+            const blueContent = formatStack(blueStack, 'BLUE');
+            const greenContent = formatStack(greenStack, 'GREEN');
+            
             const inputs = `
 RED STACK (LOVE/DESIRE - Primary Motivations):
-${formatStack(redStack)}
+${redContent || '(Empty - no cards in this pillar)'}
 
 BLUE STACK (TRUTH/MEMORY - Context & Facts):
-${formatStack(blueStack)}
+${blueContent || '(Empty - no cards in this pillar)'}
 
 GREEN STACK (CONVICTION/EXECUTION - Methods & Skills):
-${formatStack(greenStack)}
+${greenContent || '(Empty - no cards in this pillar)'}
             `;
+            
+            console.log('[Forge Debug] Full LLM Input:', inputs);
 
             setForgingStep('Synthesizing Soul Matrix...');
 
