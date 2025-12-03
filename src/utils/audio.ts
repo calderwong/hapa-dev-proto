@@ -140,3 +140,54 @@ export const playDropdownSelectSound = () => {
         console.error('Audio play failed', e);
     }
 };
+
+export const playPickUpSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        createTone(ctx, {
+            type: 'triangle',
+            startFreq: 400,
+            endFreq: 800,
+            duration: 0.15,
+            startGain: 0.06,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playDropSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        createTone(ctx, {
+            type: 'square',
+            startFreq: 300,
+            endFreq: 80,
+            duration: 0.15,
+            startGain: 0.08,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playForgeHoverSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        createTone(ctx, {
+            type: 'sawtooth',
+            startFreq: 1200,
+            endFreq: 1400,
+            duration: 0.03,
+            startGain: 0.015,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};

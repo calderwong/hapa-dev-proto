@@ -11,6 +11,7 @@ interface NavItemConfig {
 
 const NAV_ITEMS: NavItemConfig[] = [
     { path: '/', label: 'Chat', icon: 'chat' },
+    { path: '/forge', label: "Hapa's Forge", icon: 'whatshot' },
     { path: '/cards', label: 'Card Library', icon: 'photo-library' },
     { path: '/wormhole', label: 'Wormhole', icon: 'cloud-download' },
 
