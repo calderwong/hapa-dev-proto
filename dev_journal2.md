@@ -1462,3 +1462,74 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 **Tags:** #feature #ai #image-generation #card-library #ux #gemini
 **Est. Avg. Human Dev Time:** 2.0 hours
 
+## Entry 28 – Image Set Generation & One-Click Loop Video
+**Prompt:** "Generate Next Image as series continuation + One-click loop video creation from card images"
+
+**Summary of actions:**
+
+### Part 1: Image Set Generation
+- **Data Model Enhancement:**
+  - Added `imageSet` structure: `{ images[], heroIndex, displayOrder[] }`
+  - Each image tracks: `id`, `localPath`, `craftedPrompt`, `creationOrder`, `loopVideo`
+  - Migration logic for legacy single `image` field
+
+- **Series Continuation:**
+  - Button changes to "Generate Next Image (#N)" after first image
+  - Passes `seriesContext` with previous prompt to backend
+  - LLM crafts continuation prompts for visual coherence
+  
+- **Image Gallery UI:**
+  - 3-column grid showing all images in set
+  - Hero selection with amber ★ badge and glow
+  - Reorder controls (left/right arrows)
+  - Creation order badges (#1, #2, etc.)
+
+### Part 2: One-Click Loop Video
+- **New IPC Handler (`create-loop-video-for-image`):**
+  - Reads source image as base64
+  - LLM crafts loop-optimized motion prompt
+  - Calls Veo 3.1 with same image as start/end frame (loop mode)
+  - Saves video to `wormhole/card-videos/`
+  - Creates child video card with parent relationship
+  - Broadcasts progress events for real-time UI updates
+
+- **Loop Prompt Engineering:**
+  - Focus on subtle, continuous ambient motion
+  - Floating particles, light breathing, atmospheric effects
+  - Static subject, alive environment
+
+- **UI Features:**
+  - 🎬 Movie icon button in hover controls
+  - Purple pulsing border during generation
+  - Purple "LOOP" badge on images with videos
+  - Hover plays video preview inline (muted, looping)
+  - Click navigates to video card page
+
+- **Video Card Details:**
+  - Shows "Loop Video Details" section
+  - AI-Crafted Motion Prompt (purple styled box)
+  - Original Image Prompt
+  - "← View Parent Card" navigation link
+  - Model info (Veo 3.1)
+
+- **Parent-Child Relationships:**
+  - Added `parentCardId` to CardIndexEntry
+  - Video cards linked to source image's card
+  - Bidirectional navigation
+
+**Files Modified:**
+- `electron/main.ts` - Series context, loop video IPC handler
+- `electron/preload.ts` - New IPC methods exposed
+- `src/pages/CardLibrary.tsx` - Image gallery, loop controls, navigation
+- `docs/CARD_IMAGE_GENERATION_DESIGN.md` - Design notes
+- `docs/IMAGE_LOOP_VIDEO_DESIGN.md` - New design document
+
+**Outcome:**
+- Cards can have multiple AI-generated images as a visual series
+- One-click creation of mesmerizing loop videos from any image
+- Full parent-child card hierarchy for derived media
+- Hover video preview, click to navigate to video card
+
+**Tags:** #feature #ai #video-generation #veo #loop #image-set #card-hierarchy #ux
+**Est. Avg. Human Dev Time:** 4.0 hours
+
