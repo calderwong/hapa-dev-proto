@@ -105,6 +105,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('extract-video-frame', data),
     extractVideoAudio: (data: { videoPath: string }) => 
         ipcRenderer.invoke('extract-video-audio', data),
+    // Image generation for cards
+    generateImageForCard: (data: {
+        cardContext: {
+            name: string;
+            mediaKind?: string;
+            text?: string;
+            tags?: string[];
+            messageContent?: string;
+        };
+    }) => ipcRenderer.invoke('generate-image-for-card', data),
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

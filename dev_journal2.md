@@ -1416,3 +1416,49 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 **Tags:** #bugfix #llm #video #forge #debugging #gemini
 **Est. Avg. Human Dev Time:** 1.5 hours
 
+## Entry 27 – One-Click Card Image Generation Feature
+**Prompt:** "Add a feature for existing cards that's accessible in the card inspector: 'Create Image'. Create settings in the admin panel for the default API/model to use... A user should be able to just one-click take the context from the 'Card' and craft an image generation prompt for the image model..."
+
+**Summary of actions:**
+
+- **Design Document (`docs/CARD_IMAGE_GENERATION_DESIGN.md`):**
+    - Created comprehensive design doc covering UX, pipeline, API notes, and implementation plan.
+    - Defined state machine: idle → crafting → generating → complete/error.
+    - Specified neon glow animation concepts for magical feel.
+
+- **Admin Panel Settings (`src/pages/Admin.tsx`):**
+    - Added Image Generation settings section with cyan accent.
+    - Image Model selector (Gemini 2.0 Flash Image, Imagen 3).
+    - Prompt Crafting LLM selector (Gemini 1.5 Pro, etc.).
+    - Auto-save on selection change with status feedback.
+
+- **Backend IPC Handler (`electron/main.ts`):**
+    - Added `generate-image-for-card` IPC handler.
+    - Step 1: Extract context from card (name, text, tags, messageContent).
+    - Step 2: Call LLM to craft optimal image prompt.
+    - Step 3: Call image model with crafted prompt.
+    - Step 4: Save image to `wormhole/card-images/` and return path.
+    - Updated `AdminSettings` interface to include `imageGenSettings`.
+
+- **Frontend UI (`src/pages/CardLibrary.tsx`):**
+    - Added "AI Image" section in card inspector panel.
+    - "Create Image" / "Regenerate Image" button with state-based styling.
+    - States: crafting (psychology icon), generating (brush icon), complete (check), error.
+    - Neon pulse animation during generation.
+    - Updates card and reloads to show new image.
+
+- **CSS Animations (`src/index.css`):**
+    - Added `@keyframes neon-pulse` with cyan→purple color shift.
+    - Added `.animate-neon-pulse` class for magical generation effect.
+
+- **Preload (`electron/preload.ts`):**
+    - Exposed `generateImageForCard` method to renderer.
+
+**Outcome:**
+- Users can now one-click generate AI images for any card with text/tags.
+- Pipeline: Card Context → LLM Prompt Crafting → Image Generation → Card Update.
+- Visual feedback at every step with animated neon glow during generation.
+
+**Tags:** #feature #ai #image-generation #card-library #ux #gemini
+**Est. Avg. Human Dev Time:** 2.0 hours
+

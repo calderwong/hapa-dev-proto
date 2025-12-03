@@ -88,6 +88,10 @@ const CardLibrary: React.FC = () => {
     const [extracting, setExtracting] = useState<{ [key: string]: boolean }>({});
     const [extractedChildren, setExtractedChildren] = useState<{ [cardId: string]: string[] }>({});
     
+    // Image Generation State
+    const [imageGenState, setImageGenState] = useState<'idle' | 'crafting' | 'generating' | 'complete' | 'error'>('idle');
+    const [imageGenError, setImageGenError] = useState<string | null>(null);
+    
     // Navigation Animation State
     const [navAnimation, setNavAnimation] = useState<'none' | 'zoom-to-child' | 'zoom-to-parent' | 'slide-left' | 'slide-right'>('none');
     const [pendingCard, setPendingCard] = useState<CardIndexEntry | null>(null);
@@ -844,6 +848,75 @@ const CardLibrary: React.FC = () => {
         });
     };
 
+    // Generate image for card using AI
+    const handleGenerateImage = async () => {
+        if (!selected || !window.electronAPI?.generateImageForCard) return;
+        
+        // Extract context from the card
+        const rec = selected.cardRecord || selected.raw || {};
+        const cardContext = {
+            name: selected.name || 'Untitled',
+            mediaKind: selected.mediaKind,
+            text: rec.text || rec.content || rec.description || rec.bio || '',
+            tags: rec.tags || [],
+            messageContent: rec.message?.content || selected.messageContent || '',
+        };
+        
+        // Check if there's enough context
+        if (!cardContext.text && !cardContext.messageContent && (!cardContext.tags || cardContext.tags.length === 0)) {
+            setImageGenError('Not enough context to generate an image. Add some text or tags to this card.');
+            setImageGenState('error');
+            setTimeout(() => setImageGenState('idle'), 3000);
+            return;
+        }
+        
+        try {
+            setImageGenState('crafting');
+            setImageGenError(null);
+            
+            // Small delay for UX - show "crafting" state
+            await new Promise(r => setTimeout(r, 500));
+            setImageGenState('generating');
+            
+            const result = await window.electronAPI.generateImageForCard({ cardContext });
+            
+            if (result.success && result.localPath) {
+                // Update the card with the new image
+                const updatedRecord = {
+                    ...selected.cardRecord,
+                    image: {
+                        localPath: result.localPath,
+                        mimeType: result.mimeType,
+                        generatedPrompt: result.craftedPrompt,
+                        generatedAt: new Date().toISOString(),
+                    },
+                };
+                
+                // Save to Hypercore
+                if (window.electronAPI.p2pAppend && selected.coreName) {
+                    await window.electronAPI.p2pAppend(selected.coreName, updatedRecord);
+                }
+                
+                setImageGenState('complete');
+                
+                // Reload cards to show the new image
+                await loadCards(selected.cardId);
+                
+                setTimeout(() => setImageGenState('idle'), 2000);
+            }
+        } catch (err: any) {
+            console.error('[ImageGen] Error:', err);
+            setImageGenError(err?.message || 'Failed to generate image');
+            setImageGenState('error');
+            setTimeout(() => setImageGenState('idle'), 4000);
+        }
+    };
+    
+    // Check if card already has an image
+    const cardHasImage = (card: CardIndexEntry): boolean => {
+        return !!(card.thumbnail || card.mediaLocalPath || card.cardRecord?.image?.localPath);
+    };
+
     // Drag Handlers
     const handleDragStart = (e: React.DragEvent, card: CardIndexEntry) => {
         setDraggedCard(card);
@@ -1377,6 +1450,60 @@ const CardLibrary: React.FC = () => {
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+
+                                    <div className="h-px bg-gray-800"></div>
+
+                                    {/* AI Image Generation Panel */}
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-2 text-cyan-400">
+                                            <rux-icon icon="auto-awesome" size="small"></rux-icon>
+                                            <h3 className="font-bold uppercase tracking-wider text-sm">AI Image</h3>
+                                        </div>
+                                        <button
+                                            onClick={handleGenerateImage}
+                                            disabled={imageGenState !== 'idle' && imageGenState !== 'error'}
+                                            className={`w-full p-4 rounded-lg border-2 transition-all duration-300 flex items-center justify-center gap-3 ${
+                                                imageGenState === 'complete'
+                                                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                                                    : imageGenState === 'error'
+                                                        ? 'bg-red-500/20 border-red-500/50 text-red-400'
+                                                        : imageGenState === 'crafting' || imageGenState === 'generating'
+                                                            ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 animate-neon-pulse'
+                                                            : cardHasImage(selected)
+                                                                ? 'bg-gray-800/50 border-gray-600 text-gray-400 hover:border-cyan-500/50 hover:text-cyan-400 hover:bg-cyan-500/10'
+                                                                : 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)]'
+                                            }`}
+                                        >
+                                            {imageGenState === 'crafting' ? (
+                                                <>
+                                                    <rux-icon icon="psychology" size="small" className="animate-pulse"></rux-icon>
+                                                    <span className="text-sm font-bold uppercase tracking-wider">Crafting Vision...</span>
+                                                </>
+                                            ) : imageGenState === 'generating' ? (
+                                                <>
+                                                    <rux-icon icon="brush" size="small" className="animate-spin"></rux-icon>
+                                                    <span className="text-sm font-bold uppercase tracking-wider">Manifesting Image...</span>
+                                                </>
+                                            ) : imageGenState === 'complete' ? (
+                                                <>
+                                                    <rux-icon icon="check-circle" size="small"></rux-icon>
+                                                    <span className="text-sm font-bold uppercase tracking-wider">Image Created!</span>
+                                                </>
+                                            ) : imageGenState === 'error' ? (
+                                                <>
+                                                    <rux-icon icon="error" size="small"></rux-icon>
+                                                    <span className="text-xs">{imageGenError || 'Generation failed'}</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <rux-icon icon="auto-awesome" size="small"></rux-icon>
+                                                    <span className="text-sm font-bold uppercase tracking-wider">
+                                                        {cardHasImage(selected) ? 'Regenerate Image' : 'Create Image'}
+                                                    </span>
+                                                </>
+                                            )}
+                                        </button>
                                     </div>
 
                                     <div className="h-px bg-gray-800"></div>
