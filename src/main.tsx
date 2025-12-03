@@ -5,12 +5,13 @@ import App from './App.tsx'
 import { setupAstro } from './astro/setupAstro'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
-setupAstro()
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-)
+// Wait for Astro web components to be defined before rendering React
+setupAstro().then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </StrictMode>,
+  )
+})
