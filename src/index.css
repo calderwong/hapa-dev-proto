@@ -421,6 +421,27 @@ button:focus-visible {
   animation: neon-pulse 1.5s ease-in-out infinite;
 }
 
+/* Neon glow for images that have loop videos */
+@keyframes loop-video-glow {
+  0%, 100% {
+    box-shadow: 
+      0 0 8px rgba(168, 85, 247, 0.6),
+      0 0 16px rgba(168, 85, 247, 0.4),
+      inset 0 0 4px rgba(168, 85, 247, 0.2);
+  }
+  50% {
+    box-shadow: 
+      0 0 12px rgba(192, 38, 211, 0.8),
+      0 0 24px rgba(192, 38, 211, 0.5),
+      inset 0 0 6px rgba(192, 38, 211, 0.3);
+  }
+}
+
+.has-loop-video {
+  animation: loop-video-glow 2s ease-in-out infinite;
+  border-color: rgba(168, 85, 247, 0.6) !important;
+}
+
 /* Mini preview hover */
 @keyframes mini-preview-hover {
   from {

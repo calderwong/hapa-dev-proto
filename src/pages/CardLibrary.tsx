@@ -98,6 +98,19 @@ const CardLibrary: React.FC = () => {
     const [loopGenStatus, setLoopGenStatus] = useState<{ [imageId: string]: { status: string; progress?: number; message?: string } }>({});
     const [hoveredImageId, setHoveredImageId] = useState<string | null>(null);
     
+    // Global Mute State (persisted to localStorage)
+    const [globalMuted, setGlobalMuted] = useState<boolean>(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('globalMuted') === 'true';
+        }
+        return true; // Default muted
+    });
+    
+    // Persist mute state
+    useEffect(() => {
+        localStorage.setItem('globalMuted', String(globalMuted));
+    }, [globalMuted]);
+    
     // Navigation Animation State
     const [navAnimation, setNavAnimation] = useState<'none' | 'zoom-to-child' | 'zoom-to-parent' | 'slide-left' | 'slide-right'>('none');
     const [pendingCard, setPendingCard] = useState<CardIndexEntry | null>(null);
@@ -572,7 +585,33 @@ const CardLibrary: React.FC = () => {
         if (card.mediaKind === 'video') {
             const src = card.mediaLocalPath ? toFileUrl(card.mediaLocalPath) : card.mediaRemoteUrl;
             if (src) {
-                return <video src={src} className={className} controls={large} />;
+                return (
+                    <div className={`${className} relative`}>
+                        <video 
+                            src={src} 
+                            className="w-full h-full object-cover"
+                            autoPlay={large}
+                            loop={large}
+                            muted={globalMuted}
+                            playsInline
+                            controls={large}
+                        />
+                        {/* Mute toggle button */}
+                        {large && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setGlobalMuted(!globalMuted); }}
+                                className="absolute bottom-4 right-4 p-2 bg-black/70 hover:bg-black/90 rounded-full transition-colors"
+                                title={globalMuted ? 'Unmute' : 'Mute'}
+                            >
+                                <rux-icon 
+                                    icon={globalMuted ? 'volume-off' : 'volume-up'} 
+                                    size="small"
+                                    className="text-white"
+                                ></rux-icon>
+                            </button>
+                        )}
+                    </div>
+                );
             }
         }
 
@@ -901,12 +940,66 @@ const CardLibrary: React.FC = () => {
         return { images: [], heroIndex: 0, displayOrder: [] };
     };
 
+    // Collect context from parent cards for richer generation
+    const collectParentContext = async (card: CardIndexEntry): Promise<{ names: string[]; summaries: string[]; tags: string[] }> => {
+        const names: string[] = [];
+        const summaries: string[] = [];
+        const tags: string[] = [];
+        
+        let currentParentId = card.cardRecord?.parentCardId || card.parentCardId;
+        let depth = 0;
+        const maxDepth = 5; // Limit traversal depth
+        
+        while (currentParentId && depth < maxDepth) {
+            // Try to find parent in loaded cards first
+            let parentCard = cards.find(c => c.cardId === currentParentId);
+            
+            // If not found, try to load from Hypercore
+            if (!parentCard && window.electronAPI?.p2pRead) {
+                try {
+                    const records = await window.electronAPI.p2pRead(currentParentId);
+                    if (Array.isArray(records) && records.length > 0) {
+                        for (let i = records.length - 1; i >= 0; i--) {
+                            try {
+                                const parsed = JSON.parse(records[i]);
+                                if (parsed) {
+                                    parentCard = { cardId: currentParentId, cardRecord: parsed } as any;
+                                    break;
+                                }
+                            } catch { /* skip */ }
+                        }
+                    }
+                } catch { /* skip */ }
+            }
+            
+            if (parentCard) {
+                const pRec = parentCard.cardRecord || {};
+                if (parentCard.name || pRec.name) names.push(parentCard.name || pRec.name);
+                if (pRec.summaries?.length > 0) {
+                    summaries.push(...pRec.summaries.map((s: any) => s.text || s.medium || s.short || '').filter(Boolean).slice(0, 2));
+                }
+                if (pRec.tags?.length > 0) {
+                    tags.push(...pRec.tags.slice(0, 5));
+                }
+                currentParentId = pRec.parentCardId || parentCard.parentCardId;
+                depth++;
+            } else {
+                break;
+            }
+        }
+        
+        return { names, summaries, tags };
+    };
+
     // Generate image for card using AI (supports series continuation)
     const handleGenerateImage = async () => {
         if (!selected || !window.electronAPI?.generateImageForCard) return;
         
         // Extract context from the card - ENHANCED to handle wormhole documents
         const rec = selected.cardRecord || selected.raw || {};
+        
+        // Collect parent context for child cards (like video cards)
+        const parentContext = await collectParentContext(selected);
         
         // 1. Try direct text fields
         let textContent = rec.text || rec.content || rec.description || rec.bio || '';
@@ -939,11 +1032,25 @@ const CardLibrary: React.FC = () => {
         // 6. Get card kind for context
         const mediaKind = selected.mediaKind || rec.kind || 'unknown';
         
+        // 7. For video cards, include the loop prompt as context
+        const loopVideoContext = rec.generationParams?.loopPrompt || rec.sourceImage?.craftedPrompt || '';
+        
+        // 8. Merge parent context into tags and text
+        const combinedTags = [...new Set([...tags, ...parentContext.tags])];
+        const combinedText = [
+            textContent,
+            ...parentContext.summaries,
+            loopVideoContext,
+        ].filter(Boolean).join('\n\n');
+        const combinedName = parentContext.names.length > 0 
+            ? `${name} (from ${parentContext.names[0]})`
+            : name;
+        
         const cardContext = {
-            name,
+            name: combinedName,
             mediaKind,
-            text: textContent,
-            tags,
+            text: combinedText,
+            tags: combinedTags,
             messageContent,
         };
         
@@ -1907,9 +2014,11 @@ const CardLibrary: React.FC = () => {
                                                                     className={`relative group aspect-square rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
                                                                         isGeneratingLoop
                                                                             ? 'border-purple-500 animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]'
-                                                                            : isHero 
-                                                                                ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
-                                                                                : 'border-gray-700 hover:border-cyan-500/50'
+                                                                            : hasLoop
+                                                                                ? 'has-loop-video'
+                                                                                : isHero 
+                                                                                    ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
+                                                                                    : 'border-gray-700 hover:border-cyan-500/50'
                                                                     }`}
                                                                     onMouseEnter={() => setHoveredImageId(img.id)}
                                                                     onMouseLeave={() => setHoveredImageId(null)}
