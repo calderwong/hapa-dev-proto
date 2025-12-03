@@ -1249,7 +1249,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             };
             const parameters = {
                 aspectRatio: '16:9',
-                durationSeconds: 5, // Shorter for seamless loops
+                // durationSeconds must be string format for REST API
             };
             const videoRequestBody = {
                 instances: [instance],

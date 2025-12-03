@@ -38,6 +38,8 @@ interface CardIndexEntry {
     hasVideo?: boolean;
     derivedGif?: { localPath: string; cardId: string };
     cardRecord?: any;
+    // Parent-child relationship
+    parentCardId?: string;
 }
 
 const CARD_LIBRARY_CORE_NAME = 'card-library';
@@ -1748,6 +1750,23 @@ const CardLibrary: React.FC = () => {
                                                     <div className="text-gray-500 mb-1">Type</div>
                                                     <div className="text-gray-300 font-mono uppercase">{selected.mediaKind || 'UNKNOWN'}</div>
                                                 </div>
+                                                {/* Parent Card Link */}
+                                                {(selected.cardRecord?.parentCardId || selected.parentCardId) && (
+                                                    <div className="col-span-2">
+                                                        <div className="text-gray-500 mb-1">Parent Card</div>
+                                                        <button
+                                                            onClick={() => {
+                                                                const parentId = selected.cardRecord?.parentCardId || selected.parentCardId;
+                                                                const parentCard = cards.find(c => c.cardId === parentId);
+                                                                if (parentCard) setSelected(parentCard);
+                                                                else if (parentId) loadCards(parentId);
+                                                            }}
+                                                            className="text-cyan-400 hover:text-cyan-300 font-mono text-xs underline"
+                                                        >
+                                                            ← View Parent Card
+                                                        </button>
+                                                    </div>
+                                                )}
                                                 <div className="col-span-2">
                                                     <div className="text-gray-500 mb-1">ID</div>
                                                     <div className="text-gray-300 font-mono break-all">{selected.cardId}</div>
@@ -1755,6 +1774,57 @@ const CardLibrary: React.FC = () => {
                                             </div>
                                         </div>
                                     </div>
+
+                                    {/* Loop Video Generation Details - Show for loop video cards */}
+                                    {selected.cardRecord?.generationParams?.loopMode && (
+                                        <>
+                                            <div className="h-px bg-gray-800"></div>
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 text-purple-400">
+                                                    <rux-icon icon="loop" size="small"></rux-icon>
+                                                    <h3 className="font-bold uppercase tracking-wider text-sm">Loop Video Details</h3>
+                                                </div>
+                                                
+                                                {/* Loop Prompt */}
+                                                <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-4">
+                                                    <div className="text-[10px] uppercase font-bold text-purple-400 mb-2 tracking-wider">
+                                                        AI-Crafted Motion Prompt
+                                                    </div>
+                                                    <p className="text-gray-300 text-sm leading-relaxed">
+                                                        {selected.cardRecord?.generationParams?.loopPrompt || 'No prompt available'}
+                                                    </p>
+                                                </div>
+                                                
+                                                {/* Source Image Info */}
+                                                {selected.cardRecord?.sourceImage && (
+                                                    <div className="grid grid-cols-2 gap-4 text-xs">
+                                                        <div>
+                                                            <div className="text-gray-500 mb-1">Model</div>
+                                                            <div className="text-gray-300 font-mono">
+                                                                {selected.cardRecord?.generationParams?.model || 'Veo 3.1'}
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-gray-500 mb-1">Source</div>
+                                                            <div className="text-gray-300 font-mono">Image Loop</div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                
+                                                {/* Original Image Prompt */}
+                                                {selected.cardRecord?.sourceImage?.craftedPrompt && (
+                                                    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                                                        <div className="text-[10px] uppercase font-bold text-gray-500 mb-2 tracking-wider">
+                                                            Original Image Prompt
+                                                        </div>
+                                                        <p className="text-gray-400 text-sm leading-relaxed">
+                                                            {selected.cardRecord?.sourceImage?.craftedPrompt}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
 
                                     <div className="h-px bg-gray-800"></div>
 
