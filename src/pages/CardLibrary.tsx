@@ -600,10 +600,41 @@ const CardLibrary: React.FC = () => {
         }
 
         if (card.mediaKind === 'pet') {
-            const src = card.thumbnail || card.mediaRemoteUrl;
+            // Check for video from cardRecord (forged avatars)
+            const videoPath = card.cardRecord?.video?.localPath || card.raw?.video?.localPath;
+            if (videoPath) {
+                return (
+                    <video 
+                        src={toFileUrl(videoPath)} 
+                        className={className}
+                        autoPlay 
+                        muted 
+                        loop 
+                        playsInline
+                    />
+                );
+            }
+            // Fallback to image
+            const imagePath = card.cardRecord?.image?.localPath || card.raw?.image?.localPath;
+            const src = card.thumbnail || card.mediaRemoteUrl || (imagePath ? toFileUrl(imagePath) : null);
             if (src) {
                 return <img src={src} alt={card.cardId} className={className} style={{ imageRendering: 'pixelated' }} />;
             }
+        }
+
+        // Generic fallback: check for any video in cardRecord
+        const videoPath = card.cardRecord?.video?.localPath || card.raw?.video?.localPath;
+        if (videoPath) {
+            return (
+                <video 
+                    src={toFileUrl(videoPath)} 
+                    className={className}
+                    autoPlay 
+                    muted 
+                    loop 
+                    playsInline
+                />
+            );
         }
 
         if (card.thumbnail) {

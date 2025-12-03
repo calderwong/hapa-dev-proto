@@ -46,8 +46,49 @@ interface ForgedAvatar {
 const toFileUrl = (path?: string) => {
     if (!path) return '';
     if (path.startsWith('file://')) return path;
+    if (path.startsWith('data:')) return path; // data URLs pass through
     const normalized = path.replace(/\\/g, '/');
     return `file:///${normalized}`;
+};
+
+/**
+ * Get the best available thumbnail/media URL for a card.
+ * Priority: thumbnail > local media > remote URL > video from record > image from record
+ */
+const getCardMediaUrl = (card: CardIndexEntry): string | null => {
+    // 1. Explicit thumbnail
+    if (card.thumbnail) return card.thumbnail;
+    
+    // 2. Local media path (image or video)
+    if (card.mediaLocalPath) return toFileUrl(card.mediaLocalPath);
+    
+    // 3. Remote URL
+    if (card.mediaRemoteUrl) return card.mediaRemoteUrl;
+    
+    // 4. Check cardRecord for media
+    const rec = card.cardRecord || card.raw || {};
+    
+    // Video from record (avatar/pet cards)
+    if (rec.video?.localPath) return toFileUrl(rec.video.localPath);
+    
+    // Image from record
+    if (rec.image?.localPath) return toFileUrl(rec.image.localPath);
+    if (rec.image?.remoteUrl) return rec.image.remoteUrl;
+    
+    // Attachments (message cards)
+    if (rec.attachments?.[0]?.dataUrl) return rec.attachments[0].dataUrl;
+    if (rec.attachments?.[0]?.localPath) return toFileUrl(rec.attachments[0].localPath);
+    
+    return null;
+};
+
+/**
+ * Check if the media URL points to a video file
+ */
+const isVideoMedia = (url: string | null): boolean => {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+    return lower.includes('.mp4') || lower.includes('.webm') || lower.includes('.mov') || lower.includes('video');
 };
 
 const CARD_LIBRARY_CORE_NAME = 'card-library';
@@ -966,13 +1007,20 @@ OUTPUT THE JSON NOW:`;
 
                                 {/* Thumbnail */}
                                 <div className="w-10 h-10 rounded bg-black/50 flex-shrink-0 overflow-hidden border border-gray-800">
-                                    {item.card.thumbnail ? (
-                                        <img src={item.card.thumbnail} className="w-full h-full object-cover" />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-gray-600">
-                                            <rux-icon icon="article" size="small"></rux-icon>
-                                        </div>
-                                    )}
+                                    {(() => {
+                                        const mediaUrl = getCardMediaUrl(item.card);
+                                        if (mediaUrl && isVideoMedia(mediaUrl)) {
+                                            return <video src={mediaUrl} className="w-full h-full object-cover" muted />;
+                                        } else if (mediaUrl) {
+                                            return <img src={mediaUrl} className="w-full h-full object-cover" />;
+                                        } else {
+                                            return (
+                                                <div className="w-full h-full flex items-center justify-center text-gray-600">
+                                                    <rux-icon icon="article" size="small"></rux-icon>
+                                                </div>
+                                            );
+                                        }
+                                    })()}
                                 </div>
 
                                 {/* Info */}
@@ -1099,13 +1147,20 @@ OUTPUT THE JSON NOW:`;
                                     className={`p-2 rounded border border-gray-800 bg-gray-900 hover:border-purple-500/50 hover:bg-gray-800 cursor-grab active:cursor-grabbing transition-all group flex gap-3 items-center`}
                                 >
                                     <div className="w-8 h-8 rounded bg-black/30 flex-shrink-0 overflow-hidden relative">
-                                        {card.thumbnail ? (
-                                            <img src={card.thumbnail} className="w-full h-full object-cover" />
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center">
-                                                 <rux-icon icon="article" size="extra-small" className="text-gray-600"></rux-icon>
-                                            </div>
-                                        )}
+                                        {(() => {
+                                            const mediaUrl = getCardMediaUrl(card);
+                                            if (mediaUrl && isVideoMedia(mediaUrl)) {
+                                                return <video src={mediaUrl} className="w-full h-full object-cover" muted />;
+                                            } else if (mediaUrl) {
+                                                return <img src={mediaUrl} className="w-full h-full object-cover" />;
+                                            } else {
+                                                return (
+                                                    <div className="w-full h-full flex items-center justify-center">
+                                                        <rux-icon icon="article" size="extra-small" className="text-gray-600"></rux-icon>
+                                                    </div>
+                                                );
+                                            }
+                                        })()}
                                         <div className={`absolute inset-0 border ${quality.borderClass} opacity-50`}></div>
                                     </div>
                                     <div className="min-w-0 flex-1">
