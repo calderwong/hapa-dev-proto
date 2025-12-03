@@ -1212,15 +1212,61 @@ const CardLibrary: React.FC = () => {
     };
     
     // Navigate to a loop video's card page
-    const handleNavigateToLoopVideo = (loopVideoCardId: string) => {
-        // Find the video card and navigate to it
+    const handleNavigateToLoopVideo = async (loopVideoCardId: string) => {
+        console.log('[LoopVideo] Navigating to video card:', loopVideoCardId);
+        
+        // First check if already in current cards
         const videoCard = cards.find(c => c.cardId === loopVideoCardId);
         if (videoCard) {
+            console.log('[LoopVideo] Found video card in current cards, selecting');
             setSelected(videoCard);
-        } else {
-            // Card might not be in current filtered view, reload and navigate
-            loadCards(loopVideoCardId);
+            return;
         }
+        
+        // Card not in current list - need to reload and find it
+        console.log('[LoopVideo] Video card not in current list, reloading...');
+        
+        // Try to load the card directly from its core
+        if (window.electronAPI?.p2pRead) {
+            try {
+                const records = await window.electronAPI.p2pRead(loopVideoCardId);
+                if (Array.isArray(records) && records.length > 0) {
+                    // Parse the most recent record
+                    let cardRecord: any = null;
+                    for (let i = records.length - 1; i >= 0; i--) {
+                        try {
+                            const parsed = JSON.parse(records[i]);
+                            if (parsed) {
+                                cardRecord = parsed;
+                                break;
+                            }
+                        } catch { /* skip */ }
+                    }
+                    
+                    if (cardRecord) {
+                        console.log('[LoopVideo] Loaded video card record directly:', cardRecord);
+                        const videoEntry: CardIndexEntry = {
+                            cardId: loopVideoCardId,
+                            name: cardRecord.name || 'Loop Video',
+                            createdAt: cardRecord.createdAt || new Date().toISOString(),
+                            mediaKind: cardRecord.mediaKind || 'video',
+                            mediaLocalPath: cardRecord.mediaLocalPath,
+                            coreName: loopVideoCardId,
+                            parentCardId: cardRecord.parentCardId,
+                            cardRecord: cardRecord,
+                            raw: cardRecord,
+                        };
+                        setSelected(videoEntry);
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.error('[LoopVideo] Failed to load video card directly:', err);
+            }
+        }
+        
+        // Fallback: reload all cards with preference
+        loadCards(loopVideoCardId);
     };
 
     // Drag Handlers
