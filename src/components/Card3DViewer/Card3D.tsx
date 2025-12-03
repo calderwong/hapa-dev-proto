@@ -1,16 +1,24 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 
-// Tier colors matching our card system
-const TIER_COLORS: Record<string, string> = {
-    common: '#6b7280',
-    uncommon: '#10b981',
-    rare: '#3b82f6',
-    epic: '#a855f7',
-    legendary: '#f97316',
-    mythic: '#ec4899',
+// Tier colors and labels
+const TIER_CONFIG: Record<string, { color: string; label: string; glow: number }> = {
+    common: { color: '#6b7280', label: 'COMMON', glow: 0.2 },
+    uncommon: { color: '#10b981', label: 'UNCOMMON', glow: 0.3 },
+    rare: { color: '#3b82f6', label: 'RARE', glow: 0.4 },
+    epic: { color: '#a855f7', label: 'EPIC', glow: 0.5 },
+    legendary: { color: '#f97316', label: 'LEGENDARY', glow: 0.6 },
+    mythic: { color: '#ec4899', label: 'MYTHIC', glow: 0.8 },
+};
+
+// Media kind icons
+const MEDIA_ICONS: Record<string, string> = {
+    video: '🎬',
+    image: '🖼️',
+    audio: '🎵',
+    document: '📄',
 };
 
 interface Card3DProps {
@@ -27,6 +35,10 @@ interface Card3DProps {
     isParent?: boolean;
     isChild?: boolean;
     badges?: string[];
+    hasSummary?: boolean;
+    hasKeyTerms?: boolean;
+    hasImages?: boolean;
+    childCount?: number;
     onClick?: () => void;
     onDoubleClick?: () => void;
 }
@@ -36,116 +48,171 @@ export const Card3D: React.FC<Card3DProps> = ({
     name,
     tier = 'common',
     mediaKind = 'document',
+    thumbnailUrl,
     position = [0, 0, 0],
     scale = 1,
     isFocused = false,
     isParent = false,
     isChild = false,
+    hasSummary = false,
+    hasKeyTerms = false,
+    hasImages = false,
+    childCount = 0,
     onClick,
     onDoubleClick,
 }) => {
     const groupRef = useRef<THREE.Group>(null);
     const [hovered, setHovered] = useState(false);
     
-    // Card dimensions
-    const cardWidth = 2;
-    const cardHeight = 2.8;
-    const cardDepth = 0.1;
+    // Card dimensions - slightly smaller for cleaner look
+    const cardWidth = 1.8;
+    const cardHeight = 2.4;
+    const cardDepth = 0.08;
     
-    const tierColor = TIER_COLORS[tier] || TIER_COLORS.common;
+    const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.common;
+    const mediaIcon = MEDIA_ICONS[mediaKind] || MEDIA_ICONS.document;
     
-    // Floating animation
+    // Load texture if thumbnail available
+    const texture = useMemo(() => {
+        if (thumbnailUrl) {
+            const loader = new THREE.TextureLoader();
+            try {
+                const tex = loader.load(thumbnailUrl);
+                tex.minFilter = THREE.LinearFilter;
+                return tex;
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    }, [thumbnailUrl]);
+    
+    // Floating animation - more subtle for non-focused cards
     useFrame((state) => {
         if (groupRef.current) {
-            // Gentle float
-            groupRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 0.5 + cardId.charCodeAt(0)) * 0.1;
-            // Gentle rotation
-            groupRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.3) * 0.05;
+            const floatIntensity = isFocused ? 0.08 : 0.04;
+            const rotateIntensity = isFocused ? 0.03 : hovered ? 0.02 : 0;
+            groupRef.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 0.5 + cardId.charCodeAt(0)) * floatIntensity;
+            groupRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.3) * rotateIntensity;
         }
     });
+    
+    // Badge indicators
+    const badges: string[] = [];
+    if (hasSummary) badges.push('📝');
+    if (hasKeyTerms) badges.push('🔑');
+    if (hasImages) badges.push('🖼️');
+    if (childCount > 0) badges.push(`👶${childCount}`);
     
     return (
         <group
             ref={groupRef}
             position={position}
-            scale={scale}
+            scale={hovered && !isFocused ? scale * 1.05 : scale}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
             onPointerOver={() => setHovered(true)}
             onPointerOut={() => setHovered(false)}
         >
-            {/* Glow effect behind card */}
-            <mesh position={[0, 0, -0.15]} scale={[1.2, 1.2, 1]}>
+            {/* Outer glow - tier-based intensity */}
+            <mesh position={[0, 0, -0.12]} scale={[1.15, 1.15, 1]}>
                 <planeGeometry args={[cardWidth, cardHeight]} />
                 <meshBasicMaterial
-                    color={tierColor}
+                    color={tierConfig.color}
                     transparent
-                    opacity={isFocused ? 0.6 : hovered ? 0.4 : 0.2}
+                    opacity={isFocused ? tierConfig.glow : hovered ? tierConfig.glow * 0.7 : tierConfig.glow * 0.3}
                     side={THREE.DoubleSide}
                 />
             </mesh>
             
-            {/* Main card body - simple box */}
+            {/* Card frame */}
             <mesh castShadow receiveShadow>
                 <boxGeometry args={[cardWidth, cardHeight, cardDepth]} />
                 <meshStandardMaterial
-                    color="#1e293b"
-                    metalness={0.3}
-                    roughness={0.7}
+                    color="#0f172a"
+                    metalness={0.4}
+                    roughness={0.6}
                 />
             </mesh>
             
-            {/* Quality bar (top) */}
-            <mesh position={[0, cardHeight / 2 - 0.1, cardDepth / 2 + 0.01]}>
-                <planeGeometry args={[cardWidth * 0.9, 0.12]} />
-                <meshBasicMaterial color={tierColor} />
+            {/* Quality bar at top */}
+            <mesh position={[0, cardHeight / 2 - 0.06, cardDepth / 2 + 0.005]}>
+                <planeGeometry args={[cardWidth - 0.1, 0.08]} />
+                <meshBasicMaterial color={tierConfig.color} />
             </mesh>
             
-            {/* Card content area - lighter background */}
-            <mesh position={[0, 0, cardDepth / 2 + 0.01]}>
-                <planeGeometry args={[cardWidth * 0.85, cardHeight * 0.6]} />
-                <meshBasicMaterial color="#0f172a" />
+            {/* Main content area - show thumbnail or placeholder */}
+            <mesh position={[0, 0.15, cardDepth / 2 + 0.005]}>
+                <planeGeometry args={[cardWidth - 0.2, cardHeight * 0.55]} />
+                {texture ? (
+                    <meshBasicMaterial map={texture} />
+                ) : (
+                    <meshBasicMaterial color="#1e293b" />
+                )}
             </mesh>
             
-            {/* Media kind indicator */}
-            <mesh position={[0, -0.8, cardDepth / 2 + 0.02]}>
-                <planeGeometry args={[0.4, 0.4]} />
-                <meshBasicMaterial 
-                    color={mediaKind === 'video' ? '#a855f7' : mediaKind === 'image' ? '#22d3ee' : '#6b7280'} 
-                />
-            </mesh>
+            {/* HTML overlay for rich content */}
+            <Html
+                position={[0, 0, cardDepth / 2 + 0.02]}
+                center
+                distanceFactor={6}
+                style={{ pointerEvents: 'none' }}
+            >
+                <div className="select-none w-40">
+                    {/* Tier label */}
+                    <div 
+                        className="text-center text-[8px] font-bold tracking-widest mb-1 opacity-80"
+                        style={{ color: tierConfig.color }}
+                    >
+                        {tierConfig.label}
+                    </div>
+                    
+                    {/* Media placeholder if no thumbnail */}
+                    {!thumbnailUrl && (
+                        <div className="flex items-center justify-center h-20 bg-gray-800/50 rounded mb-2">
+                            <span className="text-3xl opacity-50">{mediaIcon}</span>
+                        </div>
+                    )}
+                    
+                    {/* Card name */}
+                    <div className="text-white text-[10px] font-mono text-center bg-black/60 px-2 py-1 rounded truncate">
+                        {name?.substring(0, 25) || 'Untitled'}
+                    </div>
+                    
+                    {/* Badges row */}
+                    {badges.length > 0 && (
+                        <div className="flex justify-center gap-1 mt-1">
+                            {badges.map((badge, i) => (
+                                <span key={i} className="text-[8px] bg-gray-800/70 px-1 rounded">
+                                    {badge}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                    
+                    {/* Relationship indicator */}
+                    {(isParent || isChild) && (
+                        <div className={`text-center text-[9px] font-mono mt-1 ${
+                            isParent ? 'text-cyan-400' : 'text-purple-400'
+                        }`}>
+                            {isParent ? '▲ PARENT' : '▼ CHILD'}
+                        </div>
+                    )}
+                </div>
+            </Html>
             
-            {/* Focus ring */}
+            {/* Focus ring - animated */}
             {isFocused && (
-                <mesh position={[0, 0, -0.1]}>
-                    <ringGeometry args={[cardWidth * 0.55, cardWidth * 0.6, 32]} />
+                <mesh position={[0, 0, -0.08]} rotation={[0, 0, 0]}>
+                    <ringGeometry args={[cardWidth * 0.52, cardWidth * 0.56, 6]} />
                     <meshBasicMaterial
-                        color={tierColor}
+                        color={tierConfig.color}
                         transparent
-                        opacity={0.9}
+                        opacity={0.8}
                         side={THREE.DoubleSide}
                     />
                 </mesh>
             )}
-            
-            {/* HTML overlay for text */}
-            <Html
-                position={[0, -cardHeight / 2 + 0.3, cardDepth / 2 + 0.1]}
-                center
-                distanceFactor={8}
-            >
-                <div className="text-center pointer-events-none select-none">
-                    <div className="text-white text-xs font-mono bg-black/70 px-2 py-1 rounded whitespace-nowrap max-w-[150px] truncate">
-                        {name?.substring(0, 20) || 'Untitled'}
-                    </div>
-                    {isParent && (
-                        <div className="text-cyan-400 text-[10px] mt-1">▲ PARENT</div>
-                    )}
-                    {isChild && (
-                        <div className="text-purple-400 text-[10px] mt-1">▼ CHILD</div>
-                    )}
-                </div>
-            </Html>
         </group>
     );
 };

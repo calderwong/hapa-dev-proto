@@ -319,6 +319,12 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                         const isParent = card.cardId === parentCard?.cardId;
                         const isChild = childCards.some(c => c.cardId === card.cardId);
                         
+                        // Count children for this card
+                        const cardChildCount = cards.filter(c => 
+                            c.cardRecord?.parentCardId === card.cardId ||
+                            c.parentCardId === card.cardId
+                        ).length;
+                        
                         return (
                             <Card3D
                                 key={card.cardId}
@@ -329,10 +335,14 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                                 thumbnailUrl={getCardThumbnail(card)}
                                 videoUrl={getCardVideo(card)}
                                 position={position as [number, number, number]}
-                                scale={isFocused ? 1.2 : 0.8}
+                                scale={isFocused ? 1.2 : isParent ? 0.9 : 0.75}
                                 isFocused={isFocused}
                                 isParent={isParent}
                                 isChild={isChild}
+                                hasSummary={!!card.cardRecord?.summaries?.length}
+                                hasKeyTerms={!!card.cardRecord?.keyTerms?.length}
+                                hasImages={!!card.cardRecord?.imageSet?.images?.length}
+                                childCount={cardChildCount}
                                 onClick={() => {
                                     focusCard(card.cardId);
                                     onCardSelect?.(card.cardId);
@@ -382,26 +392,24 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                 childCount={childCards.length}
             />
             
-            {/* Card info panel */}
-            <div className="absolute top-4 right-20 z-50">
-                <div className="bg-gray-900/80 backdrop-blur-sm border border-purple-500/30 rounded-lg p-3 max-w-xs">
-                    <div className="text-purple-400 text-[10px] font-mono uppercase tracking-wider mb-1">
-                        View Mode: {viewMode}
-                    </div>
-                    <div className="text-gray-400 text-xs">
-                        {cardsToRender.length} cards visible
-                    </div>
-                    {parentCard && (
-                        <div className="text-cyan-400 text-xs mt-1">
-                            Parent: {parentCard.name?.slice(0, 20)}...
-                        </div>
-                    )}
-                    {childCards.length > 0 && (
-                        <div className="text-purple-400 text-xs mt-1">
-                            Children: {childCards.length}
-                        </div>
-                    )}
+            {/* Compact status bar - top right */}
+            <div className="absolute top-4 right-16 z-50 flex items-center gap-2">
+                <div className="bg-gray-900/70 backdrop-blur-sm border border-gray-700/50 rounded px-2 py-1 text-[10px] font-mono text-gray-400">
+                    {viewMode.toUpperCase()}
                 </div>
+                <div className="bg-gray-900/70 backdrop-blur-sm border border-gray-700/50 rounded px-2 py-1 text-[10px] font-mono text-gray-400">
+                    {cardsToRender.length} visible
+                </div>
+                {parentCard && (
+                    <div className="bg-cyan-900/30 border border-cyan-500/30 rounded px-2 py-1 text-[10px] font-mono text-cyan-400">
+                        ▲ {parentCard.name?.slice(0, 15)}
+                    </div>
+                )}
+                {childCards.length > 0 && (
+                    <div className="bg-purple-900/30 border border-purple-500/30 rounded px-2 py-1 text-[10px] font-mono text-purple-400">
+                        ▼ {childCards.length} children
+                    </div>
+                )}
             </div>
         </div>
     );

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useViewer3DStore } from './viewer3DStore';
 import type { ViewMode } from './viewer3DStore';
 
@@ -11,14 +11,15 @@ interface NexusNavigatorProps {
     hasChildren?: boolean;
     hasSiblings?: boolean;
     childCount?: number;
+    cardName?: string;
 }
 
-const VIEW_MODES: { mode: ViewMode; icon: string; label: string }[] = [
-    { mode: 'constellation', icon: '🌌', label: 'Constellation' },
-    { mode: 'focus', icon: '📍', label: 'Focus' },
-    { mode: 'theatre', icon: '🎬', label: 'Theatre' },
-    { mode: 'lineage', icon: '📈', label: 'Lineage' },
-    { mode: 'badges', icon: '🏷️', label: 'Badges' },
+const VIEW_MODES: { mode: ViewMode; icon: string; label: string; key: string }[] = [
+    { mode: 'constellation', icon: '◈', label: 'Constellation', key: '1' },
+    { mode: 'focus', icon: '◉', label: 'Focus', key: '2' },
+    { mode: 'theatre', icon: '▶', label: 'Theatre', key: '3' },
+    { mode: 'lineage', icon: '⋔', label: 'Lineage', key: '4' },
+    { mode: 'badges', icon: '✦', label: 'Badges', key: '5' },
 ];
 
 export const NexusNavigator: React.FC<NexusNavigatorProps> = ({
@@ -32,132 +33,110 @@ export const NexusNavigator: React.FC<NexusNavigatorProps> = ({
     childCount = 0,
 }) => {
     const { viewMode, setViewMode, resetView, globalMuted, setGlobalMuted } = useViewer3DStore();
+    const [expanded, setExpanded] = useState(false);
     
     return (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50">
-            <div className="bg-gray-900/90 backdrop-blur-md border border-cyan-500/30 rounded-lg p-4 shadow-[0_0_30px_rgba(34,211,238,0.2)]">
-                {/* Header */}
-                <div className="flex items-center gap-2 mb-3 pb-2 border-b border-cyan-500/20">
-                    <span className="text-cyan-400 text-lg">◉</span>
-                    <span className="text-cyan-300 font-mono text-sm font-bold tracking-wider">NEXUS NAVIGATOR</span>
-                </div>
-                
-                {/* Navigation Controls */}
-                <div className="grid grid-cols-3 gap-2 mb-3">
-                    {/* Top row - Parent */}
-                    <div></div>
+        <div 
+            className="absolute bottom-4 left-4 z-50"
+            onMouseEnter={() => setExpanded(true)}
+            onMouseLeave={() => setExpanded(false)}
+        >
+            {/* Minimal collapsed state */}
+            <div className={`bg-gray-900/80 backdrop-blur-sm border border-cyan-500/30 rounded-lg transition-all duration-300 ${
+                expanded ? 'p-3 w-48' : 'p-2 w-auto'
+            }`}>
+                {/* Always visible: Direction controls */}
+                <div className="flex items-center gap-1">
+                    {/* Parent */}
                     <button
                         onClick={onNavigateParent}
                         disabled={!hasParent}
-                        className={`flex flex-col items-center gap-1 p-2 rounded transition-all ${
+                        className={`p-1.5 rounded text-xs transition-all ${
                             hasParent 
-                                ? 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300' 
-                                : 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                                ? 'text-cyan-400 hover:bg-cyan-500/20' 
+                                : 'text-gray-600 cursor-not-allowed'
                         }`}
-                        title="Go to Parent"
-                    >
-                        <span className="text-lg">↑</span>
-                        <span className="text-[10px] font-mono">PARENT</span>
-                    </button>
-                    <div></div>
+                        title="Parent [↑]"
+                    >▲</button>
                     
-                    {/* Middle row - Prev, Focus, Next */}
+                    {/* Prev */}
                     <button
                         onClick={onNavigatePrev}
                         disabled={!hasSiblings}
-                        className={`flex flex-col items-center gap-1 p-2 rounded transition-all ${
+                        className={`p-1.5 rounded text-xs transition-all ${
                             hasSiblings 
-                                ? 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300' 
-                                : 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                                ? 'text-purple-400 hover:bg-purple-500/20' 
+                                : 'text-gray-600 cursor-not-allowed'
                         }`}
-                        title="Previous Sibling"
-                    >
-                        <span className="text-lg">←</span>
-                        <span className="text-[10px] font-mono">PREV</span>
-                    </button>
+                        title="Previous [←]"
+                    >◀</button>
                     
+                    {/* Reset/Center */}
                     <button
                         onClick={resetView}
-                        className="flex flex-col items-center gap-1 p-2 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 transition-all"
-                        title="Reset View"
-                    >
-                        <span className="text-lg">◉</span>
-                        <span className="text-[10px] font-mono">RESET</span>
-                    </button>
+                        className="p-1.5 rounded text-cyan-400 hover:bg-cyan-500/20 transition-all"
+                        title="Reset [R]"
+                    >⟲</button>
                     
+                    {/* Next */}
                     <button
                         onClick={onNavigateNext}
                         disabled={!hasSiblings}
-                        className={`flex flex-col items-center gap-1 p-2 rounded transition-all ${
+                        className={`p-1.5 rounded text-xs transition-all ${
                             hasSiblings 
-                                ? 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300' 
-                                : 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                                ? 'text-purple-400 hover:bg-purple-500/20' 
+                                : 'text-gray-600 cursor-not-allowed'
                         }`}
-                        title="Next Sibling"
-                    >
-                        <span className="text-lg">→</span>
-                        <span className="text-[10px] font-mono">NEXT</span>
-                    </button>
+                        title="Next [→]"
+                    >▶</button>
                     
-                    {/* Bottom row - Children */}
-                    <div></div>
+                    {/* Child */}
                     <button
                         onClick={() => onNavigateChild?.(0)}
                         disabled={!hasChildren}
-                        className={`flex flex-col items-center gap-1 p-2 rounded transition-all ${
+                        className={`p-1.5 rounded text-xs transition-all ${
                             hasChildren 
-                                ? 'bg-purple-500/20 hover:bg-purple-500/30 text-purple-300' 
-                                : 'bg-gray-800/50 text-gray-600 cursor-not-allowed'
+                                ? 'text-purple-400 hover:bg-purple-500/20' 
+                                : 'text-gray-600 cursor-not-allowed'
                         }`}
-                        title={`Go to Child (${childCount})`}
-                    >
-                        <span className="text-lg">↓</span>
-                        <span className="text-[10px] font-mono">CHILD{childCount > 1 ? `(${childCount})` : ''}</span>
-                    </button>
-                    <div></div>
-                </div>
-                
-                {/* View Mode Selector */}
-                <div className="flex gap-1 p-1 bg-gray-800/50 rounded">
-                    {VIEW_MODES.map(({ mode, icon, label }) => (
-                        <button
-                            key={mode}
-                            onClick={() => setViewMode(mode)}
-                            className={`flex-1 flex flex-col items-center gap-0.5 p-1.5 rounded transition-all ${
-                                viewMode === mode
-                                    ? 'bg-cyan-500/30 text-cyan-300'
-                                    : 'hover:bg-gray-700/50 text-gray-400'
-                            }`}
-                            title={label}
-                        >
-                            <span className="text-sm">{icon}</span>
-                            <span className="text-[8px] font-mono">{label.slice(0, 4).toUpperCase()}</span>
-                        </button>
-                    ))}
-                </div>
-                
-                {/* Quick Actions */}
-                <div className="flex gap-2 mt-3 pt-2 border-t border-cyan-500/20">
+                        title={`Children (${childCount}) [↓]`}
+                    >▼{childCount > 0 && <span className="text-[8px] ml-0.5">{childCount}</span>}</button>
+                    
+                    {/* Mute toggle */}
                     <button
                         onClick={() => setGlobalMuted(!globalMuted)}
-                        className={`flex-1 flex items-center justify-center gap-2 p-2 rounded transition-all ${
-                            globalMuted 
-                                ? 'bg-gray-700/50 text-gray-400' 
-                                : 'bg-green-500/20 text-green-300'
+                        className={`p-1.5 rounded text-xs transition-all ${
+                            globalMuted ? 'text-gray-500' : 'text-green-400'
                         }`}
-                        title={globalMuted ? 'Unmute' : 'Mute'}
-                    >
-                        <span>{globalMuted ? '🔇' : '🔊'}</span>
-                        <span className="text-[10px] font-mono">{globalMuted ? 'MUTED' : 'SOUND'}</span>
-                    </button>
+                        title={globalMuted ? 'Unmute [M]' : 'Mute [M]'}
+                    >{globalMuted ? '🔇' : '🔊'}</button>
                 </div>
-            </div>
-            
-            {/* Keyboard hints */}
-            <div className="mt-2 text-center">
-                <span className="text-gray-500 text-[10px] font-mono">
-                    [1-5] Views • [Space] Play • [R] Reset • [M] Mute
-                </span>
+                
+                {/* Expanded: View modes */}
+                {expanded && (
+                    <div className="mt-2 pt-2 border-t border-gray-700/50">
+                        <div className="flex gap-1 flex-wrap">
+                            {VIEW_MODES.map(({ mode, icon, label, key }) => (
+                                <button
+                                    key={mode}
+                                    onClick={() => setViewMode(mode)}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono transition-all ${
+                                        viewMode === mode
+                                            ? 'bg-cyan-500/30 text-cyan-300'
+                                            : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/30'
+                                    }`}
+                                    title={`${label} [${key}]`}
+                                >
+                                    <span>{icon}</span>
+                                    <span className="hidden sm:inline">{label.slice(0, 4)}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mt-2 text-[9px] text-gray-600 font-mono">
+                            Arrows: Navigate • R: Reset • M: Mute
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
