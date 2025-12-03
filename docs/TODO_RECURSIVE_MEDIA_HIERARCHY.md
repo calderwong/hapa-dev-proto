@@ -22,9 +22,9 @@ Video cards created from loop generation need full card functionality:
 ### Phase 1: Fix Video Card Image Generation
 **Goal:** Images generated on video cards persist and display correctly
 
-- [ ] 1.1 Update `handleGenerateImage` to work for ANY card type (not just parent cards)
-- [ ] 1.2 Ensure video cards have proper `coreName` for Hypercore saves
-- [ ] 1.3 Include parent context when generating images for child cards
+- [x] 1.1 Update `handleGenerateImage` to work for ANY card type (not just parent cards)
+- [x] 1.2 Ensure video cards have proper `coreName` for Hypercore saves
+- [x] 1.3 Include parent context when generating images for child cards
   - Traverse up parent chain to collect context
   - Pass combined context to LLM for richer prompts
 - [ ] 1.4 Test: Generate image on video card → image persists and displays
@@ -37,30 +37,30 @@ Video cards created from loop generation need full card functionality:
 - [ ] 2.3 Loop video buttons work on video card images too
 - [ ] 2.4 Recursive: Video → Image → Video → Image... all linked
 
-### Phase 3: Enhanced Visual Indicators
+### Phase 3: Enhanced Visual Indicators ✅
 **Goal:** Images with loop videos are visually distinct
 
-- [ ] 3.1 Add neon glow border to images with loop videos
+- [x] 3.1 Add neon glow border to images with loop videos
   - Purple/magenta glow using box-shadow
   - CSS class: `has-loop-video`
-- [ ] 3.2 Keep LOOP badge but make border the primary indicator
-- [ ] 3.3 Animate glow subtly (pulse or shimmer)
+- [x] 3.2 Keep LOOP badge but make border the primary indicator
+- [x] 3.3 Animate glow subtly (pulse or shimmer)
 
-### Phase 4: Card Lineage Display
+### Phase 4: Card Lineage Display ✅
 **Goal:** Show parent-child hierarchy clearly
 
-- [ ] 4.1 "Card Lineage" section in all card details
-- [ ] 4.2 Show parent card (clickable, with thumbnail)
-- [ ] 4.3 Show children cards (clickable list with thumbnails)
-- [ ] 4.4 Breadcrumb-style lineage path at top
+- [x] 4.1 "Card Lineage" section in all card details
+- [x] 4.2 Show parent card (clickable, with thumbnail)
+- [x] 4.3 Show children cards (clickable list with thumbnails)
+- [ ] 4.4 Breadcrumb-style lineage path at top (optional)
 
-### Phase 5: Video Auto-Play & Global Mute
+### Phase 5: Video Auto-Play & Global Mute ✅
 **Goal:** Video cards play automatically, respecting user volume preference
 
-- [ ] 5.1 Add global mute state (persisted to localStorage)
-- [ ] 5.2 Video card detail view auto-plays video (looping)
-- [ ] 5.3 Mute button in video player respects global state
-- [ ] 5.4 Header mute button affects all videos app-wide
+- [x] 5.1 Add global mute state (persisted to localStorage)
+- [x] 5.2 Video card detail view auto-plays video (looping)
+- [x] 5.3 Mute button in video player respects global state
+- [ ] 5.4 Header mute button affects all videos app-wide (uses existing hapa-audio-muted)
 
 ### Phase 6: Data Schema Updates
 **Goal:** Clean parent-child relationships in Hypercore

@@ -794,8 +794,11 @@ const CardLibrary: React.FC = () => {
     };
     
     const getChildCards = (card: CardIndexEntry) => {
-        const childIds = card.cardRecord?.childCardIds || [];
-        return childIds.map(id => findCardById(id)).filter(Boolean) as CardIndexEntry[];
+        // Search for children by their parentCardId reference (more robust)
+        return cards.filter(c => 
+            c.cardRecord?.parentCardId === card.cardId || 
+            c.parentCardId === card.cardId
+        );
     };
     
     const getSiblingCards = (card: CardIndexEntry) => {
