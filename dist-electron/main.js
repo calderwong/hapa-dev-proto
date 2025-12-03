@@ -1025,27 +1025,43 @@ electron_1.app.whenReady().then(() => {
         console.log('[ImageGen] Using Image Model:', imageGenSettings.defaultImageModel);
         try {
             // Step 1: Craft image prompt using LLM
-            const contextSummary = `
-Card Name: ${cardContext.name || 'Untitled'}
-Card Type: ${cardContext.mediaKind || 'unknown'}
-Content: ${cardContext.text || cardContext.messageContent || 'No text content'}
-Tags: ${cardContext.tags?.join(', ') || 'none'}
-        `.trim();
+            // Build a rich context summary from all available content
+            const contentParts = [];
+            if (cardContext.name && cardContext.name !== 'Untitled') {
+                contentParts.push(`Title: ${cardContext.name}`);
+            }
+            if (cardContext.text) {
+                // Truncate to reasonable length for LLM
+                const truncatedText = cardContext.text.length > 2000
+                    ? cardContext.text.substring(0, 2000) + '...'
+                    : cardContext.text;
+                contentParts.push(`Content:\n${truncatedText}`);
+            }
+            if (cardContext.messageContent) {
+                contentParts.push(`Message: ${cardContext.messageContent}`);
+            }
+            if (cardContext.tags && cardContext.tags.length > 0) {
+                contentParts.push(`Key Terms/Tags: ${cardContext.tags.slice(0, 30).join(', ')}`);
+            }
+            const contextSummary = contentParts.length > 0
+                ? contentParts.join('\n\n')
+                : `Card Type: ${cardContext.mediaKind || 'document'}\nTitle: ${cardContext.name || 'Untitled'}`;
             const promptCraftingRequest = `
-You are an expert at crafting image generation prompts. Given context about a data card, create a detailed, evocative prompt for an AI image generator.
+You are an expert at crafting image generation prompts. Given context about a data card/document, create a detailed, evocative prompt for an AI image generator.
 
 Rules:
 1. Output ONLY the image prompt, no explanations or preamble
 2. Be specific about style, lighting, composition
-3. Include artistic style keywords (digital art, concept art, cinematic, etc.)
+3. Include artistic style keywords (digital art, concept art, cinematic, illustration, etc.)
 4. Keep under 150 words
-5. Focus on visual elements that represent the content's essence
-6. Make it visually interesting and artistic
+5. Focus on visual elements that represent the content's essence and themes
+6. Make it visually interesting, artistic, and memorable
+7. If the content is abstract or technical, create a metaphorical or symbolic visual representation
 
-Card Context:
+Document/Card Context:
 ${contextSummary}
 
-Create an image prompt:`;
+Create a vivid image prompt that visually represents this content:`;
             // Call LLM to craft the prompt
             const llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultPromptLLM}:generateContent?key=${apiKey}`;
             const llmResponse = await fetch(llmUrl, {

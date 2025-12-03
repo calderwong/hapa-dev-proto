@@ -919,6 +919,7 @@ const CardLibrary: React.FC = () => {
                 // Update the card with the new image
                 const updatedRecord = {
                     ...selected.cardRecord,
+                    updatedAt: new Date().toISOString(),
                     image: {
                         localPath: result.localPath,
                         mimeType: result.mimeType,
@@ -927,9 +928,11 @@ const CardLibrary: React.FC = () => {
                     },
                 };
                 
-                // Save to Hypercore
-                if (window.electronAPI.p2pAppend && selected.coreName) {
-                    await window.electronAPI.p2pAppend(selected.coreName, updatedRecord);
+                // Save to Hypercore - use cardId as the core name (standard pattern)
+                // coreName might be undefined for wormhole cards
+                const coreToUse = selected.coreName || selected.cardId;
+                if (window.electronAPI.p2pAppend && coreToUse) {
+                    await window.electronAPI.p2pAppend(coreToUse, JSON.stringify(updatedRecord));
                 }
                 
                 setImageGenState('complete');
