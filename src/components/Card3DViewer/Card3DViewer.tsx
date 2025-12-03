@@ -75,7 +75,8 @@ const calculateConstellationPositions = (
     focusedCard: CardData,
     parentCard: CardData | undefined,
     childCards: CardData[],
-    siblingCards: CardData[]
+    siblingCards: CardData[],
+    contextCards: CardData[] = [] // Nearby cards for context
 ): Map<string, [number, number, number]> => {
     const positions = new Map<string, [number, number, number]>();
     
@@ -84,22 +85,34 @@ const calculateConstellationPositions = (
     
     // Parent above
     if (parentCard) {
-        positions.set(parentCard.cardId, [0, 3, -2]);
+        positions.set(parentCard.cardId, [0, 2.5, -1.5]);
     }
     
     // Children in arc below
     childCards.forEach((child, i) => {
-        const angle = (i - (childCards.length - 1) / 2) * 0.5;
-        const x = Math.sin(angle) * 4;
-        const z = Math.cos(angle) * 2 - 2;
-        positions.set(child.cardId, [x, -3, z]);
+        const angle = (i - (childCards.length - 1) / 2) * 0.6;
+        const x = Math.sin(angle) * 3;
+        const z = Math.cos(angle) * 1.5 - 1;
+        positions.set(child.cardId, [x, -2.5, z]);
     });
     
-    // Siblings on sides
+    // Siblings on sides (closer to center)
     siblingCards.forEach((sibling, i) => {
         const side = i % 2 === 0 ? 1 : -1;
         const offset = Math.floor(i / 2) + 1;
-        positions.set(sibling.cardId, [side * 4 * offset, 0, -1]);
+        positions.set(sibling.cardId, [side * 3 * offset, 0, -1]);
+    });
+    
+    // Context cards - arrange in a ring around the constellation
+    contextCards.forEach((card, i) => {
+        if (positions.has(card.cardId)) return; // Skip if already positioned
+        
+        const angle = (i / contextCards.length) * Math.PI * 2 + Math.PI / 4;
+        const radius = 5;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius - 2;
+        const y = (Math.random() - 0.5) * 1; // Slight vertical variation
+        positions.set(card.cardId, [x, y, z]);
     });
     
     return positions;
@@ -146,11 +159,41 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
         ).slice(0, 4); // Limit siblings shown
     }, [cards, parentCard, focusedCard]);
     
+    // Context cards - nearby cards that aren't directly related
+    const contextCards = useMemo(() => {
+        if (!focusedCard) return [];
+        
+        const relatedIds = new Set<string>([focusedCard.cardId]);
+        if (parentCard) relatedIds.add(parentCard.cardId);
+        childCards.forEach(c => relatedIds.add(c.cardId));
+        siblingCards.forEach(c => relatedIds.add(c.cardId));
+        
+        // If we have few related cards, add some context
+        if (relatedIds.size < 5 && cards.length > 1) {
+            const focusedIndex = cards.findIndex(c => c.cardId === focusedCard.cardId);
+            const nearby: CardData[] = [];
+            
+            for (let i = 1; i <= 6 && nearby.length < 8; i++) {
+                const prevIndex = focusedIndex - i;
+                const nextIndex = focusedIndex + i;
+                
+                if (prevIndex >= 0 && !relatedIds.has(cards[prevIndex].cardId)) {
+                    nearby.push(cards[prevIndex]);
+                }
+                if (nextIndex < cards.length && !relatedIds.has(cards[nextIndex].cardId)) {
+                    nearby.push(cards[nextIndex]);
+                }
+            }
+            return nearby;
+        }
+        return [];
+    }, [focusedCard, parentCard, childCards, siblingCards, cards]);
+    
     // Calculate card positions
     const cardPositions = useMemo(() => {
         if (!focusedCard) return new Map();
-        return calculateConstellationPositions(focusedCard, parentCard, childCards, siblingCards);
-    }, [focusedCard, parentCard, childCards, siblingCards]);
+        return calculateConstellationPositions(focusedCard, parentCard, childCards, siblingCards, contextCards);
+    }, [focusedCard, parentCard, childCards, siblingCards, contextCards]);
     
     // Build connections
     const connections = useMemo(() => {
@@ -186,12 +229,16 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
     // Get all cards to render
     const cardsToRender = useMemo(() => {
         const cardSet = new Set<CardData>();
+        
+        // Add all related cards
         if (focusedCard) cardSet.add(focusedCard);
         if (parentCard) cardSet.add(parentCard);
         childCards.forEach(c => cardSet.add(c));
         siblingCards.forEach(c => cardSet.add(c));
+        contextCards.forEach(c => cardSet.add(c));
+        
         return Array.from(cardSet);
-    }, [focusedCard, parentCard, childCards, siblingCards]);
+    }, [focusedCard, parentCard, childCards, siblingCards, contextCards]);
     
     // Navigation handlers
     const handleNavigateParent = useCallback(() => {
