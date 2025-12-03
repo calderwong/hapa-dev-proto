@@ -290,3 +290,107 @@ const isImageModel = (modelName: string): boolean => {
 4. ✓ Settings allow customization of models
 5. ✓ Errors are handled gracefully with clear feedback
 6. ✓ Visual effects make the experience feel "magical"
+
+---
+
+## Bugfix Notes (Dec 2, 2025)
+
+### Issue: "Not enough context" Error for Rich Wormhole Documents
+
+**Problem:** Cards with wormhole-processed content (summaries, key terms, wiki entries) were showing "Not enough context to generate an image" despite having rich metadata.
+
+**Root Cause:** The context extraction in `handleGenerateImage` was only checking a narrow set of fields:
+- `rec.text`, `rec.content`, `rec.description`, `rec.bio`
+- `rec.tags`
+- `rec.message?.content`
+
+But wormhole documents store content differently:
+- **Summaries**: `cardRecord.summaries[]` - array of {text, style} objects
+- **Key Terms**: `cardRecord.keyTerms[]` - array of term strings
+- **Original Text**: Stored in file at `cardRecord.wormhole.ingest.originalPath`
+- **Title**: `cardRecord.name` or `cardRecord.title`
+- **Kind**: `cardRecord.kind` = "document"
+
+### Solution: Enhanced Context Extraction
+
+Update the frontend (`CardLibrary.tsx`) and backend (`main.ts`) to extract context from ALL available sources:
+
+```typescript
+// Enhanced CardContext extraction
+const extractCardContext = (card: CardIndexEntry) => {
+  const rec = card.cardRecord || {};
+  
+  // 1. Try direct text fields
+  let textContent = rec.text || rec.content || rec.description || rec.bio || '';
+  
+  // 2. Extract from summaries (most valuable for wormhole docs)
+  if (!textContent && rec.summaries?.length > 0) {
+    textContent = rec.summaries
+      .map((s: any) => s.text || s.medium || s.short || '')
+      .filter(Boolean)
+      .join('\n');
+  }
+  
+  // 3. Extract key terms as tags
+  let tags = rec.tags || [];
+  if (rec.keyTerms?.length > 0) {
+    const terms = rec.keyTerms.map((kt: any) => 
+      typeof kt === 'string' ? kt : kt.term || kt.name || ''
+    ).filter(Boolean);
+    tags = [...tags, ...terms];
+  }
+  
+  // 4. Card title/name (always available)
+  const name = card.name || rec.name || rec.title || 'Untitled';
+  
+  // 5. Message content for chat cards
+  const messageContent = rec.message?.content || card.messageContent || '';
+  
+  return {
+    name,
+    mediaKind: card.mediaKind || rec.kind || 'unknown',
+    text: textContent,
+    tags,
+    messageContent,
+  };
+};
+```
+
+### Backend Enhancement
+
+The backend IPC handler should also be enhanced to:
+1. Accept richer context from the frontend
+2. Fallback to reading original file if no text content
+3. Use summaries as the primary content source for document cards
+
+### Data Flow Diagram (Updated)
+
+```
+Card Inspector
+     │
+     ├─► Extract Context (ENHANCED)
+     │    ├─ rec.text / content / description
+     │    ├─ rec.summaries[].text ← NEW
+     │    ├─ rec.keyTerms[] as tags ← NEW  
+     │    ├─ card.name / rec.title ← NEW
+     │    └─ rec.message?.content
+     │
+     ├─► Frontend validation
+     │    (at least name OR text OR tags)
+     │
+     └─► IPC: generate-image-for-card
+          │
+          ├─► LLM: Craft image prompt
+          │
+          └─► Image Model: Generate image
+```
+
+### Files Modified for Fix
+
+1. **`src/pages/CardLibrary.tsx`**
+   - Updated `handleGenerateImage` to extract summaries and keyTerms
+   - Relaxed validation (name alone should be enough for simple cases)
+
+2. **`electron/main.ts`**
+   - Enhanced context handling in `generate-image-for-card`
+   - Better prompt construction using all available context

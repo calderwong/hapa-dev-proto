@@ -852,19 +852,54 @@ const CardLibrary: React.FC = () => {
     const handleGenerateImage = async () => {
         if (!selected || !window.electronAPI?.generateImageForCard) return;
         
-        // Extract context from the card
+        // Extract context from the card - ENHANCED to handle wormhole documents
         const rec = selected.cardRecord || selected.raw || {};
+        
+        // 1. Try direct text fields
+        let textContent = rec.text || rec.content || rec.description || rec.bio || '';
+        
+        // 2. Extract from summaries (most valuable for wormhole docs)
+        if (!textContent && rec.summaries?.length > 0) {
+            textContent = rec.summaries
+                .map((s: any) => s.text || s.medium || s.short || '')
+                .filter(Boolean)
+                .slice(0, 3) // Limit to first 3 summaries
+                .join('\n\n');
+        }
+        
+        // 3. Extract key terms and add to tags
+        let tags = Array.isArray(rec.tags) ? [...rec.tags] : [];
+        if (rec.keyTerms?.length > 0) {
+            const terms = rec.keyTerms
+                .map((kt: any) => typeof kt === 'string' ? kt : kt.term || kt.name || '')
+                .filter(Boolean)
+                .slice(0, 20); // Limit to 20 key terms
+            tags = [...tags, ...terms];
+        }
+        
+        // 4. Card title/name
+        const name = selected.name || rec.name || rec.title || 'Untitled';
+        
+        // 5. Message content for chat cards
+        const messageContent = rec.message?.content || selected.messageContent || '';
+        
+        // 6. Get card kind for context
+        const mediaKind = selected.mediaKind || rec.kind || 'unknown';
+        
         const cardContext = {
-            name: selected.name || 'Untitled',
-            mediaKind: selected.mediaKind,
-            text: rec.text || rec.content || rec.description || rec.bio || '',
-            tags: rec.tags || [],
-            messageContent: rec.message?.content || selected.messageContent || '',
+            name,
+            mediaKind,
+            text: textContent,
+            tags,
+            messageContent,
         };
         
-        // Check if there's enough context
-        if (!cardContext.text && !cardContext.messageContent && (!cardContext.tags || cardContext.tags.length === 0)) {
-            setImageGenError('Not enough context to generate an image. Add some text or tags to this card.');
+        // Check if there's enough context - RELAXED: name + any other content is enough
+        const hasContent = cardContext.text || cardContext.messageContent || cardContext.tags.length > 0;
+        const hasName = cardContext.name && cardContext.name !== 'Untitled';
+        
+        if (!hasContent && !hasName) {
+            setImageGenError('Not enough context to generate an image. Add some text, tags, or a title.');
             setImageGenState('error');
             setTimeout(() => setImageGenState('idle'), 3000);
             return;

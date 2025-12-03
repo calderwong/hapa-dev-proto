@@ -337,10 +337,13 @@ const getAdminSettings = () => {
     const audioMode = stored.audioMode === 'realtime' ? 'realtime' : 'transcribe';
     return {
         audioMode,
+        imageGenSettings: stored.imageGenSettings,
     };
 };
 const saveAdminSettings = (settings) => {
-    store.set(ADMIN_SETTINGS_KEY, settings);
+    const existing = getAdminSettings();
+    const merged = { ...existing, ...settings };
+    store.set(ADMIN_SETTINGS_KEY, merged);
 };
 const OPENAI_CHAT_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_TRANSCRIPT_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
@@ -1003,11 +1006,120 @@ electron_1.app.whenReady().then(() => {
         return getAdminSettings();
     });
     electron_1.ipcMain.handle('save-admin-settings', (_event, settings) => {
-        const next = {
-            audioMode: settings.audioMode === 'realtime' ? 'realtime' : 'transcribe',
-        };
-        saveAdminSettings(next);
+        saveAdminSettings(settings);
         return true;
+    });
+    // Generate image for a card using LLM to craft prompt, then image model
+    electron_1.ipcMain.handle('generate-image-for-card', async (_event, { cardContext, }) => {
+        const apiKey = store.get('geminiKey');
+        if (!apiKey) {
+            throw new Error('Gemini API Key not found. Please configure it in Settings.');
+        }
+        const adminSettings = getAdminSettings();
+        const imageGenSettings = adminSettings.imageGenSettings || {
+            defaultImageModel: 'gemini-2.0-flash-preview-image-generation',
+            defaultPromptLLM: 'gemini-1.5-pro',
+        };
+        console.log('[ImageGen] Starting image generation for card:', cardContext.name);
+        console.log('[ImageGen] Using LLM:', imageGenSettings.defaultPromptLLM);
+        console.log('[ImageGen] Using Image Model:', imageGenSettings.defaultImageModel);
+        try {
+            // Step 1: Craft image prompt using LLM
+            const contextSummary = `
+Card Name: ${cardContext.name || 'Untitled'}
+Card Type: ${cardContext.mediaKind || 'unknown'}
+Content: ${cardContext.text || cardContext.messageContent || 'No text content'}
+Tags: ${cardContext.tags?.join(', ') || 'none'}
+        `.trim();
+            const promptCraftingRequest = `
+You are an expert at crafting image generation prompts. Given context about a data card, create a detailed, evocative prompt for an AI image generator.
+
+Rules:
+1. Output ONLY the image prompt, no explanations or preamble
+2. Be specific about style, lighting, composition
+3. Include artistic style keywords (digital art, concept art, cinematic, etc.)
+4. Keep under 150 words
+5. Focus on visual elements that represent the content's essence
+6. Make it visually interesting and artistic
+
+Card Context:
+${contextSummary}
+
+Create an image prompt:`;
+            // Call LLM to craft the prompt
+            const llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultPromptLLM}:generateContent?key=${apiKey}`;
+            const llmResponse = await fetch(llmUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ role: 'user', parts: [{ text: promptCraftingRequest }] }],
+                }),
+            });
+            if (!llmResponse.ok) {
+                const errText = await llmResponse.text();
+                throw new Error(`LLM prompt crafting failed: ${errText}`);
+            }
+            const llmData = await llmResponse.json();
+            const craftedPrompt = llmData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            if (!craftedPrompt) {
+                throw new Error('Failed to craft image prompt from LLM');
+            }
+            console.log('[ImageGen] Crafted prompt:', craftedPrompt.substring(0, 200) + '...');
+            // Step 2: Generate image using the crafted prompt
+            const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultImageModel}:generateContent?key=${apiKey}`;
+            const imageResponse = await fetch(imageUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }],
+                }),
+            });
+            if (!imageResponse.ok) {
+                const errText = await imageResponse.text();
+                throw new Error(`Image generation failed: ${errText}`);
+            }
+            const imageData = await imageResponse.json();
+            // Extract image from response
+            const parts = imageData.candidates?.[0]?.content?.parts || [];
+            let imageBase64 = null;
+            let mimeType = 'image/png';
+            for (const part of parts) {
+                if (part.inlineData?.data) {
+                    imageBase64 = part.inlineData.data;
+                    mimeType = part.inlineData.mimeType || 'image/png';
+                    break;
+                }
+            }
+            if (!imageBase64) {
+                // Check if response contains text (markdown image) instead
+                const textContent = parts.find((p) => p.text)?.text || '';
+                const base64Match = textContent.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+                if (base64Match) {
+                    imageBase64 = base64Match[1];
+                }
+                else {
+                    throw new Error('No image data in response. The model may not support image generation.');
+                }
+            }
+            // Step 3: Save image to file
+            const userDataDir = electron_1.app.getPath('userData');
+            const imagesDir = path.join(userDataDir, 'wormhole', 'card-images');
+            await fs.promises.mkdir(imagesDir, { recursive: true });
+            const fileName = `card-${Date.now()}.${mimeType.split('/')[1] || 'png'}`;
+            const filePath = path.join(imagesDir, fileName);
+            await fs.promises.writeFile(filePath, Buffer.from(imageBase64, 'base64'));
+            console.log('[ImageGen] Saved image to:', filePath);
+            return {
+                success: true,
+                localPath: filePath,
+                mimeType,
+                craftedPrompt,
+            };
+        }
+        catch (error) {
+            console.error('[ImageGen] Error:', error);
+            throw new Error(`Image generation failed: ${error.message}`);
+        }
     });
     // Veo video generation models (image-to-video capable)
     const VEO_VIDEO_MODELS = [
