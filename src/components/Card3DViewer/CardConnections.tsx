@@ -8,17 +8,21 @@ interface Connection {
     toCardId: string;
     fromPosition: [number, number, number];
     toPosition: [number, number, number];
-    type: 'parent-child' | 'extraction' | 'generated';
+    type: 'parent-child' | 'extraction' | 'generated' | 'card-component' | 'derived-from' | 'sibling' | 'reference';
 }
 
 interface CardConnectionsProps {
     connections: Connection[];
 }
 
-const CONNECTION_COLORS = {
+const CONNECTION_COLORS: Record<string, string> = {
     'parent-child': '#22d3ee',  // Cyan
     'extraction': '#a855f7',    // Purple
     'generated': '#f59e0b',     // Amber
+    'card-component': '#6b7280', // Gray - subtle for card->component
+    'derived-from': '#a855f7',  // Purple
+    'sibling': '#10b981',       // Green
+    'reference': '#3b82f6',     // Blue
 };
 
 export const CardConnections: React.FC<CardConnectionsProps> = ({ connections }) => {

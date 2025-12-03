@@ -1,11 +1,18 @@
-import React, { Suspense, useMemo, useCallback, useEffect } from 'react';
+import React, { Suspense, useMemo, useCallback, useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stars, Environment, PerspectiveCamera } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import { Card3D } from './Card3D';
+import { ComponentNode3D } from './ComponentNode3D';
 import { CardConnections } from './CardConnections';
 import { NexusNavigator } from './NexusNavigator';
 import { useViewer3DStore } from './viewer3DStore';
+import { 
+    extractGraphFromCard, 
+    addCardRelationships, 
+    type GraphNode, 
+    type GraphEdge 
+} from './graphTypes';
 
 // Card tier calculation (simplified)
 const calculateTier = (card: CardData): 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic' => {
@@ -25,11 +32,13 @@ const calculateTier = (card: CardData): 'common' | 'uncommon' | 'rare' | 'epic' 
 // Get thumbnail URL from card
 const getCardThumbnail = (card: CardData): string | undefined => {
     if (card.thumbnail) return card.thumbnail;
-    if (card.cardRecord?.imageSet?.images?.[0]?.localPath) {
-        return `file://${card.cardRecord.imageSet.images[0].localPath}`;
+    const rec = card.cardRecord || {};
+    const heroIdx = rec.imageSet?.heroIndex || 0;
+    if (rec.imageSet?.images?.[heroIdx]?.localPath) {
+        return `file://${rec.imageSet.images[heroIdx].localPath}`;
     }
-    if (card.cardRecord?.image?.localPath) {
-        return `file://${card.cardRecord.image.localPath}`;
+    if (rec.image?.localPath) {
+        return `file://${rec.image.localPath}`;
     }
     if (card.mediaLocalPath && card.mediaKind === 'image') {
         return `file://${card.mediaLocalPath}`;
@@ -54,12 +63,25 @@ export interface CardData {
     parentCardId?: string;
     cardRecord?: {
         parentCardId?: string;
+        childCardIds?: string[];
         summaries?: any[];
         keyTerms?: any[];
+        transcripts?: any[];
         imageSet?: {
-            images?: { localPath: string }[];
+            images?: { localPath: string; mimeType?: string; generatedAt?: string; craftedPrompt?: string }[];
+            heroIndex?: number;
+            displayOrder?: number[];
         };
-        image?: { localPath: string };
+        image?: { localPath: string; mimeType?: string };
+        video?: { localPath: string; mimeType?: string; thumbnail?: string };
+        audio?: { localPath: string; mimeType?: string };
+        text?: string;
+        content?: string;
+        wormhole?: {
+            transcripts?: any[];
+            summaries?: any[];
+            keyTerms?: any[];
+        };
     };
 }
 
@@ -188,6 +210,86 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
         }
         return [];
     }, [focusedCard, parentCard, childCards, siblingCards, cards]);
+    
+    // Toggle for showing component nodes
+    const [showComponents, setShowComponents] = useState(true);
+    
+    // Extract graph nodes from focused card (components: images, videos, summaries, etc.)
+    const graphData = useMemo(() => {
+        if (!focusedCard) return { nodes: [], edges: [] };
+        
+        // Extract nodes from focused card
+        let { nodes, edges } = extractGraphFromCard(focusedCard);
+        
+        // Add card relationships
+        const withRelationships = addCardRelationships(cards, focusedCard.cardId, nodes, edges);
+        
+        return withRelationships;
+    }, [focusedCard, cards]);
+    
+    // Calculate positions for component nodes (radiating from focused card)
+    const componentPositions = useMemo(() => {
+        const positions = new Map<string, [number, number, number]>();
+        
+        // Get component nodes (non-card nodes)
+        const componentNodes = graphData.nodes.filter(n => n.type !== 'card');
+        
+        // Group by type for organized layout
+        const byType: Record<string, GraphNode[]> = {};
+        componentNodes.forEach(node => {
+            if (!byType[node.type]) byType[node.type] = [];
+            byType[node.type].push(node);
+        });
+        
+        // Position each type group in a sector
+        const typeOrder = ['image', 'video', 'audio', 'transcript', 'summary', 'keyterm', 'text', 'wiki'];
+        let typeIndex = 0;
+        
+        typeOrder.forEach(type => {
+            const nodesOfType = byType[type] || [];
+            if (nodesOfType.length === 0) return;
+            
+            // Each type gets a sector of the circle around the focused card
+            const sectorAngle = (typeIndex / typeOrder.length) * Math.PI * 2;
+            const baseRadius = 2.5;
+            
+            nodesOfType.forEach((node, i) => {
+                const angle = sectorAngle + (i * 0.25) - (nodesOfType.length * 0.125);
+                const radius = baseRadius + (i % 2) * 0.5;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                const y = (i % 3 - 1) * 0.4;
+                
+                positions.set(node.id, [x, y, z]);
+            });
+            
+            typeIndex++;
+        });
+        
+        return positions;
+    }, [graphData.nodes]);
+    
+    // Build component connections
+    const componentConnections = useMemo(() => {
+        if (!showComponents) return [];
+        
+        return graphData.edges
+            .filter(edge => edge.type === 'card-component')
+            .map(edge => {
+                const fromPos = edge.fromId === focusedCard?.cardId 
+                    ? [0, 0, 0] as [number, number, number]
+                    : componentPositions.get(edge.fromId) || [0, 0, 0];
+                const toPos = componentPositions.get(edge.toId) || [0, 0, 0];
+                
+                return {
+                    fromCardId: edge.fromId,
+                    toCardId: edge.toId,
+                    fromPosition: fromPos,
+                    toPosition: toPos,
+                    type: edge.type,
+                };
+            });
+    }, [graphData.edges, focusedCard, componentPositions, showComponents]);
     
     // Calculate card positions
     const cardPositions = useMemo(() => {
@@ -405,6 +507,34 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                     })}
                 </Suspense>
                 
+                {/* Component nodes (images, videos, summaries, etc.) */}
+                {showComponents && (
+                    <Suspense fallback={null}>
+                        {graphData.nodes
+                            .filter(node => node.type !== 'card')
+                            .map(node => {
+                                const position = componentPositions.get(node.id) || [0, 0, 0];
+                                return (
+                                    <ComponentNode3D
+                                        key={node.id}
+                                        node={node}
+                                        position={position as [number, number, number]}
+                                        isFocused={false}
+                                        onClick={() => {
+                                            // Could expand to show details
+                                            console.log('Clicked component:', node);
+                                        }}
+                                    />
+                                );
+                            })}
+                    </Suspense>
+                )}
+                
+                {/* Component connection lines */}
+                {showComponents && componentConnections.length > 0 && (
+                    <CardConnections connections={componentConnections} />
+                )}
+                
                 {/* Controls */}
                 <OrbitControls
                     enablePan={true}
@@ -441,11 +571,22 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
             
             {/* Compact status bar - top right */}
             <div className="absolute top-4 right-16 z-50 flex items-center gap-2">
+                <button
+                    onClick={() => setShowComponents(!showComponents)}
+                    className={`px-2 py-1 rounded text-[10px] font-mono transition-all ${
+                        showComponents 
+                            ? 'bg-cyan-900/50 border border-cyan-500/50 text-cyan-300' 
+                            : 'bg-gray-900/70 border border-gray-700/50 text-gray-500'
+                    }`}
+                    title="Toggle component nodes (images, videos, summaries)"
+                >
+                    ◈ {graphData.nodes.filter(n => n.type !== 'card').length} parts
+                </button>
                 <div className="bg-gray-900/70 backdrop-blur-sm border border-gray-700/50 rounded px-2 py-1 text-[10px] font-mono text-gray-400">
                     {viewMode.toUpperCase()}
                 </div>
                 <div className="bg-gray-900/70 backdrop-blur-sm border border-gray-700/50 rounded px-2 py-1 text-[10px] font-mono text-gray-400">
-                    {cardsToRender.length} visible
+                    {cardsToRender.length} cards
                 </div>
                 {parentCard && (
                     <div className="bg-cyan-900/30 border border-cyan-500/30 rounded px-2 py-1 text-[10px] font-mono text-cyan-400">
