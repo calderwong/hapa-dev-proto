@@ -931,8 +931,23 @@ const CardLibrary: React.FC = () => {
                 // Save to Hypercore - use cardId as the core name (standard pattern)
                 // coreName might be undefined for wormhole cards
                 const coreToUse = selected.coreName || selected.cardId;
+                console.log('[ImageGen] Saving to core:', coreToUse, 'coreName:', selected.coreName, 'cardId:', selected.cardId);
+                
                 if (window.electronAPI.p2pAppend && coreToUse) {
-                    await window.electronAPI.p2pAppend(coreToUse, JSON.stringify(updatedRecord));
+                    try {
+                        // p2pAppend expects { name, data } object
+                        await window.electronAPI.p2pAppend({ 
+                            name: coreToUse, 
+                            data: JSON.stringify(updatedRecord) 
+                        });
+                        console.log('[ImageGen] Successfully saved to Hypercore');
+                    } catch (saveErr: any) {
+                        console.error('[ImageGen] Failed to save to Hypercore:', saveErr);
+                        // Image was generated successfully, just couldn't save to card
+                        // Still show success since image exists on disk
+                    }
+                } else {
+                    console.warn('[ImageGen] No valid core name, skipping Hypercore save. Image saved to:', result.localPath);
                 }
                 
                 setImageGenState('complete');
