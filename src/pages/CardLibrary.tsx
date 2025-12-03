@@ -1,8 +1,11 @@
 // @ts-nocheck
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { useLocation } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 import CardWorkspace from '../components/CardWorkspace';
+
+// Lazy load 3D viewer for performance
+const Card3DViewer = lazy(() => import('../components/Card3DViewer/Card3DViewer').then(m => ({ default: m.Card3DViewer })));
 import { 
     calculateCardQuality, 
     getCardType, 
@@ -114,6 +117,9 @@ const CardLibrary: React.FC = () => {
     // Navigation Animation State
     const [navAnimation, setNavAnimation] = useState<'none' | 'zoom-to-child' | 'zoom-to-parent' | 'slide-left' | 'slide-right'>('none');
     const [pendingCard, setPendingCard] = useState<CardIndexEntry | null>(null);
+    
+    // 3D Viewer State
+    const [show3DViewer, setShow3DViewer] = useState(false);
 
     const emitWormholeRunEvent = (
         type: 'start' | 'end',
@@ -1479,6 +1485,7 @@ const CardLibrary: React.FC = () => {
     }
 
     return (
+        <>
         <div className="flex flex-col h-full bg-gray-900 text-white overflow-hidden">
             {/* Status Header Bar */}
             <div className="flex-none px-6 py-3 bg-gray-900/80 backdrop-blur border-b border-gray-700 flex items-center justify-between z-10">
@@ -1533,6 +1540,15 @@ const CardLibrary: React.FC = () => {
                         size="small"
                     >
                         Sync
+                    </rux-button>
+                    <rux-button
+                        onClick={() => setShow3DViewer(true)}
+                        disabled={cards.length === 0}
+                        icon="view-in-ar"
+                        size="small"
+                        className="bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/50"
+                    >
+                        3D Nexus
                     </rux-button>
                 </div>
             </div>
@@ -2474,6 +2490,37 @@ const CardLibrary: React.FC = () => {
             </div>
             </div>
         </div>
+        
+        {/* 3D Card Viewer */}
+        {show3DViewer && (
+            <Suspense fallback={
+                <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="text-cyan-400 text-4xl mb-4 animate-pulse">◈</div>
+                        <div className="text-cyan-300 font-mono">Loading Card Nexus...</div>
+                    </div>
+                </div>
+            }>
+                <Card3DViewer
+                    cards={cards.map(c => ({
+                        cardId: c.cardId,
+                        name: c.name,
+                        mediaKind: c.mediaKind,
+                        thumbnail: c.thumbnail,
+                        mediaLocalPath: c.mediaLocalPath,
+                        parentCardId: c.parentCardId,
+                        cardRecord: c.cardRecord,
+                    }))}
+                    focusedCardId={selected?.cardId}
+                    onCardSelect={(cardId) => {
+                        const card = cards.find(c => c.cardId === cardId);
+                        if (card) setSelected(card);
+                    }}
+                    onClose={() => setShow3DViewer(false)}
+                />
+            </Suspense>
+        )}
+        </>
     );
 };
 
