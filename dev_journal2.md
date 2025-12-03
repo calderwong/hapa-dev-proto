@@ -1533,3 +1533,53 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 **Tags:** #feature #ai #video-generation #veo #loop #image-set #card-hierarchy #ux
 **Est. Avg. Human Dev Time:** 4.0 hours
 
+## Entry 29 – Recursive Media Hierarchy & Enhanced Card Details
+**Prompt:** "Fix video card image generation, add neon glow for loop images, auto-play videos, show card lineage"
+
+**Summary of actions:**
+
+### Parent Context Collection
+- Added `collectParentContext()` to traverse up parent chain (max 5 levels)
+- Collects: parent names, summaries, tags
+- Merges into image generation context for richer prompts
+- Video cards use loop prompt + source prompt + parent context
+
+### Visual Enhancements
+- **Neon Glow for Loop Images:**
+  - Added `@keyframes loop-video-glow` with purple pulsing effect
+  - New CSS class `has-loop-video` applied to images with loop videos
+  - Images with videos now visually stand out beyond the badge
+
+### Video Auto-Play & Global Mute
+- Added global mute state with localStorage persistence (`globalMuted`)
+- Video cards in detail view auto-play and loop
+- Mute toggle button on video player (volume icon)
+- Default: muted
+
+### Card Lineage Display
+- Fixed `getChildCards()` to search by `parentCardId` reference (more robust)
+- Lineage panel shows:
+  - Parent card (clickable, with thumbnail)
+  - Children cards list (clickable, with thumbnails)
+  - "Original (No Parent)" indicator for root cards
+- Navigation with zoom animations between related cards
+
+### TODO Document
+- Created `docs/TODO_RECURSIVE_MEDIA_HIERARCHY.md`
+- Tracked implementation progress across 6 phases
+- Phases 3, 4, 5 completed; Phases 1, 2, 6 partial
+
+**Files Modified:**
+- `src/pages/CardLibrary.tsx` - Parent context, mute state, getChildCards fix
+- `src/index.css` - loop-video-glow animation, has-loop-video class
+- `docs/TODO_RECURSIVE_MEDIA_HIERARCHY.md` - Implementation plan
+
+**Outcome:**
+- Video cards can generate images using parent + self context
+- Images with loop videos have distinctive purple glow
+- Videos auto-play with user-controlled mute
+- Card lineage navigation fully functional
+
+**Tags:** #feature #card-hierarchy #lineage #video #animation #ux
+**Est. Avg. Human Dev Time:** 1.5 hours
+
