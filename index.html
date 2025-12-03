@@ -6,6 +6,17 @@
   <link rel="icon" type="image/png" href="/Paramation_Logo.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>hapa-ag</title>
+  <!-- Set Astro icons path BEFORE any components load -->
+  <script>
+    window.RUX_ICONS_PATH = '/icons/';
+  </script>
+  <!-- Load Astro components SYNCHRONOUSLY before React -->
+  <script type="module">
+    import { defineCustomElements } from '/node_modules/@astrouxds/astro-web-components/loader/index.js';
+    await defineCustomElements(window);
+    console.log('[index.html] Astro components loaded');
+    window.__ASTRO_READY__ = true;
+  </script>
   <script src="./lib/gif.js"></script>
 </head>
 

@@ -5,26 +5,39 @@ import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Custom plugin to exclude Stencil lazy-loaded chunks from Vite processing
+    {
+      name: 'stencil-loader',
+      enforce: 'pre',
+      resolveId(id) {
+        // Don't process Stencil's internal chunks
+        if (id.includes('@astrouxds') && id.includes('.entry.js')) {
+          return { id, external: true };
+        }
+      },
+    },
+  ],
   base: command === 'build' ? './' : '/',
   build: {
     outDir: 'dist-renderer',
     emptyOutDir: true,
   },
   optimizeDeps: {
-    // Include Stencil core dependencies but let the web components lazy-load
-    include: ['@stencil/core'],
+    // Pre-bundle the loader but exclude lazy-loaded components
+    include: ['@astrouxds/astro-web-components/loader'],
+    exclude: ['@astrouxds/astro-web-components'],
   },
   resolve: {
     alias: {
-      // Help Vite resolve Stencil's lazy-loaded components
       '@astrouxds/astro-web-components': path.resolve(__dirname, 'node_modules/@astrouxds/astro-web-components'),
     },
   },
   server: {
     fs: {
-      // Allow serving files from node_modules for Stencil lazy loading
-      allow: ['.', 'node_modules/@astrouxds'],
+      // Allow serving ALL of node_modules for Stencil lazy loading
+      allow: ['.', 'node_modules'],
     },
   },
 }))

@@ -35,7 +35,14 @@ function App() {
   }, []);
 
   return (
-    <Router>
+    <>
+      {/* Hidden Stencil warmup - forces lazy-loaded components to fully initialize */}
+      <div style={{ position: 'absolute', left: '-9999px', visibility: 'hidden' }} aria-hidden="true">
+        <rux-icon icon="check"></rux-icon>
+        <rux-status status="normal"></rux-status>
+      </div>
+      
+      <Router>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Chat />} />
@@ -55,6 +62,7 @@ function App() {
         </Route>
       </Routes>
     </Router>
+    </>
   );
 }
 
