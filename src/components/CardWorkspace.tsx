@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { PrimaryButton, SecondaryButton } from './Button';
 import SpriteSheetConverter from './SpriteSheetConverter';
 import { SpriteAnimationGenerator } from './SpriteAnimationGenerator';
+import { SpriteAudioPanel } from './SpriteAudioPanel';
 
 interface CardWorkspaceProps {
     card: any;
@@ -35,6 +36,11 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
     const [generatedChildren, setGeneratedChildren] = useState<Array<{ cardId: string; type: string; label: string; imageUrl?: string }>>(card.children || []);
     // Lightbox state for viewing generated images
     const [viewingImage, setViewingImage] = useState<string | null>(null);
+    // Audio children for sprite-animation cards
+    const [audioChildren, setAudioChildren] = useState<Array<{ cardId: string; title: string; duration?: number; url?: string; createdAt?: string }>>([]);
+    
+    // Check if this is a sprite-animation card (can have audio)
+    const isSpriteAnimation = card.data?.subType === 'sprite-animation' || card.subType === 'sprite-animation';
 
     // Initialize versions (simulated for now, would fetch from P2P in real app)
     useEffect(() => {
@@ -119,7 +125,7 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
         if (onUpdate) onUpdate();
     };
 
-    const handleSpriteGenerate = async (blob: Blob) => {
+    const handleSpriteGenerate = async (blob: Blob, animationName: string) => {
         if (!window.electronAPI?.wormholeIngestContent || !window.electronAPI?.p2pAppend) return;
 
         setConverting(true);
@@ -131,10 +137,11 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
                 const base64data = reader.result as string;
                 const base64 = base64data.split(',')[1];
 
-                // Ingest GIF
+                // Ingest GIF with animation name in filename
+                const safeFileName = animationName.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-');
                 const result = await window.electronAPI.wormholeIngestContent({
                     bytesBase64: base64,
-                    fileName: `sprite-animation-${Date.now()}.gif`,
+                    fileName: `${safeFileName}-${Date.now()}.gif`,
                     mediaType: 'image',
                     sourceLabel: 'sprite-sheet-gif'
                 });
@@ -169,7 +176,7 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
                     ...animLatest,
                     id: animCardId, // Ensure ID is set
                     type: 'card', // Ensure type is set
-                    title: `Sprite Animation from ${card.data?.title || 'Card'}`,
+                    title: animationName, // Use provided animation name
                     subType: 'sprite-animation',
                     parentId: card.id, // Link to parent
                     tags: [...(animLatest.tags || []), 'sprite', 'animation', 'generated'],
@@ -207,7 +214,7 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
                         { 
                             cardId: animCardId, 
                             type: 'sprite-animation', 
-                            label: 'Generated GIF' 
+                            label: animationName // Use provided animation name
                         }
                     ],
                     updatedAt: new Date().toISOString()
@@ -227,19 +234,33 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
                         cardId: animCardId,
                         coreName: animCardId, // Wormhole uses ID as core name
                         title: updatedAnimRecord.title,
-                        type: 'image', // Index type
+                        mediaType: 'image', // Card media type
                         subType: 'sprite-animation',
                         thumbnail: `data:image/gif;base64,${base64}`, // Use the GIF itself as thumbnail
                         createdAt: updatedAnimRecord.createdAt
                     })
                 });
 
-                setShowSpriteConverter(false);
+                // Add to local generated children for immediate UI feedback
+                setGeneratedChildren(prev => [
+                    ...prev,
+                    { 
+                        cardId: animCardId, 
+                        type: 'sprite-animation', 
+                        label: animationName,
+                        imageUrl: `data:image/gif;base64,${base64}`
+                    }
+                ]);
+
+                // Don't close converter - allow creating more animations!
+                // setShowSpriteConverter(false);
                 setConverting(false);
-                // Ideally trigger a refresh here, but for now just close
+                
+                if (onUpdate) onUpdate();
             };
         } catch (e) {
             console.error("Failed to generate sprite sheet GIF:", e);
+            setConverting(false);
         }
     };
 
@@ -275,14 +296,23 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
             }
         }
 
-        // 2. Construct Instruction-Rich Prompt
-        const instructions = `
-REQUIREMENT: Create a pixel-art sprite sheet animation (grid layout e.g. 4x4 or 3x3) on a white background.
-The sprites should show the character in motion (e.g. walking, attacking, idling).
-Maintain consistent size and style across frames.
+        // 2. Construct Instruction-Rich Prompt (using stored setting or default)
+        const storedSpritePrompt = localStorage.getItem('spriteSheetPromptTemplate');
+        const defaultPromptTemplate = `REQUIREMENT: Create a pixel-art sprite sheet animation arranged in a grid layout (e.g. 4x4 or 3x3).
 
-USER REQUEST: ${prompt}
-        `;
+CRITICAL RULES:
+- SOLID BACKGROUND ONLY: Use a plain, solid color background (white or single flat color). NO grid lines, NO guidelines, NO patterns.
+- NO TEXT: Do not include any text, labels, titles, frame numbers, or annotations anywhere on the image.
+- EVENLY SPACED FRAMES: All animation frames must be perfectly aligned in a uniform grid with equal spacing between each frame.
+- CONSISTENT SIZE: Each frame must be the exact same dimensions.
+- CONSISTENT STYLE: Maintain the same art style, colors, and proportions across all frames.
+
+The sprites should show the character in fluid motion (e.g. walking cycle, attack sequence, idle animation).
+
+USER REQUEST: {{USER_PROMPT}}`;
+        
+        const promptTemplate = storedSpritePrompt || defaultPromptTemplate;
+        const instructions = promptTemplate.replace('{{USER_PROMPT}}', prompt);
 
         console.log('[Animation] Sending request to Image Gen Pipeline:', instructions);
 
@@ -391,7 +421,7 @@ USER REQUEST: ${prompt}
                         cardId: animCardId,
                         coreName: animCardId,
                         title: updatedAnimRecord.title,
-                        type: 'image',
+                        mediaType: 'image',
                         subType: 'sprite-animation',
                         thumbnail: `data:image/png;base64,${base64}`,
                         createdAt: updatedAnimRecord.createdAt
@@ -430,6 +460,226 @@ USER REQUEST: ${prompt}
         }
     };
 
+    // === Audio Attachment Handlers (for sprite-animation cards) ===
+
+    const handleAudioUpload = async (file: File) => {
+        if (!window.electronAPI?.wormholeIngestContent) return;
+
+        try {
+            // Convert file to base64
+            const reader = new FileReader();
+            const base64 = await new Promise<string>((resolve) => {
+                reader.onloadend = () => {
+                    const result = reader.result as string;
+                    resolve(result.split(',')[1]);
+                };
+                reader.readAsDataURL(file);
+            });
+
+            // Ingest the audio file
+            const ingestResult = await window.electronAPI.wormholeIngestContent({
+                bytesBase64: base64,
+                fileName: file.name,
+                mediaType: 'audio',
+                sourceLabel: 'sprite-audio-upload'
+            });
+
+            const audioCardId = ingestResult.cardId;
+
+            // Update the audio card with metadata linking to parent animation
+            const audioRecord = {
+                type: 'card',
+                kind: 'audio',
+                id: audioCardId,
+                title: file.name.replace(/\.[^/.]+$/, ''), // Remove extension
+                subType: 'sprite-sfx',
+                parentId: card.id,
+                createdAt: new Date().toISOString(),
+                audio: {
+                    localPath: ingestResult.localPath,
+                    mimeType: file.type
+                }
+            };
+
+            await window.electronAPI.p2pAppend({
+                name: audioCardId,
+                data: JSON.stringify(audioRecord)
+            });
+
+            // Link as child of animation card
+            const coreName = card.coreName || card.id;
+            const coreRecords = await window.electronAPI.p2pRead(coreName);
+            let parentLatest: any = {};
+            for (const r of coreRecords) {
+                try {
+                    const p = JSON.parse(r);
+                    if (p.type === 'card') parentLatest = p;
+                } catch { }
+            }
+
+            const updatedParentRecord = {
+                ...parentLatest,
+                children: [
+                    ...(parentLatest.children || []),
+                    { cardId: audioCardId, type: 'sprite-sfx', label: audioRecord.title }
+                ],
+                updatedAt: new Date().toISOString()
+            };
+
+            await window.electronAPI.p2pAppend({
+                name: coreName,
+                data: JSON.stringify(updatedParentRecord)
+            });
+
+            // Update local state
+            setAudioChildren(prev => [
+                ...prev,
+                {
+                    cardId: audioCardId,
+                    title: audioRecord.title,
+                    url: `file://${ingestResult.localPath?.replace(/\\/g, '/')}`,
+                    createdAt: audioRecord.createdAt
+                }
+            ]);
+
+            if (onUpdate) onUpdate();
+        } catch (error) {
+            console.error('Audio upload failed:', error);
+            throw error;
+        }
+    };
+
+    const handleAudioRecord = async (audioBlob: Blob, name: string) => {
+        if (!window.electronAPI?.wormholeIngestContent) return;
+
+        try {
+            // Convert blob to base64
+            const reader = new FileReader();
+            const base64 = await new Promise<string>((resolve) => {
+                reader.onloadend = () => {
+                    const result = reader.result as string;
+                    resolve(result.split(',')[1]);
+                };
+                reader.readAsDataURL(audioBlob);
+            });
+
+            // Determine file extension from mime type
+            const mimeType = audioBlob.type;
+            const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('mp4') ? 'm4a' : 'wav';
+            const fileName = `${name.replace(/[^a-zA-Z0-9\s-]/g, '')}-${Date.now()}.${ext}`;
+
+            // Ingest the audio
+            const ingestResult = await window.electronAPI.wormholeIngestContent({
+                bytesBase64: base64,
+                fileName: fileName,
+                mediaType: 'audio',
+                sourceLabel: 'sprite-audio-recording'
+            });
+
+            const audioCardId = ingestResult.cardId;
+
+            // Update the audio card with metadata
+            const audioRecord = {
+                type: 'card',
+                kind: 'audio',
+                id: audioCardId,
+                title: name,
+                subType: 'sprite-sfx',
+                parentId: card.id,
+                createdAt: new Date().toISOString(),
+                audio: {
+                    localPath: ingestResult.localPath,
+                    mimeType: mimeType,
+                    duration: undefined // Could be extracted if needed
+                },
+                generationMetadata: {
+                    recordedAt: new Date().toISOString(),
+                    syncedWithAnimation: true,
+                    sourceAnimationId: card.id
+                }
+            };
+
+            await window.electronAPI.p2pAppend({
+                name: audioCardId,
+                data: JSON.stringify(audioRecord)
+            });
+
+            // Link as child of animation card
+            const coreName = card.coreName || card.id;
+            const coreRecords = await window.electronAPI.p2pRead(coreName);
+            let parentLatest: any = {};
+            for (const r of coreRecords) {
+                try {
+                    const p = JSON.parse(r);
+                    if (p.type === 'card') parentLatest = p;
+                } catch { }
+            }
+
+            const updatedParentRecord = {
+                ...parentLatest,
+                children: [
+                    ...(parentLatest.children || []),
+                    { cardId: audioCardId, type: 'sprite-sfx', label: name }
+                ],
+                updatedAt: new Date().toISOString()
+            };
+
+            await window.electronAPI.p2pAppend({
+                name: coreName,
+                data: JSON.stringify(updatedParentRecord)
+            });
+
+            // Update local state
+            setAudioChildren(prev => [
+                ...prev,
+                {
+                    cardId: audioCardId,
+                    title: name,
+                    url: `file://${ingestResult.localPath?.replace(/\\/g, '/')}`,
+                    createdAt: audioRecord.createdAt
+                }
+            ]);
+
+            if (onUpdate) onUpdate();
+        } catch (error) {
+            console.error('Audio recording save failed:', error);
+            throw error;
+        }
+    };
+
+    const handleAudioDelete = async (audioCardId: string) => {
+        // Remove from local state (P2P delete is more complex, just unlink for now)
+        setAudioChildren(prev => prev.filter(a => a.cardId !== audioCardId));
+        
+        // Update parent to remove child reference
+        try {
+            const coreName = card.coreName || card.id;
+            const coreRecords = await window.electronAPI.p2pRead(coreName);
+            let parentLatest: any = {};
+            for (const r of coreRecords) {
+                try {
+                    const p = JSON.parse(r);
+                    if (p.type === 'card') parentLatest = p;
+                } catch { }
+            }
+
+            const updatedParentRecord = {
+                ...parentLatest,
+                children: (parentLatest.children || []).filter((c: any) => c.cardId !== audioCardId),
+                updatedAt: new Date().toISOString()
+            };
+
+            await window.electronAPI.p2pAppend({
+                name: coreName,
+                data: JSON.stringify(updatedParentRecord)
+            });
+
+            if (onUpdate) onUpdate();
+        } catch (error) {
+            console.error('Failed to unlink audio:', error);
+        }
+    };
+
     return (
         <div className="flex h-full gap-6 animate-in fade-in zoom-in duration-300">
             {/* Left Panel: Content & Editor */}
@@ -447,6 +697,12 @@ USER REQUEST: ${prompt}
                                     <div className="px-2 py-0.5 rounded bg-green-900/50 border border-green-500/50 text-green-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                                         <rux-icon icon="local-florist" size="extra-small"></rux-icon>
                                         Sprite Seed
+                                    </div>
+                                )}
+                                {isSpriteAnimation && (
+                                    <div className="px-2 py-0.5 rounded bg-cyan-900/50 border border-cyan-500/50 text-cyan-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                                        <rux-icon icon="movie-filter" size="extra-small"></rux-icon>
+                                        Animation
                                     </div>
                                 )}
                             </div>
@@ -513,10 +769,35 @@ USER REQUEST: ${prompt}
                                         imageUrl={card.data?.imageUrl || card.data?.url}
                                         onGenerate={handleSpriteGenerate}
                                         onCancel={() => setShowSpriteConverter(false)}
+                                        existingAnimationsCount={generatedChildren.filter(c => c.type === 'sprite-animation').length}
                                     />
                                 </div>
                             ) : (
-                                <img src={card.data?.imageUrl || card.data?.url} alt="Card Media" className="max-h-full max-w-full rounded-lg shadow-2xl border border-gray-800" />
+                                <div className="flex flex-col items-center gap-6 w-full h-full">
+                                    {/* Image Display */}
+                                    <div className="flex-shrink-0">
+                                        <img 
+                                            src={card.data?.imageUrl || card.data?.url} 
+                                            alt="Card Media" 
+                                            className="max-h-[50vh] max-w-full rounded-lg shadow-2xl border border-gray-800 cursor-pointer hover:border-cyan-500/50 transition-colors" 
+                                            onClick={() => setViewingImage(card.data?.imageUrl || card.data?.url)}
+                                        />
+                                    </div>
+                                    
+                                    {/* Audio Panel for Sprite Animations */}
+                                    {isSpriteAnimation && (
+                                        <div className="w-full max-w-2xl">
+                                            <SpriteAudioPanel
+                                                animationCard={card}
+                                                gifUrl={card.data?.imageUrl || card.data?.url}
+                                                audioChildren={audioChildren}
+                                                onUpload={handleAudioUpload}
+                                                onRecordComplete={handleAudioRecord}
+                                                onDelete={handleAudioDelete}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
                             )}
                         </div>
                     )}

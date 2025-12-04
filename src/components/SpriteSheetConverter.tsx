@@ -6,11 +6,20 @@ import { applyChromaKey, detectBackgroundColor } from '../utils/imageProcessing'
 
 interface SpriteSheetConverterProps {
     imageUrl: string;
-    onGenerate: (gifBlob: Blob) => void;
+    onGenerate: (gifBlob: Blob, animationName: string) => void;
     onCancel: () => void;
+    existingAnimationsCount?: number; // How many animations already exist from this sheet
 }
 
-const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, onGenerate, onCancel }) => {
+const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ 
+    imageUrl, 
+    onGenerate, 
+    onCancel,
+    existingAnimationsCount = 0 
+}) => {
+    // Animation Name (for multi-animation support)
+    const [animationName, setAnimationName] = useState('');
+    
     // Inputs
     const [rows, setRows] = useState(4);
     const [cols, setCols] = useState(4);
@@ -200,20 +209,40 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
         const frameWidth = Math.floor(effectiveWidth / cols);
         const frameHeight = Math.floor(effectiveHeight / rows);
 
+        // Determine worker script path - handle both dev and production
+        // In Electron, the path needs to be relative to the served content
+        let workerScript = './lib/gif.worker.js';
+        
+        // Try to detect if we need an absolute path (Electron file:// protocol)
+        if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
+            // In Electron with file:// protocol, try an absolute path
+            const basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
+            workerScript = `${basePath}/lib/gif.worker.js`;
+        }
+
         // Configure GIF with transparency support
+        // Use full URL for worker script to ensure it loads in Electron/Vite
+        const workerUrl = new URL('/lib/gif.worker.js', window.location.origin).href;
+        console.log('[GIF] Worker URL:', workerUrl);
+        
         const gifOptions: any = {
-            workers: 2,
+            workers: 1,
             quality: 10,
             width: frameWidth,
             height: frameHeight,
-            workerScript: './lib/gif.worker.js'
+            workerScript: workerUrl,
+            background: '#000000',
+            debug: true
         };
 
         // Enable transparency if background was removed
+        // GIF.js needs transparency as null (auto-detect) or a specific hex color
         if (removeBackground && processedImage) {
-            gifOptions.transparent = 0x00000000; // Transparent black
+            gifOptions.transparent = null; // Auto-detect transparent color
         }
 
+        console.log('[GIF] Creating encoder with options:', gifOptions);
+        console.log('[GIF] Worker script path:', workerScript);
         const gif = new GIF(gifOptions);
 
         // Create temp canvas for frame extraction
@@ -241,20 +270,40 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
                     0, 0, frameWidth, frameHeight
                 );
 
-                // Add frame with transparency preservation
-                gif.addFrame(ctx, { copy: true, delay: frameDelay, transparent: removeBackground ? 0x00000000 : null });
+                // Add frame - transparency is handled at GIF level, not per-frame
+                gif.addFrame(ctx, { copy: true, delay: frameDelay });
 
                 framesProcessed++;
                 setProgress((framesProcessed / totalFrames) * 50);
             }
         }
 
+        // Set a timeout to detect if workers are stuck
+        let renderStarted = false;
+        const timeoutId = setTimeout(() => {
+            if (!renderStarted) {
+                console.error('[GIF] Worker timeout - render never started');
+                setStatus('GIF worker timeout. Try disabling background removal or refresh the page.');
+                setIsGenerating(false);
+                try {
+                    gif.abort();
+                } catch (e) {
+                    console.warn('[GIF] Could not abort:', e);
+                }
+            }
+        }, 15000); // 15 second timeout
+
         gif.on('progress', (p: number) => {
+            renderStarted = true;
+            clearTimeout(timeoutId);
+            console.log('[GIF] Render progress:', p);
             setProgress(50 + (p * 50));
             setStatus(`Rendering GIF: ${Math.round(p * 100)}%`);
         });
 
         gif.on('finished', (blob: Blob) => {
+            clearTimeout(timeoutId);
+            console.log('[GIF] Render finished, blob size:', blob.size);
             const url = URL.createObjectURL(blob);
             setGeneratedGifUrl(url);
             setGeneratedBlob(blob);
@@ -262,14 +311,50 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
             setStatus('Complete!');
         });
 
+        gif.on('abort', () => {
+            clearTimeout(timeoutId);
+            console.error('[GIF] Render aborted');
+            setStatus('GIF rendering was aborted');
+            setIsGenerating(false);
+        });
+
         setStatus('Rendering GIF...');
-        gif.render();
+        console.log('[GIF] Starting render with', totalFrames, 'frames');
+        console.log('[GIF] gif.frames:', gif.frames?.length);
+        console.log('[GIF] gif.running:', gif.running);
+        
+        // Use setTimeout to ensure event listeners are registered before render starts
+        setTimeout(() => {
+            try {
+                console.log('[GIF] Calling render()...');
+                gif.render();
+                console.log('[GIF] render() called, gif.running:', gif.running);
+            } catch (err) {
+                clearTimeout(timeoutId);
+                console.error('[GIF] Render error:', err);
+                setStatus('Error rendering GIF: ' + (err instanceof Error ? err.message : 'Unknown error'));
+                setIsGenerating(false);
+            }
+        }, 100);
     };
 
     const handleConfirm = () => {
         if (generatedBlob) {
-            onGenerate(generatedBlob);
+            const name = animationName.trim() || `Animation #${existingAnimationsCount + 1}`;
+            onGenerate(generatedBlob, name);
+            
+            // Reset state for next animation
+            resetForNextAnimation();
         }
+    };
+    
+    const resetForNextAnimation = () => {
+        setGeneratedGifUrl(null);
+        setGeneratedBlob(null);
+        setAnimationName('');
+        setProgress(0);
+        setStatus('');
+        setIsGenerating(false);
     };
 
     return (
@@ -287,6 +372,26 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
             <div className="flex gap-4 h-full overflow-hidden">
                 {/* Controls */}
                 <div className="w-64 flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2">
+                    {/* Animation Name */}
+                    <div className="space-y-2">
+                        <label className="text-xs uppercase text-gray-500 font-bold flex items-center gap-2">
+                            <rux-icon icon="label" size="extra-small"></rux-icon>
+                            Animation Name
+                        </label>
+                        <input
+                            type="text"
+                            value={animationName}
+                            onChange={(e) => setAnimationName(e.target.value)}
+                            placeholder={`Animation #${existingAnimationsCount + 1}`}
+                            className="w-full bg-gray-900/50 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
+                        {existingAnimationsCount > 0 && (
+                            <div className="text-[10px] text-cyan-400">
+                                {existingAnimationsCount} animation{existingAnimationsCount > 1 ? 's' : ''} already created
+                            </div>
+                        )}
+                    </div>
+
                     <div className="space-y-2">
                         <label className="text-xs uppercase text-gray-500 font-bold">Grid Layout</label>
                         <div className="grid grid-cols-2 gap-2">

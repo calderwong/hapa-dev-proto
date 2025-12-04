@@ -1678,3 +1678,96 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 **Tags:** #bugfix #optimization #local-vision #z-image-turbo #fp16 #sdxl-turbo #cuda #localstorage
 **Est. Avg. Human Dev Time:** 2.5 hours
 
+## Entry 36 – Sprite Audio Attachment System
+**Prompt:** "Add feature to attach audio (upload or record) to sprite animation cards as child cards, with 3-second countdown synced to GIF playback."
+
+**Summary of actions:**
+- **Design Phase:**
+    - Created `docs/DESIGN_SPRITE_AUDIO_ATTACHMENT.md` with 4-stage card hierarchy:
+      Original Image → Sprite Seed → Sprite Sheet → Sprite Animation → Audio Clip
+    - Each stage creates a child card linked to its parent.
+
+- **AudioRecorder Component (`AudioRecorder.tsx`):**
+    - Full-screen modal with GIF preview synchronized to recording.
+    - 3-second countdown before recording starts (GIF pauses at frame 0).
+    - Web Audio API integration for microphone access.
+    - Real-time waveform visualization during recording.
+    - Preview, Re-record, and Save flow with custom clip naming.
+    - Proper cleanup of streams and resources.
+
+- **SpriteAudioPanel Component (`SpriteAudioPanel.tsx`):**
+    - Panel for sprite-animation cards showing:
+      - Upload button for existing audio files
+      - Record button to open AudioRecorder modal
+      - List of attached audio children with play/pause and delete controls
+    - Hidden audio elements for playback control.
+
+- **CardWorkspace Integration:**
+    - Detects `sprite-animation` cards via `subType` check.
+    - Audio panel shown below animation GIF in content area.
+    - Added handlers: `handleAudioUpload`, `handleAudioRecord`, `handleAudioDelete`.
+    - Audio cards linked as children with `parentId` and P2P linking.
+    - Visual "Animation" badge in header for sprite-animation cards.
+
+- **Card Structure for Audio:**
+    - `type: 'audio'`, `subType: 'sprite-sfx'`
+    - `parentId` links to animation card
+    - `generationMetadata` tracks sync info for recorded clips
+
+**Tags:** #feature #audio #sprite-animation #recording #web-audio-api #p2p #card-hierarchy
+**Est. Avg. Human Dev Time:** 3.5 hours
+
+## Entry 37 – Sprite Sheet Prompt Improvements & Admin Panel
+**Prompt:** "Update sprite animation prompt to be explicit about solid background (no lines), no text, evenly spaced frames. Expose prompt as admin setting."
+
+**Summary of actions:**
+- **Updated Default Prompt (`CardWorkspace.tsx`):**
+    - Added explicit CRITICAL RULES section:
+      - SOLID BACKGROUND ONLY: Plain solid color, NO grid lines, NO guidelines, NO patterns
+      - NO TEXT: No labels, titles, frame numbers, or annotations
+      - EVENLY SPACED FRAMES: Uniform grid with equal spacing
+      - CONSISTENT SIZE/STYLE rules
+    - Prompt now uses `localStorage.getItem('spriteSheetPromptTemplate')` for customization
+    - Placeholder `{{USER_PROMPT}}` replaced with user's actual request
+
+- **Admin Panel (`Settings.tsx`):**
+    - Added collapsible "Admin: Prompt Templates" section with orange accent
+    - Textarea for editing the sprite sheet generation prompt
+    - "Reset to Default" button to restore original prompt
+    - "Save Prompt" button to persist to localStorage
+    - Shows `{{USER_PROMPT}}` placeholder explanation
+
+**Tags:** #feature #admin #settings #prompt-engineering #sprite-animation
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 38 – Multi-Animation Sprite Sheet Support
+**Prompt:** "Support creating multiple animations from the same sprite sheet with proper naming and hierarchy."
+
+**Summary of actions:**
+- **Created Plan Document:** `docs/MULTI_ANIMATION_SPRITE_SHEET_PLAN.md`
+    - Documented the hierarchy: Sprite Sheet → Multiple Animation children
+    - Each animation can have its own grid settings/offsets
+    - Animations can have multiple audio clips attached
+
+- **SpriteSheetConverter Updates:**
+    - Added `animationName` state for custom naming
+    - Added `existingAnimationsCount` prop to show how many already exist
+    - Added input field for animation name with placeholder "Animation #N"
+    - Added `resetForNextAnimation()` function to clear state after save
+    - Updated `onGenerate` interface: `(blob: Blob, animationName: string)`
+
+- **CardWorkspace Updates:**
+    - Updated `handleSpriteGenerate` to accept and use `animationName`
+    - Animation name used in: filename, card title, and child label
+    - Keeps converter open after saving (for creating more animations)
+    - Immediately updates `generatedChildren` state with new animation
+    - Passes `existingAnimationsCount` to SpriteSheetConverter
+
+- **Bug Fixes (concurrent):**
+    - Fixed duplicate key "type" warning in card-index objects
+    - Added GIF worker debugging and timeout handling
+    - Improved worker script URL resolution
+
+**Tags:** #feature #sprite-animation #hierarchy #multi-animation #ux
+**Est. Avg. Human Dev Time:** 1.5 hours
+

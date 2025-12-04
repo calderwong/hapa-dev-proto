@@ -33,6 +33,22 @@ const Settings: React.FC = () => {
     const [openaiModels, setOpenaiModels] = useState<ModelInfo[]>([]);
     const [llamaModels, setLlamaModels] = useState<ModelInfo[]>([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
+    
+    // Admin: Prompt Templates
+    const [showAdminPanel, setShowAdminPanel] = useState(false);
+    const defaultSpritePrompt = `REQUIREMENT: Create a pixel-art sprite sheet animation arranged in a grid layout (e.g. 4x4 or 3x3).
+
+CRITICAL RULES:
+- SOLID BACKGROUND ONLY: Use a plain, solid color background (white or single flat color). NO grid lines, NO guidelines, NO patterns.
+- NO TEXT: Do not include any text, labels, titles, frame numbers, or annotations anywhere on the image.
+- EVENLY SPACED FRAMES: All animation frames must be perfectly aligned in a uniform grid with equal spacing between each frame.
+- CONSISTENT SIZE: Each frame must be the exact same dimensions.
+- CONSISTENT STYLE: Maintain the same art style, colors, and proportions across all frames.
+
+The sprites should show the character in fluid motion (e.g. walking cycle, attack sequence, idle animation).
+
+USER REQUEST: {{USER_PROMPT}}`;
+    const [spritePromptTemplate, setSpritePromptTemplate] = useState(defaultSpritePrompt);
 
     const loadModels = useCallback(async () => {
         if (!window.electronAPI) return;
@@ -85,6 +101,12 @@ const Settings: React.FC = () => {
                     keyTerms: normalizeStep(wormholeSettings.keyTerms, 'gemini'),
                     wikiUpdate: normalizeStep(wormholeSettings.wikiUpdate, 'gemini'),
                 });
+            }
+            
+            // Load prompt templates from localStorage
+            const storedSpritePrompt = localStorage.getItem('spriteSheetPromptTemplate');
+            if (storedSpritePrompt) {
+                setSpritePromptTemplate(storedSpritePrompt);
             }
         };
         loadSettings();
@@ -487,6 +509,71 @@ const Settings: React.FC = () => {
                             </div>
                         </div>
                     </div>
+                </div>
+
+                {/* Admin Panel - Prompt Templates */}
+                <div className="mt-8">
+                    <button
+                        onClick={() => setShowAdminPanel(!showAdminPanel)}
+                        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-4"
+                    >
+                        <rux-icon icon={showAdminPanel ? "expand-less" : "expand-more"} size="small"></rux-icon>
+                        <span className="text-xs uppercase font-bold tracking-wider">Admin: Prompt Templates</span>
+                        <rux-icon icon="admin-panel-settings" size="small"></rux-icon>
+                    </button>
+                    
+                    {showAdminPanel && (
+                        <div className="glass-panel rounded-xl p-6 border border-orange-500/30">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2 rounded bg-orange-900/30 border border-orange-500/30 text-orange-400">
+                                    <rux-icon icon="code" size="small"></rux-icon>
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white">Sprite Sheet Generation Prompt</h3>
+                                    <p className="text-xs text-gray-500 font-mono">CONTROLS AI IMAGE GENERATION</p>
+                                </div>
+                            </div>
+                            
+                            <div className="space-y-4">
+                                <div className="text-xs text-gray-400 mb-2">
+                                    <span className="text-orange-400 font-bold">{'{{USER_PROMPT}}'}</span> will be replaced with the user's animation request.
+                                </div>
+                                
+                                <textarea
+                                    value={spritePromptTemplate}
+                                    onChange={(e) => setSpritePromptTemplate(e.target.value)}
+                                    className="w-full h-64 bg-gray-900/50 border border-gray-600 rounded-lg px-4 py-3 text-xs text-white font-mono focus:outline-none focus:border-orange-500 transition-colors resize-y"
+                                    placeholder="Enter prompt template..."
+                                />
+                                
+                                <div className="flex gap-3 justify-end">
+                                    <button
+                                        onClick={() => {
+                                            setSpritePromptTemplate(defaultSpritePrompt);
+                                            localStorage.removeItem('spriteSheetPromptTemplate');
+                                            setStatus('Prompt Reset to Default');
+                                            setTimeout(() => setStatus(''), 3000);
+                                        }}
+                                        className="px-4 py-2 text-xs text-gray-400 hover:text-white border border-gray-600 hover:border-gray-400 rounded transition-colors"
+                                    >
+                                        <rux-icon icon="restore" size="extra-small" className="mr-1"></rux-icon>
+                                        Reset to Default
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            localStorage.setItem('spriteSheetPromptTemplate', spritePromptTemplate);
+                                            setStatus('Prompt Template Saved');
+                                            setTimeout(() => setStatus(''), 3000);
+                                        }}
+                                        className="px-4 py-2 text-xs text-orange-400 hover:text-white border border-orange-500/50 hover:border-orange-500 rounded transition-colors bg-orange-900/20"
+                                    >
+                                        <rux-icon icon="save" size="extra-small" className="mr-1"></rux-icon>
+                                        Save Prompt
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Floating Action Button */}
