@@ -20,6 +20,16 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     hfSearchGGUFModels: (params) => electron_1.ipcRenderer.invoke('hf-search-gguf-models', params),
     deleteLlamaModel: (params) => electron_1.ipcRenderer.invoke('delete-llama-model', params),
     downloadLlamaModel: (params) => electron_1.ipcRenderer.invoke('download-llama-model', params),
+    // Local Vision
+    getLocalVisionSettings: () => electron_1.ipcRenderer.invoke('get-local-vision-settings'),
+    saveLocalVisionSettings: (settings) => electron_1.ipcRenderer.invoke('save-local-vision-settings', settings),
+    getLocalVisionStatus: () => electron_1.ipcRenderer.invoke('get-local-vision-status'),
+    startLocalVision: () => electron_1.ipcRenderer.invoke('start-local-vision'),
+    stopLocalVision: () => electron_1.ipcRenderer.invoke('stop-local-vision'),
+    listVisionModels: () => electron_1.ipcRenderer.invoke('list-vision-models'),
+    downloadVisionModel: (params) => electron_1.ipcRenderer.invoke('download-vision-model', params),
+    generateLocalImage: (params) => electron_1.ipcRenderer.invoke('generate-local-image', params),
+    // End Local Vision
     geminiListRequests: () => electron_1.ipcRenderer.invoke('gemini-list-requests'),
     geminiSaveRequest: (entry) => electron_1.ipcRenderer.invoke('gemini-save-request', entry),
     getAdminSettings: () => electron_1.ipcRenderer.invoke('get-admin-settings'),

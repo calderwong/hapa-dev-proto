@@ -279,7 +279,20 @@ const Chat: React.FC = () => {
   // Persist messageCardState when it changes
   useEffect(() => {
     if (Object.keys(messageCardState).length > 0) {
-      localStorage.setItem(`${CHAT_MESSAGE_CARDS_STORAGE_KEY}_${threadId}`, JSON.stringify(messageCardState));
+      try {
+        // Strip thumbnail and content to save localStorage space (avoid QuotaExceededError)
+        const toSave = Object.entries(messageCardState).reduce((acc, [k, v]) => {
+          acc[k] = { 
+            hasCard: v.hasCard, 
+            cardCoreName: v.cardCoreName, 
+            isSaving: v.isSaving 
+          };
+          return acc;
+        }, {} as typeof messageCardState);
+        localStorage.setItem(`${CHAT_MESSAGE_CARDS_STORAGE_KEY}_${threadId}`, JSON.stringify(toSave));
+      } catch (e) {
+        console.warn('Failed to persist messageCardState (quota exceeded?):', e);
+      }
     }
   }, [messageCardState, threadId]);
 
@@ -298,6 +311,22 @@ const Chat: React.FC = () => {
       (lower.includes('image') && !lower.includes('video'))
     );
   }, [provider, selectedGeminiModel]);
+
+  // Helper to extract embedded images from markdown content (e.g., ![image](data:...))
+  const extractEmbeddedImages = (content: string): Array<{ dataUrl: string; mimeType: string; index: number }> => {
+    const images: Array<{ dataUrl: string; mimeType: string; index: number }> = [];
+    const regex = /!\[.*?\]\((data:([^;]+);base64,[^)]+)\)/g;
+    let match;
+    let index = 0;
+    while ((match = regex.exec(content)) !== null) {
+      images.push({
+        dataUrl: match[1],
+        mimeType: match[2] || 'image/png',
+        index: index++,
+      });
+    }
+    return images;
+  };
 
   // Compute all media items from the current thread for the sidebar
   type ThreadMediaItem = {
@@ -371,11 +400,22 @@ const Chat: React.FC = () => {
       // Add saved message cards
       const msgCardInfo = messageCardState[msg.id];
       if (msgCardInfo?.hasCard && msgCardInfo.cardCoreName) {
+        // Re-derive thumbnail if missing (since we don't persist it anymore)
+        let thumbnail = msgCardInfo.thumbnail;
+        if (!thumbnail) {
+          thumbnail = msg.attachments?.[0]?.dataUrl || msg.attachments?.[0]?.previewUrl;
+          if (!thumbnail) {
+             // Try to extract from content (e.g. generated images)
+             const embedded = extractEmbeddedImages(msg.content);
+             if (embedded.length > 0) thumbnail = embedded[0].dataUrl;
+          }
+        }
+
         items.push({
           id: `msgcard-${msg.id}`,
           type: 'message',
           source: 'saved',
-          dataUrl: msgCardInfo.thumbnail,
+          dataUrl: thumbnail,
           label: msg.role === 'user' ? 'Request Card' : 'Response Card',
           messageId: msg.id,
           cardId: msgCardInfo.cardCoreName,
@@ -814,22 +854,6 @@ const Chat: React.FC = () => {
       console.error('Failed to create Video Card:', error);
       return null;
     }
-  };
-
-  // Helper to extract embedded images from markdown content (e.g., ![image](data:...))
-  const extractEmbeddedImages = (content: string): Array<{ dataUrl: string; mimeType: string; index: number }> => {
-    const images: Array<{ dataUrl: string; mimeType: string; index: number }> = [];
-    const regex = /!\[.*?\]\((data:([^;]+);base64,[^)]+)\)/g;
-    let match;
-    let index = 0;
-    while ((match = regex.exec(content)) !== null) {
-      images.push({
-        dataUrl: match[1],
-        mimeType: match[2] || 'image/png',
-        index: index++,
-      });
-    }
-    return images;
   };
 
   // Create a message card in the library - stores full message context
@@ -1511,7 +1535,15 @@ const Chat: React.FC = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(CHAT_EXTRACTED_CARDS_STORAGE_KEY, JSON.stringify(extractedCards));
+      // Strip dataUrl to save space (avoid QuotaExceededError)
+      const toSave = Object.entries(extractedCards).reduce((acc, [msgId, types]) => {
+        acc[msgId] = Object.entries(types).reduce((tAcc, [type, card]) => {
+           tAcc[type] = { ...card, dataUrl: undefined };
+           return tAcc;
+        }, {} as any);
+        return acc;
+      }, {} as typeof extractedCards);
+      localStorage.setItem(CHAT_EXTRACTED_CARDS_STORAGE_KEY, JSON.stringify(toSave));
     } catch (err) {
       console.error('Failed to persist extracted cards:', err);
     }

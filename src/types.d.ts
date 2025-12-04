@@ -29,6 +29,28 @@ export interface LlamaStatus {
     lastError?: string;
 }
 
+export interface LocalVisionSettings {
+    pythonPath: string;
+    modelsDir: string;
+    activeModel: string;
+    port: number;
+    autoStart: boolean;
+}
+
+export interface LocalVisionStatus {
+    running: boolean;
+    pid?: number;
+    port?: number;
+    model?: string;
+    lastError?: string;
+}
+
+export interface VisionModel {
+    repo_id: string;
+    size: string;
+    cached: boolean;
+}
+
 export interface LocalLlamaModel {
     name: string;
     path: string;
@@ -399,6 +421,16 @@ export interface ElectronAPI {
     stopLlamaServer: () => Promise<LlamaStatus>;
     downloadLlamaModel: (params: { url: string; fileName?: string }) => Promise<{ path: string }>;
     deleteLlamaModel: (params: { path: string }) => Promise<boolean>;
+    // Local Vision methods
+    getLocalVisionSettings: () => Promise<LocalVisionSettings>;
+    saveLocalVisionSettings: (settings: LocalVisionSettings) => Promise<boolean>;
+    getLocalVisionStatus: () => Promise<LocalVisionStatus>;
+    startLocalVision: () => Promise<LocalVisionStatus>;
+    stopLocalVision: () => Promise<LocalVisionStatus>;
+    listVisionModels: () => Promise<VisionModel[]>;
+    downloadVisionModel: (params: { repo_id: string }) => Promise<any>;
+    generateLocalImage: (params: any) => Promise<{ images: string[] }>;
+    // End Local Vision
     hfSearchGGUFModels: (params: { query: string }) => Promise<HfGGUFSearchResult[]>;
     geminiListRequests: () => Promise<any[]>;
     geminiSaveRequest: (entry: any) => Promise<any>;

@@ -25,6 +25,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteLlamaModel: (params: { path: string }) => ipcRenderer.invoke('delete-llama-model', params),
     downloadLlamaModel: (params: { url: string; fileName?: string }) =>
         ipcRenderer.invoke('download-llama-model', params),
+    // Local Vision
+    getLocalVisionSettings: () => ipcRenderer.invoke('get-local-vision-settings'),
+    saveLocalVisionSettings: (settings: any) => ipcRenderer.invoke('save-local-vision-settings', settings),
+    getLocalVisionStatus: () => ipcRenderer.invoke('get-local-vision-status'),
+    startLocalVision: () => ipcRenderer.invoke('start-local-vision'),
+    stopLocalVision: () => ipcRenderer.invoke('stop-local-vision'),
+    listVisionModels: () => ipcRenderer.invoke('list-vision-models'),
+    downloadVisionModel: (params: { repo_id: string }) => ipcRenderer.invoke('download-vision-model', params),
+    generateLocalImage: (params: any) => ipcRenderer.invoke('generate-local-image', params),
+    // End Local Vision
     geminiListRequests: () => ipcRenderer.invoke('gemini-list-requests'),
     geminiSaveRequest: (entry: any) => ipcRenderer.invoke('gemini-save-request', entry),
     getAdminSettings: () => ipcRenderer.invoke('get-admin-settings'),

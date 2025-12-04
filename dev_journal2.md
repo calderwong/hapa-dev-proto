@@ -1583,3 +1583,98 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 **Tags:** #feature #card-hierarchy #lineage #video #animation #ux
 **Est. Avg. Human Dev Time:** 1.5 hours
 
+## Entry 32 – Local Vision Integration (Z-Image-Turbo)
+**Prompt:** "Add Local Vision feature with Python backend for image generation (Z-Image-Turbo) and integrate into Card Library"
+
+**Summary of actions:**
+- **Python Backend (`python/server.py`):**
+    - Implemented FastAPI server to host Diffusers pipeline.
+    - Added `AutoPipelineForTextToImage` with `DiffusionPipeline` fallback for compatibility.
+    - Exposed endpoints for generation, model downloading (via `huggingface_hub`), and model listing.
+    - Added IPC spawning logic in Electron main process.
+
+- **Electron Integration (`electron/main.ts`):**
+    - Added `LocalVisionSettings` state management.
+    - Implemented `start-local-vision`, `stop-local-vision`, `get-local-vision-status` handlers.
+    - Implemented proxy handlers for generation and model management.
+    - Updated `generate-image-for-card` to support `provider: 'local-vision'`, routing prompts to the local Python server instead of Gemini.
+
+- **Frontend UI:**
+    - **Local Vision Page (`src/pages/LocalVision.tsx`):**
+        - Dashboard for server status, model downloading, and configuration.
+        - Real-time logs terminal using `xterm-for-react`.
+    - **Card Library (`src/pages/CardLibrary.tsx`):**
+        - Added "Provider Selector" (Gemini vs Local Vision) in the AI Image Generation panel.
+        - Wired generation button to use the selected provider.
+        - Added status indicators for local server availability.
+
+**Tags:** #feature #local-vision #python #electron #image-generation #pipeline
+**Est. Avg. Human Dev Time:** 4.0 hours
+
+## Entry 33 – Local Vision Windows Compatibility Fixes
+**Prompt:** "Fix WinError 1314 (symlink privilege) during model download on Windows"
+
+**Summary of actions:**
+- **Python Server (`python/server.py`):**
+    - Updated `DownloadRequest` and `GenerateRequest` to accept an optional `cache_dir`.
+    - Modified download logic to use `snapshot_download(local_dir=cache_dir, local_dir_use_symlinks=False)` when a custom directory is provided. This avoids creating symlinks which requires Admin privileges on Windows.
+    - Updated `load_pipeline` to look for models in the local directory first.
+- **Electron Main (`electron/main.ts`):**
+    - Updated `download-vision-model` handler to pass the user-configured `modelsDir` as `cache_dir` to the Python server.
+    - Updated `generate-image-for-card` handler to pass `modelsDir` as `cache_dir` during generation requests.
+
+**Tags:** #bugfix #local-vision #windows #permissions #symlinks
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 34 – Local Vision Pipeline Optimization (Z-Image-Turbo)
+**Prompt:** "Investigate ZImagePipeline error, optimize download for 4090 (smaller/fp16), and research pipeline design."
+
+**Summary of actions:**
+- **Research:** Created `docs/LOCAL_VISION_RESEARCH.md` to track the `ZImagePipeline` loading issue and optimization strategy.
+- **Backend Fixes (`python/server.py`):**
+    - Enabled `trust_remote_code=True` in `from_pretrained` to allow custom pipeline code execution (fixing the `AttributeError`).
+    - Implemented fallback loading logic to retry with default variant if `fp16` specific loading fails.
+    - Updated `download_model` to support a `variant` parameter.
+    - Implemented "Optimized Download" logic: if `variant="fp16"`, restricts download to `*.fp16.safetensors`, `*.json`, `*.txt` to save disk space and bandwidth.
+- **Electron Integration (`electron/main.ts`):**
+    - Updated `download-vision-model` to pass the `variant` parameter to the Python backend.
+- **Frontend (`src/pages/LocalVision.tsx`):**
+    - Updated the "Download & Set Active" button for the default model to request `variant: 'fp16'`.
+    - This allows the user to "redownload" (verify/fetch) the optimized version easily.
+
+**Fix Update (Z-Image-Turbo Architecture):**
+- Discovered `Z-Image-Turbo` uses a Transformer-based architecture (`ZImageTransformer2DModel`), causing `StableDiffusionXLPipeline` (UNet-based) to fail.
+- Replaced the hard fallback with `DiffusionPipeline.from_pretrained(...)`, which is more robust for custom pipelines with `trust_remote_code=True`.
+- **Final Resolution:** `Z-Image-Turbo` remote code proved incompatible with the installed `diffusers` version (0.35.2), and the environment was running on CPU (Torch 2.9.1+cpu).
+- Switched default model to `stabilityai/sdxl-turbo` (standard SDXL Turbo) to ensure stability and compatibility.
+
+## Entry 35 – Sprite Seed Workflow (Phases 1-3)
+**Prompt:** "Implement Sprite Seed designation, Animation Request UI, and LLM+Image Generation pipeline."
+
+**Summary of actions:**
+- **Phase 1 (Seed Designation):**
+    - Added "MARK SEED" button in `CardWorkspace`.
+    - Implemented metadata update (`isSpriteSeed: true`) and visual badge.
+- **Phase 2 (Animation UI):**
+    - Created `SpriteAnimationGenerator` component for text-to-animation prompts.
+    - Integrated generator panel into `CardWorkspace` for Seed cards.
+- **Phase 3 (Generation Pipeline):**
+    - Implemented `handleGenerateAnimation` in `CardWorkspace`.
+    - Wired up `chatWithGemini` to refine user requests into technical sprite sheet prompts.
+    - Wired up `generateImageForCard` to generate the sprite sheet using the Seed Image as context (Img2Img/ControlNet via `seriesContext`).
+    - Implemented full ingestion (Wormhole) and child-card linking logic for the generated animation.
+
+**Tags:** #feature #sprite-seed #animation #llm #gemini #image-generation #workflow
+**Est. Avg. Human Dev Time:** 4.0 hours
+
+- Initiated PyTorch CUDA installation to enable GPU acceleration.
+
+**Fix Update (QuotaExceededError):**
+- Diagnosed `QuotaExceededError` in `localStorage` caused by storing full base64 thumbnails in `chatMessageCards` and `chatExtractedCards` state.
+- Refactored `Chat.tsx` persistence logic to strip `thumbnail`, `content`, and `dataUrl` fields before saving to `localStorage`.
+- Updated UI logic to dynamically derive thumbnails from message content/attachments where possible.
+- This prevents the app from crashing due to storage limits when handling many image cards.
+
+**Tags:** #bugfix #optimization #local-vision #z-image-turbo #fp16 #sdxl-turbo #cuda #localstorage
+**Est. Avg. Human Dev Time:** 2.5 hours
+

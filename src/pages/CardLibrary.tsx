@@ -96,6 +96,25 @@ const CardLibrary: React.FC = () => {
     // Image Generation State
     const [imageGenState, setImageGenState] = useState<'idle' | 'crafting' | 'generating' | 'complete' | 'error'>('idle');
     const [imageGenError, setImageGenError] = useState<string | null>(null);
+    const [imageProvider, setImageProvider] = useState<'gemini' | 'local-vision'>('gemini');
+    const [localVisionStatus, setLocalVisionStatus] = useState<{ running: boolean }>({ running: false });
+
+    // Check Local Vision status
+    useEffect(() => {
+        const checkStatus = async () => {
+            if (window.electronAPI?.getLocalVisionStatus) {
+                try {
+                    const status = await window.electronAPI.getLocalVisionStatus();
+                    setLocalVisionStatus(status);
+                } catch (e) {
+                    // ignore
+                }
+            }
+        };
+        checkStatus();
+        const interval = setInterval(checkStatus, 5000);
+        return () => clearInterval(interval);
+    }, []);
     
     // Loop Video State
     const [loopGenStatus, setLoopGenStatus] = useState<{ [imageId: string]: { status: string; progress?: number; message?: string } }>({});
@@ -1096,7 +1115,11 @@ const CardLibrary: React.FC = () => {
             
             console.log('[ImageGen] Generating image #', imageNumber, seriesContext ? '(series continuation)' : '(first image)');
             
-            const result = await window.electronAPI.generateImageForCard({ cardContext, seriesContext });
+            const result = await window.electronAPI.generateImageForCard({ 
+                cardContext, 
+                seriesContext,
+                provider: imageProvider 
+            });
             
             if (result.success && result.localPath) {
                 // Create new image entry
@@ -1466,7 +1489,10 @@ const CardLibrary: React.FC = () => {
                 text: textContent,
                 url: activeWorkspaceCard.mediaRemoteUrl || toFileUrl(activeWorkspaceCard.mediaLocalPath),
                 imageUrl: activeWorkspaceCard.mediaRemoteUrl || toFileUrl(activeWorkspaceCard.mediaLocalPath),
-                tags: activeWorkspaceCard.cardRecord?.tags || []
+                tags: activeWorkspaceCard.cardRecord?.tags || [],
+                isSpriteSeed: activeWorkspaceCard.cardRecord?.isSpriteSeed,
+                localPath: activeWorkspaceCard.mediaLocalPath,
+                generatedPrompt: activeWorkspaceCard.cardRecord?.sourceImage?.craftedPrompt || activeWorkspaceCard.cardRecord?.generatedPrompt
             },
             coreName: activeWorkspaceCard.coreName || activeWorkspaceCard.cardId
         };
@@ -1478,6 +1504,23 @@ const CardLibrary: React.FC = () => {
                         card={workspaceCard}
                         onClose={() => setActiveWorkspaceCard(null)}
                         onSave={handleWorkspaceSave}
+                        onUpdate={async () => {
+                            if (window.electronAPI?.p2pRead) {
+                                const coreName = activeWorkspaceCard.coreName || activeWorkspaceCard.cardId;
+                                try {
+                                    const records = await window.electronAPI.p2pRead(coreName);
+                                    let latest: any = {};
+                                    for (const r of records) {
+                                        try {
+                                            const p = JSON.parse(r);
+                                            if (p.type === 'card') latest = p;
+                                        } catch {}
+                                    }
+                                    setActiveWorkspaceCard(prev => prev ? ({ ...prev, cardRecord: latest }) : null);
+                                    loadCards(); // Refresh grid as well
+                                } catch (e) { console.error("Failed to refresh workspace card", e); }
+                            }
+                        }}
                     />
                 </div>
             </PageContainer>
@@ -2147,10 +2190,49 @@ const CardLibrary: React.FC = () => {
                                                     </div>
                                                 )}
                                                 
+                                                {/* Provider Selector */}
+                                                <div className="flex gap-2 mb-2 bg-gray-900/50 p-1 rounded-lg">
+                                                    <button
+                                                        onClick={() => setImageProvider('gemini')}
+                                                        className={`flex-1 py-1.5 text-xs font-bold rounded transition-colors ${
+                                                            imageProvider === 'gemini' 
+                                                                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+                                                                : 'text-gray-500 hover:text-gray-300'
+                                                        }`}
+                                                    >
+                                                        Gemini (Cloud)
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setImageProvider('local-vision')}
+                                                        className={`flex-1 py-1.5 text-xs font-bold rounded transition-colors flex items-center justify-center gap-1 ${
+                                                            imageProvider === 'local-vision' 
+                                                                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' 
+                                                                : 'text-gray-500 hover:text-gray-300'
+                                                        }`}
+                                                    >
+                                                        Local Vision
+                                                        {imageProvider !== 'local-vision' && localVisionStatus.running && (
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                                
+                                                {/* Local Vision Status Warning */}
+                                                {imageProvider === 'local-vision' && !localVisionStatus.running && (
+                                                    <div className="mb-2 px-2 py-1.5 bg-red-900/20 border border-red-500/30 rounded text-[10px] text-red-300 flex items-center gap-2">
+                                                        <rux-icon icon="warning" size="extra-small"></rux-icon>
+                                                        {/* Assuming Link is available, or use window.location */}
+                                                        <span>Server offline. Check Local Vision settings.</span>
+                                                    </div>
+                                                )}
+
                                                 {/* Generate Button */}
                                                 <button
                                                     onClick={handleGenerateImage}
-                                                    disabled={imageGenState !== 'idle' && imageGenState !== 'error'}
+                                                    disabled={
+                                                        (imageGenState !== 'idle' && imageGenState !== 'error') ||
+                                                        (imageProvider === 'local-vision' && !localVisionStatus.running)
+                                                    }
                                                     className={`w-full p-4 rounded-lg border-2 transition-all duration-300 flex items-center justify-center gap-3 ${
                                                         imageGenState === 'complete'
                                                             ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'

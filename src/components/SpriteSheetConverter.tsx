@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PrimaryButton, SecondaryButton } from './Button';
 import type { RemovalProgress } from '../utils/backgroundRemoval';
+import { applyChromaKey, detectBackgroundColor } from '../utils/imageProcessing';
 
 interface SpriteSheetConverterProps {
     imageUrl: string;
@@ -21,6 +22,10 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
 
     // Background Removal
     const [removeBackground, setRemoveBackground] = useState(false);
+    const [removalMode, setRemovalMode] = useState<'ai' | 'chroma'>('chroma'); // Default to chroma for sprites
+    const [chromaColor, setChromaColor] = useState('#00FF00');
+    const [chromaTolerance, setChromaTolerance] = useState(15);
+    
     const [isRemovingBg, setIsRemovingBg] = useState(false);
     const [bgRemovalProgress, setBgRemovalProgress] = useState<RemovalProgress | null>(null);
     const [processedImage, setProcessedImage] = useState<HTMLImageElement | null>(null);
@@ -47,39 +52,50 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
             setImage(img);
             setOriginalImage(img);
             setProcessedImage(null); // Reset processed image when source changes
+            
+            // Auto-detect background color
+            const detected = detectBackgroundColor(img);
+            setChromaColor(detected);
         };
     }, [imageUrl]);
 
-    // Handle background removal toggle
+    // Handle background removal toggle & updates
     useEffect(() => {
         if (!originalImage) return;
 
-        if (removeBackground && !processedImage && !isRemovingBg) {
-            // User enabled background removal - process the image
+        if (removeBackground) {
             handleRemoveBackground();
-        } else if (!removeBackground) {
+        } else {
             // User disabled background removal - use original
             setImage(originalImage);
+            setProcessedImage(null);
         }
-    }, [removeBackground, originalImage]);
+    }, [removeBackground, removalMode, chromaColor, chromaTolerance, originalImage]);
 
     const handleRemoveBackground = async () => {
         if (!originalImage) return;
 
         setIsRemovingBg(true);
-        setBgRemovalProgress({ stage: 'loading', progress: 0, message: 'Loading AI model...' });
-
+        
         try {
-            // Dynamic import to avoid loading at startup
-            const { removeBackgroundFromElement } = await import('../utils/backgroundRemoval');
-            
-            const result = await removeBackgroundFromElement(originalImage, (progress) => {
-                setBgRemovalProgress(progress);
-            });
+            if (removalMode === 'ai') {
+                setBgRemovalProgress({ stage: 'loading', progress: 0, message: 'Loading AI model...' });
+                // Dynamic import to avoid loading at startup
+                const { removeBackgroundFromElement } = await import('../utils/backgroundRemoval');
+                
+                const result = await removeBackgroundFromElement(originalImage, (progress) => {
+                    setBgRemovalProgress(progress);
+                });
 
-            setProcessedImage(result);
-            setImage(result);
-            setBgRemovalProgress({ stage: 'done', progress: 100, message: 'Background removed!' });
+                setProcessedImage(result);
+                setImage(result);
+                setBgRemovalProgress({ stage: 'done', progress: 100, message: 'Background removed!' });
+            } else {
+                // Chroma Key Mode
+                const result = await applyChromaKey(originalImage, chromaColor, chromaTolerance);
+                setProcessedImage(result);
+                setImage(result);
+            }
         } catch (error) {
             console.error('Background removal failed:', error);
             setBgRemovalProgress({ 
@@ -89,7 +105,7 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
             });
             // Fall back to original
             setImage(originalImage);
-            setRemoveBackground(false);
+            // Don't auto-disable, let user see error
         } finally {
             setIsRemovingBg(false);
         }
@@ -310,17 +326,81 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({ imageUrl, o
                                     : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:border-gray-500'}
                                 ${isRemovingBg ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                             `}
-                            title="Remove background using AI"
+                            title="Remove background"
                         >
                             <span className="text-xs font-bold uppercase">Remove Background</span>
                             <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${removeBackground ? 'bg-green-500' : 'bg-gray-600'}`}>
                                 <div className={`w-4 h-4 rounded-full bg-white transition-transform ${removeBackground ? 'translate-x-5' : 'translate-x-0'}`}></div>
                             </div>
                         </button>
+                        
                         {removeBackground && (
-                            <p className="text-[10px] text-gray-500">
-                                AI will remove the background, creating transparent areas for pet overlays.
-                            </p>
+                            <div className="space-y-3 p-3 bg-black/30 rounded border border-white/5 mt-2">
+                                {/* Method Selector */}
+                                <div className="space-y-1">
+                                    <label className="text-[10px] uppercase text-gray-500 font-bold">Method</label>
+                                    <div className="flex bg-black/50 rounded p-1">
+                                        <button
+                                            onClick={() => setRemovalMode('chroma')}
+                                            className={`flex-1 py-1 text-[10px] rounded font-bold transition-colors ${removalMode === 'chroma' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                                        >
+                                            Color Key
+                                        </button>
+                                        <button
+                                            onClick={() => setRemovalMode('ai')}
+                                            className={`flex-1 py-1 text-[10px] rounded font-bold transition-colors ${removalMode === 'ai' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                                        >
+                                            AI Model
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {removalMode === 'chroma' ? (
+                                    <>
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between">
+                                                <label className="text-[10px] uppercase text-gray-500 font-bold">Key Color</label>
+                                                <span className="text-[10px] font-mono text-gray-400">{chromaColor}</span>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <input 
+                                                    type="color" 
+                                                    value={chromaColor}
+                                                    onChange={(e) => setChromaColor(e.target.value)}
+                                                    className="h-8 flex-1 bg-transparent border border-gray-600 rounded cursor-pointer"
+                                                />
+                                                <button
+                                                    onClick={() => originalImage && setChromaColor(detectBackgroundColor(originalImage))}
+                                                    className="px-2 bg-gray-700 border border-gray-600 rounded text-gray-300 hover:bg-gray-600"
+                                                    title="Auto-detect from top-left pixel"
+                                                >
+                                                    <rux-icon icon="colorize" size="extra-small"></rux-icon>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between">
+                                                <label className="text-[10px] uppercase text-gray-500 font-bold">Tolerance</label>
+                                                <span className="text-[10px] text-gray-400">{chromaTolerance}%</span>
+                                            </div>
+                                            <rux-slider
+                                                min={0}
+                                                max={100}
+                                                value={chromaTolerance}
+                                                onInput={(e: any) => setChromaTolerance(parseInt(e.target.value))}
+                                            ></rux-slider>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 italic">
+                                            Best for solid backgrounds (sprites).
+                                        </p>
+                                    </>
+                                ) : (
+                                    <p className="text-[10px] text-gray-500 italic">
+                                        AI segmentation. Best for photos/complex backgrounds. Slow.
+                                    </p>
+                                )}
+                            </div>
                         )}
                     </div>
 

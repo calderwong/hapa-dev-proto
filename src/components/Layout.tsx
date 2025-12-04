@@ -18,6 +18,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     { path: '/wiki', label: 'Wiki', icon: 'library-books' },
     { path: '/archives', label: 'Archives', icon: 'archive' },
     { path: '/local-llama', label: 'Local Llama', icon: 'memory' },
+    { path: '/local-vision', label: 'Local Vision', icon: 'visibility' },
     { path: '/revid', label: 'Revid (Video)', icon: 'videocam' },
     { path: '/revid-media', label: 'Revid Media', icon: 'movie' },
     { path: '/p2p', label: 'P2P Network', icon: 'device-hub' },

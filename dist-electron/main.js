@@ -51,6 +51,7 @@ const GEMINI_REQUEST_LOG_KEY = 'geminiRequestLog';
 const GEMINI_REQUEST_LOG_MAX_ENTRIES = 200;
 const ADMIN_SETTINGS_KEY = 'adminSettings';
 const LLAMA_SETTINGS_KEY = 'llamaSettings';
+const LOCAL_VISION_SETTINGS_KEY = 'localVisionSettings';
 const WORMHOLE_SETTINGS_KEY = 'wormholeSettings';
 const CARD_LIBRARY_CORE_NAME = 'card-library';
 const WIKI_CORE_NAME = 'wormhole-wiki-entries';
@@ -200,6 +201,120 @@ const deleteLlamaModelInternal = async (targetPath) => {
         throw new Error('Refusing to delete file outside llama models directory.');
     }
     await fs.promises.unlink(resolved);
+};
+let visionProcess = null;
+let visionStatus = { running: false };
+const getLocalVisionSettingsInternal = () => {
+    const stored = store.get(LOCAL_VISION_SETTINGS_KEY, {}) || {};
+    const modelsDir = typeof stored.modelsDir === 'string' && stored.modelsDir.length > 0
+        ? stored.modelsDir
+        : path.join(electron_1.app.getPath('userData'), 'vision-models');
+    return {
+        pythonPath: stored.pythonPath || 'python', // Default to 'python' in PATH
+        modelsDir,
+        activeModel: stored.activeModel || 'Tongyi-MAI/Z-Image-Turbo',
+        port: typeof stored.port === 'number' && stored.port > 0 ? stored.port : 11435,
+        autoStart: stored.autoStart === true,
+    };
+};
+const saveLocalVisionSettingsInternal = (settings) => {
+    store.set(LOCAL_VISION_SETTINGS_KEY, settings);
+};
+const getLocalVisionStatusInternal = () => {
+    const running = !!visionProcess && !visionProcess.killed;
+    return { ...visionStatus, running };
+};
+const startVisionServerInternal = async () => {
+    if (visionProcess && !visionProcess.killed) {
+        return getLocalVisionStatusInternal();
+    }
+    const settings = getLocalVisionSettingsInternal();
+    if (!settings.pythonPath) {
+        const msg = 'Python path is not configured. Please set it in Local Vision settings.';
+        visionStatus = { running: false, lastError: msg };
+        throw new Error(msg);
+    }
+    try {
+        // Path to the python server script
+        const serverScript = electron_is_dev_1.default
+            ? path.join(__dirname, '../python/server.py')
+            : path.join(process.resourcesPath, 'python/server.py'); // Assuming we package it here for prod
+        // If running in dev but accessing via 'electron', __dirname might be dist-electron
+        // We need to reliably find the python folder. 
+        // In dev: root/python/server.py
+        // In prod: resources/python/server.py
+        let scriptPath = '';
+        if (electron_is_dev_1.default) {
+            scriptPath = path.resolve(__dirname, '..', 'python', 'server.py');
+        }
+        else {
+            // In production, we likely need to bundle the python script
+            // For now, let's assume it's in resources
+            scriptPath = path.join(process.resourcesPath, 'python', 'server.py');
+        }
+        if (!fs.existsSync(scriptPath)) {
+            // Fallback check for dev environment relative to main.ts location
+            scriptPath = path.resolve(__dirname, '../../python/server.py');
+        }
+        console.log('Starting Vision Server at:', scriptPath);
+        const env = {
+            ...process.env,
+            HAPA_VISION_PORT: String(settings.port),
+            HF_HOME: settings.modelsDir
+        };
+        const child = (0, child_process_1.spawn)(settings.pythonPath, [scriptPath], {
+            env,
+            detached: false,
+            stdio: 'pipe', // Capture output for logging
+        });
+        visionProcess = child;
+        visionStatus = {
+            running: true,
+            pid: child.pid ?? undefined,
+            model: settings.activeModel,
+            port: settings.port,
+            lastError: undefined,
+        };
+        if (child.stdout) {
+            child.stdout.on('data', (data) => {
+                console.log(`[Vision]: ${data.toString().trim()}`);
+            });
+        }
+        if (child.stderr) {
+            child.stderr.on('data', (data) => {
+                console.error(`[Vision Err]: ${data.toString().trim()}`);
+            });
+        }
+        child.on('exit', (code, signal) => {
+            visionProcess = null;
+            visionStatus = {
+                ...visionStatus,
+                running: false,
+                lastError: code && code !== 0
+                    ? `Vision server exited with code ${code}${signal ? ` (signal ${signal})` : ''}`
+                    : visionStatus.lastError,
+            };
+        });
+        child.on('error', (err) => {
+            visionProcess = null;
+            visionStatus = { running: false, lastError: err.message };
+        });
+        return getLocalVisionStatusInternal();
+    }
+    catch (error) {
+        const msg = error?.message || 'Failed to start vision server';
+        visionProcess = null;
+        visionStatus = { running: false, lastError: msg };
+        throw new Error(msg);
+    }
+};
+const stopVisionServerInternal = () => {
+    if (visionProcess && !visionProcess.killed) {
+        visionProcess.kill();
+    }
+    visionProcess = null;
+    visionStatus = { ...visionStatus, running: false };
+    return getLocalVisionStatusInternal();
 };
 const HF_MODELS_API_BASE = 'https://huggingface.co/api/models';
 const pickRecommendedGGUFFile = (files) => {
@@ -661,10 +776,10 @@ const transcribeAudioWithOpenAI = async (base64, mimeType, apiKey) => {
     }
     return data.text || '';
 };
-const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-1.5-pro';
 const resolveGeminiModelName = (modelName) => {
     const trimmed = (modelName || '').toString().trim();
-    if (!trimmed || trimmed === 'gemini-pro' || trimmed === 'gemini-1.5-pro') {
+    if (!trimmed || trimmed === 'gemini-pro') {
         return DEFAULT_GEMINI_MODEL;
     }
     return trimmed;
@@ -886,6 +1001,90 @@ electron_1.app.whenReady().then(() => {
         }
         return searchHfGGUFModelsInternal(query);
     });
+    // --- Local Vision IPC Handlers ---
+    electron_1.ipcMain.handle('get-local-vision-settings', () => {
+        return getLocalVisionSettingsInternal();
+    });
+    electron_1.ipcMain.handle('save-local-vision-settings', (_event, settings) => {
+        saveLocalVisionSettingsInternal(settings);
+        return true;
+    });
+    electron_1.ipcMain.handle('get-local-vision-status', () => {
+        return getLocalVisionStatusInternal();
+    });
+    electron_1.ipcMain.handle('start-local-vision', async () => {
+        return startVisionServerInternal();
+    });
+    electron_1.ipcMain.handle('stop-local-vision', () => {
+        return stopVisionServerInternal();
+    });
+    electron_1.ipcMain.handle('list-vision-models', async () => {
+        const status = getLocalVisionStatusInternal();
+        if (!status.running || !status.port) {
+            throw new Error('Vision server is not running.');
+        }
+        const settings = getLocalVisionSettingsInternal();
+        const params = new URLSearchParams();
+        if (settings.modelsDir) {
+            params.set('cache_dir', settings.modelsDir);
+        }
+        try {
+            const response = await fetch(`http://127.0.0.1:${status.port}/models?${params.toString()}`);
+            if (!response.ok)
+                throw new Error(`Server returned ${response.status}`);
+            return await response.json();
+        }
+        catch (e) {
+            throw new Error(`Failed to list models: ${e.message}`);
+        }
+    });
+    electron_1.ipcMain.handle('download-vision-model', async (_event, payload) => {
+        const status = getLocalVisionStatusInternal();
+        if (!status.running || !status.port) {
+            throw new Error('Vision server is not running.');
+        }
+        if (!payload.repo_id)
+            throw new Error('repo_id is required');
+        const settings = getLocalVisionSettingsInternal();
+        try {
+            const response = await fetch(`http://127.0.0.1:${status.port}/models/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    repo_id: payload.repo_id,
+                    cache_dir: settings.modelsDir,
+                    variant: payload.variant
+                })
+            });
+            if (!response.ok)
+                throw new Error(`Server returned ${response.status}`);
+            return await response.json();
+        }
+        catch (e) {
+            throw new Error(`Failed to trigger download: ${e.message}`);
+        }
+    });
+    electron_1.ipcMain.handle('generate-local-image', async (_event, payload) => {
+        const status = getLocalVisionStatusInternal();
+        if (!status.running || !status.port) {
+            throw new Error('Vision server is not running.');
+        }
+        try {
+            const response = await fetch(`http://127.0.0.1:${status.port}/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Generation failed: ${errText}`);
+            }
+            return await response.json();
+        }
+        catch (e) {
+            throw new Error(`Failed to generate image: ${e.message}`);
+        }
+    });
     electron_1.ipcMain.handle('revid-estimate-credits', async (_event, payload) => {
         const { creationParams } = payload || {};
         if (!creationParams) {
@@ -1010,25 +1209,27 @@ electron_1.app.whenReady().then(() => {
         return true;
     });
     // Generate image for a card using LLM to craft prompt, then image model
-    electron_1.ipcMain.handle('generate-image-for-card', async (_event, { cardContext, seriesContext, }) => {
+    electron_1.ipcMain.handle('generate-image-for-card', async (_event, { cardContext, seriesContext, provider = 'gemini', // Default to Gemini
+     }) => {
         const apiKey = store.get('geminiKey');
-        if (!apiKey) {
+        if (!apiKey && provider === 'gemini') {
             throw new Error('Gemini API Key not found. Please configure it in Settings.');
         }
         const adminSettings = getAdminSettings();
         const imageGenSettings = adminSettings.imageGenSettings || {
-            defaultImageModel: 'gemini-2.0-flash-preview-image-generation',
-            defaultPromptLLM: 'gemini-1.5-pro',
+            defaultImageModel: 'gemini-2.0-flash-exp', // Updated to a valid model that supports image gen
+            defaultPromptLLM: 'gemini-1.5-flash', // Safer default
         };
         const imageNumber = seriesContext?.imageNumber || 1;
         const isSeriesContinuation = imageNumber > 1 && seriesContext?.previousPrompt;
         console.log('[ImageGen] Starting image generation for card:', cardContext.name);
+        console.log('[ImageGen] Provider:', provider);
         console.log('[ImageGen] Image #', imageNumber, isSeriesContinuation ? '(series continuation)' : '(first image)');
         console.log('[ImageGen] Using LLM:', imageGenSettings.defaultPromptLLM);
-        console.log('[ImageGen] Using Image Model:', imageGenSettings.defaultImageModel);
+        if (cardContext.image)
+            console.log('[ImageGen] Including Input Image for Multimodal Context');
         try {
-            // Step 1: Craft image prompt using LLM
-            // Build a rich context summary from all available content
+            // Step 1: Craft image prompt using LLM (always done)
             const contentParts = [];
             if (cardContext.name && cardContext.name !== 'Untitled') {
                 contentParts.push(`Title: ${cardContext.name}`);
@@ -1038,7 +1239,7 @@ electron_1.app.whenReady().then(() => {
                 const truncatedText = cardContext.text.length > 2000
                     ? cardContext.text.substring(0, 2000) + '...'
                     : cardContext.text;
-                contentParts.push(`Content:\n${truncatedText}`);
+                contentParts.push(`Content/Request:\n${truncatedText}`);
             }
             if (cardContext.messageContent) {
                 contentParts.push(`Message: ${cardContext.messageContent}`);
@@ -1068,6 +1269,7 @@ Now create a NEW, DIFFERENT prompt for image #${imageNumber} that:
 
 Document/Card Context (for reference):
 ${contextSummary}
+${cardContext.image ? '(REFER TO ATTACHED IMAGE FOR CHARACTER/VISUAL CONTEXT)' : ''}
 
 Create prompt for image #${imageNumber} in the series:`;
             }
@@ -1084,65 +1286,127 @@ Rules:
 5. Focus on visual elements that represent the content's essence and themes
 6. Make it visually interesting, artistic, and memorable
 7. If the content is abstract or technical, create a metaphorical or symbolic visual representation
+8. If an image is provided, USE IT as the primary visual reference for the character/object.
 
 Document/Card Context:
 ${contextSummary}
+${cardContext.image ? '(REFER TO ATTACHED IMAGE FOR CHARACTER/VISUAL CONTEXT)' : ''}
 
 Create a vivid image prompt that visually represents this content:`;
             }
-            // Call LLM to craft the prompt
-            const llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultPromptLLM}:generateContent?key=${apiKey}`;
-            const llmResponse = await fetch(llmUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ role: 'user', parts: [{ text: promptCraftingRequest }] }],
-                }),
-            });
-            if (!llmResponse.ok) {
-                const errText = await llmResponse.text();
-                throw new Error(`LLM prompt crafting failed: ${errText}`);
+            // Call LLM to craft the prompt using SDK (more robust)
+            if (!apiKey) {
+                throw new Error('Gemini API Key is required for prompt refinement.');
             }
-            const llmData = await llmResponse.json();
-            const craftedPrompt = llmData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
+            const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
+            let craftedPrompt = '';
+            try {
+                // Construct Multimodal Request
+                const promptParts = [promptCraftingRequest];
+                if (cardContext.image) {
+                    promptParts.push({
+                        inlineData: {
+                            mimeType: cardContext.mimeType || 'image/png',
+                            data: cardContext.image // Base64 string
+                        }
+                    });
+                }
+                const result = await promptModel.generateContent(promptParts);
+                const response = await result.response;
+                craftedPrompt = response.text().trim();
+            }
+            catch (e) {
+                console.error('[ImageGen] SDK Prompt Crafting failed:', e);
+                throw new Error(`LLM prompt crafting failed: ${e.message}`);
+            }
             if (!craftedPrompt) {
                 throw new Error('Failed to craft image prompt from LLM');
             }
             console.log('[ImageGen] Crafted prompt:', craftedPrompt.substring(0, 200) + '...');
             // Step 2: Generate image using the crafted prompt
-            const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultImageModel}:generateContent?key=${apiKey}`;
-            const imageResponse = await fetch(imageUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }],
-                }),
-            });
-            if (!imageResponse.ok) {
-                const errText = await imageResponse.text();
-                throw new Error(`Image generation failed: ${errText}`);
-            }
-            const imageData = await imageResponse.json();
-            // Extract image from response
-            const parts = imageData.candidates?.[0]?.content?.parts || [];
             let imageBase64 = null;
             let mimeType = 'image/png';
-            for (const part of parts) {
-                if (part.inlineData?.data) {
-                    imageBase64 = part.inlineData.data;
-                    mimeType = part.inlineData.mimeType || 'image/png';
-                    break;
+            if (provider === 'local-vision') {
+                const status = getLocalVisionStatusInternal();
+                if (!status.running || !status.port) {
+                    throw new Error('Local Vision server is not running.');
                 }
-            }
-            if (!imageBase64) {
-                // Check if response contains text (markdown image) instead
-                const textContent = parts.find((p) => p.text)?.text || '';
-                const base64Match = textContent.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
-                if (base64Match) {
-                    imageBase64 = base64Match[1];
+                const visionSettings = getLocalVisionSettingsInternal();
+                console.log(`[ImageGen] Routing to Local Vision (Model: ${visionSettings.activeModel})`);
+                const response = await fetch(`http://127.0.0.1:${status.port}/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: craftedPrompt,
+                        model_id: visionSettings.activeModel,
+                        cache_dir: visionSettings.modelsDir,
+                        num_inference_steps: 4, // Z-Image-Turbo default
+                        guidance_scale: 1.5,
+                        width: 1024,
+                        height: 1024
+                    })
+                });
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(`Local generation failed: ${errText}`);
+                }
+                const data = await response.json();
+                if (data.images && data.images.length > 0) {
+                    imageBase64 = data.images[0]; // Base64 string without prefix
+                    mimeType = 'image/png';
                 }
                 else {
-                    throw new Error('No image data in response. The model may not support image generation.');
+                    throw new Error('Local server returned no images.');
+                }
+            }
+            else {
+                // Gemini Image Generation
+                const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultImageModel}:generateContent?key=${apiKey}`;
+                console.log(`[ImageGen] Calling Gemini Image API: ${imageUrl.replace(apiKey, 'HIDDEN_KEY')}`);
+                console.log(`[ImageGen] Payload:`, JSON.stringify({ contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }] }).substring(0, 200) + '...');
+                const imageResponse = await fetch(imageUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }],
+                    }),
+                });
+                console.log(`[ImageGen] Response Status: ${imageResponse.status} ${imageResponse.statusText}`);
+                if (!imageResponse.ok) {
+                    const errText = await imageResponse.text();
+                    console.error(`[ImageGen] API Error Body:`, errText);
+                    throw new Error(`Image generation failed (${imageResponse.status}): ${errText}`);
+                }
+                const rawText = await imageResponse.text();
+                console.log(`[ImageGen] Raw Response Body (first 500 chars):`, rawText.substring(0, 500));
+                let imageData;
+                try {
+                    imageData = JSON.parse(rawText);
+                }
+                catch (e) {
+                    console.error(`[ImageGen] JSON Parse Error:`, e);
+                    throw new Error('Failed to parse image API response.');
+                }
+                // Extract image from response
+                const parts = imageData.candidates?.[0]?.content?.parts || [];
+                for (const part of parts) {
+                    if (part.inlineData?.data) {
+                        imageBase64 = part.inlineData.data;
+                        mimeType = part.inlineData.mimeType || 'image/png';
+                        break;
+                    }
+                }
+                if (!imageBase64) {
+                    // Check if response contains text (markdown image) instead
+                    const textContent = parts.find((p) => p.text)?.text || '';
+                    const base64Match = textContent.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+                    if (base64Match) {
+                        imageBase64 = base64Match[1];
+                    }
+                    else {
+                        throw new Error('No image data in response. The model may not support image generation.');
+                    }
                 }
             }
             // Step 3: Save image to file
@@ -1494,7 +1758,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             }));
         }
         catch (error) {
-            console.error('Error fetching Llama models from local server:', error);
+            // Suppress ECONNREFUSED as it just means server is not running
+            if (error?.cause?.code !== 'ECONNREFUSED' && !error?.message?.includes('ECONNREFUSED')) {
+                console.error('Error fetching Llama models from local server:', error);
+            }
             return [];
         }
     });
@@ -2369,11 +2636,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         else {
             const audioExts = ['.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg'];
             const videoExts = ['.mp4', '.mkv', '.webm', '.mov', '.avi'];
+            const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
             if (audioExts.includes(ext)) {
                 inferredMediaType = 'audio';
             }
             else if (videoExts.includes(ext)) {
                 inferredMediaType = 'video';
+            }
+            else if (imageExts.includes(ext)) {
+                inferredMediaType = 'image';
             }
         }
         const mediaType = providedMediaType || inferredMediaType;
@@ -2384,6 +2655,9 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         }
         else if (mediaType === 'video') {
             kind = 'video';
+        }
+        else if (mediaType === 'image') {
+            kind = 'image';
         }
         const fileName = path.basename(filePath);
         const ingestInfo = {
@@ -2459,6 +2733,20 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 remoteUrl: undefined,
                 mimeType: '',
             };
+        }
+        else if (mediaType === 'image') {
+            // Generate file:// URL for renderer
+            const imageUrl = `file://${filePath.replace(/\\/g, '/')}`;
+            cardRecord.image = {
+                localPath: filePath,
+                url: imageUrl,
+                imageUrl: imageUrl,
+                remoteUrl: undefined,
+                mimeType: ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.gif' ? 'image/gif' : 'image/png',
+            };
+            // Also set at root for compatibility
+            cardRecord.imageUrl = imageUrl;
+            cardRecord.url = imageUrl;
         }
         await (0, p2p_1.appendToCore)(cardCoreName, JSON.stringify(cardRecord));
         await (0, p2p_1.createCore)(CARD_LIBRARY_CORE_NAME);

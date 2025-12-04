@@ -10,6 +10,7 @@ import { initFirebase } from './firebase';
 import P2P from './pages/P2P';
 import Admin from './pages/Admin';
 import LocalLlama from './pages/LocalLlama';
+import LocalVision from './pages/LocalVision';
 import Archives from './pages/Archives';
 import Revid from './pages/Revid';
 import RevidMedia from './pages/RevidMedia';
@@ -51,6 +52,7 @@ function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="admin" element={<Admin />} />
           <Route path="local-llama" element={<LocalLlama />} />
+          <Route path="local-vision" element={<LocalVision />} />
           <Route path="revid" element={<Revid />} />
           <Route path="revid-media" element={<RevidMedia />} />
           <Route path="cards" element={<CardLibrary />} />
