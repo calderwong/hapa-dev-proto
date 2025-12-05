@@ -3,6 +3,7 @@ import React, { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { useLocation } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 import CardWorkspace from '../components/CardWorkspace';
+import { HoverVideoThumbnail, getCardVideoPath, getCardImagePath } from '../components/HoverVideoThumbnail';
 
 // Lazy load 3D viewer for performance
 const Card3DViewer = lazy(() => import('../components/Card3DViewer/Card3DViewer').then(m => ({ default: m.Card3DViewer })));
@@ -93,6 +94,11 @@ const CardLibrary: React.FC = () => {
     const [extracting, setExtracting] = useState<{ [key: string]: boolean }>({});
     const [extractedChildren, setExtractedChildren] = useState<{ [cardId: string]: string[] }>({});
     
+    // Scroll Attachment State
+    const [showScrollPicker, setShowScrollPicker] = useState(false);
+    const [availableScrollCards, setAvailableScrollCards] = useState<{ cardId: string; name: string; mediaType: string }[]>([]);
+    const [scrollAttaching, setScrollAttaching] = useState(false);
+    
     // Image Generation State
     const [imageGenState, setImageGenState] = useState<'idle' | 'crafting' | 'generating' | 'complete' | 'error'>('idle');
     const [imageGenError, setImageGenError] = useState<string | null>(null);
@@ -172,7 +178,13 @@ const CardLibrary: React.FC = () => {
                         if (!raw || typeof raw !== 'string') continue;
                         try {
                             const parsed = JSON.parse(raw);
-                            if (parsed && (parsed.type === 'card' || parsed.type === 'pet')) {
+                            // Accept various card types: traditional cards, pets, AND new media cards (videos, images)
+                            if (parsed && (
+                                parsed.type === 'card' || 
+                                parsed.type === 'pet' ||
+                                parsed.mediaKind ||  // NEW: loop videos and generated images
+                                parsed.cardId        // NEW: any record with cardId
+                            )) {
                                 cardRecord = parsed;
                                 break;
                             }
@@ -215,6 +227,11 @@ const CardLibrary: React.FC = () => {
                         mediaLocalPath = cardRecord.video.localPath;
                         mediaRemoteUrl = cardRecord.video.remoteUrl;
                         mediaMimeType = cardRecord.video.mimeType;
+                    } else if (cardRecord.mediaKind === 'video') {
+                        // NEW FORMAT: Loop videos and generated videos store mediaLocalPath directly
+                        mediaKind = 'video';
+                        mediaLocalPath = cardRecord.mediaLocalPath;
+                        mediaMimeType = 'video/mp4';
                     } else if (cardRecord.audio) {
                         mediaKind = 'audio';
                         mediaLocalPath = cardRecord.audio.localPath;
@@ -504,8 +521,11 @@ const CardLibrary: React.FC = () => {
         }
 
         if (step === 'summarization') {
-            if (mediaType !== 'audio' && mediaType !== 'text' && mediaType !== 'markdown') {
-                setError('Summarization is currently implemented for audio (with transcript) and text/markdown cards.');
+            // Now supports: audio, text, markdown, image, video (multimodal analysis)
+            const supportedTypes = ['audio', 'text', 'markdown', 'image', 'video'];
+            const effectiveMediaType = mediaType || selected.mediaKind || '';
+            if (!supportedTypes.includes(effectiveMediaType)) {
+                setError(`Summarization is not supported for '${effectiveMediaType}' cards. Supported: audio, text, markdown, image, video.`);
                 return;
             }
             if (!window.electronAPI.wormholeRunSummarization) {
@@ -596,30 +616,143 @@ const CardLibrary: React.FC = () => {
     };
 
     const renderThumbnail = (card: CardIndexEntry, large = false) => {
-        const className = large
+        // Note: We removed pointer-events-none for thumbnails with videos so hover works
+        const baseClassName = large
             ? "w-full h-64 object-cover rounded-lg border border-gray-700 bg-black/40 shadow-lg"
-            : "w-full h-40 object-cover rounded-t-lg bg-black/40 group-hover:opacity-90 transition-opacity pointer-events-none"; // pointer-events-none to prevent image dragging interfering with card dragging
+            : "w-full h-40 object-cover rounded-t-lg bg-black/40 group-hover:opacity-90 transition-opacity";
+        
+        // Only add pointer-events-none for non-video thumbnails (to prevent drag interference)
+        const className = baseClassName;
 
         if (card.mediaKind === 'image') {
-            const src = card.mediaLocalPath ? toFileUrl(card.mediaLocalPath) : card.thumbnail || card.mediaRemoteUrl;
-            if (src) {
-                return <img src={src} alt={card.cardId} className={className} />;
+            const imageSrc = card.mediaLocalPath ? toFileUrl(card.mediaLocalPath) : card.thumbnail || card.mediaRemoteUrl;
+            if (imageSrc) {
+                // Get video path from card (new taxonomy children or legacy)
+                const videoPath = getCardVideoPath(card);
+                const videoSrc = videoPath ? toFileUrl(videoPath) : null;
+                
+                // For card grid (small thumbnails) - use modular HoverVideoThumbnail
+                if (!large) {
+                    return (
+                        <HoverVideoThumbnail
+                            imageSrc={imageSrc}
+                            videoSrc={videoSrc}
+                            alt={card.cardId}
+                            className={className}
+                            showLoopBadge={!!videoSrc}
+                            badgePosition="top-right"
+                        />
+                    );
+                }
+                
+                // For detail view (large=true) - show with create button or video preview
+                if (videoSrc) {
+                    // Has loop video - show hover preview
+                    return (
+                        <HoverVideoThumbnail
+                            imageSrc={imageSrc}
+                            videoSrc={videoSrc}
+                            alt={card.cardId}
+                            className={`${className} cursor-pointer`}
+                            showLoopBadge={true}
+                            badgePosition="top-right"
+                        >
+                            <div className="absolute bottom-2 left-2 text-[10px] text-purple-300 bg-black/60 px-2 py-1 rounded">
+                                Hover to preview loop
+                            </div>
+                        </HoverVideoThumbnail>
+                    );
+                }
+                
+                // No loop video - show create button overlay
+                const loopStatus = loopGenStatus[card.cardId];
+                const isGenerating = loopStatus?.status === 'generating';
+                
+                return (
+                    <div className={`${className} relative group/imagethumb`}>
+                        <img src={imageSrc} alt={card.cardId} className="w-full h-full object-cover" loading="lazy" />
+                        {/* Create Loop Video overlay button */}
+                        {!isGenerating && (
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/imagethumb:opacity-100 transition-opacity flex items-center justify-center">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCreateLoopVideoFromImageCard(card);
+                                    }}
+                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg flex items-center gap-2 text-white font-bold text-sm transition-colors shadow-lg"
+                                >
+                                    <rux-icon icon="movie" size="small"></rux-icon>
+                                    Create Loop Video
+                                </button>
+                            </div>
+                        )}
+                        {/* Generating overlay */}
+                        {isGenerating && (
+                            <div className="absolute inset-0 bg-purple-900/60 flex flex-col items-center justify-center">
+                                <rux-icon icon="autorenew" size="normal" className="animate-spin text-purple-300"></rux-icon>
+                                <span className="mt-2 text-sm text-purple-200 font-bold">Creating Loop...</span>
+                            </div>
+                        )}
+                    </div>
+                );
             }
         }
 
         if (card.mediaKind === 'video') {
-            const src = card.mediaLocalPath ? toFileUrl(card.mediaLocalPath) : card.mediaRemoteUrl;
-            if (src) {
+            // Get video source - check multiple possible locations
+            const rawVideoPath = card.mediaLocalPath || 
+                                card.cardRecord?.mediaLocalPath ||
+                                card.cardRecord?.video?.localPath;
+            const videoSrc = rawVideoPath ? toFileUrl(rawVideoPath) : card.mediaRemoteUrl;
+            
+            console.log('[renderThumbnail] Video card:', card.cardId, 'videoSrc:', videoSrc, 'raw:', rawVideoPath);
+            
+            if (videoSrc) {
+                // For grid view (small) - hover to play with thumbnail
+                if (!large) {
+                    // Get thumbnail - use sourceImage, thumbnail, or generate from video
+                    const thumbSrc = card.thumbnail || 
+                                    (card.cardRecord?.sourceImage?.localPath ? toFileUrl(card.cardRecord.sourceImage.localPath) : null) ||
+                                    card.cardRecord?.thumbnail;
+                    
+                    if (thumbSrc) {
+                        return (
+                            <HoverVideoThumbnail
+                                imageSrc={thumbSrc}
+                                videoSrc={videoSrc}
+                                alt={card.cardId}
+                                className={className}
+                                showLoopBadge={true}
+                                badgePosition="top-right"
+                            />
+                        );
+                    }
+                    
+                    // No thumbnail - just show video directly with poster frame
+                    return (
+                        <HoverVideoThumbnail
+                            imageSrc={videoSrc}
+                            videoSrc={videoSrc}
+                            alt={card.cardId}
+                            className={className}
+                            showLoopBadge={true}
+                            badgePosition="top-right"
+                        />
+                    );
+                }
+                
+                // For detail view (large) - full video player
                 return (
                     <div className={`${className} relative`}>
                         <video 
-                            src={src} 
+                            src={videoSrc} 
                             className="w-full h-full object-cover"
                             autoPlay={large}
                             loop={large}
                             muted={globalMuted}
                             playsInline
                             controls={large}
+                            preload="metadata"
                         />
                         {/* Mute toggle button */}
                         {large && (
@@ -708,6 +841,7 @@ const CardLibrary: React.FC = () => {
                         muted 
                         loop 
                         playsInline
+                        preload="metadata"
                     />
                 );
             }
@@ -715,7 +849,7 @@ const CardLibrary: React.FC = () => {
             const imagePath = card.cardRecord?.image?.localPath || card.raw?.image?.localPath;
             const src = card.thumbnail || card.mediaRemoteUrl || (imagePath ? toFileUrl(imagePath) : null);
             if (src) {
-                return <img src={src} alt={card.cardId} className={className} style={{ imageRendering: 'pixelated' }} />;
+                return <img src={src} alt={card.cardId} className={className} style={{ imageRendering: 'pixelated' }} loading="lazy" />;
             }
         }
 
@@ -730,12 +864,13 @@ const CardLibrary: React.FC = () => {
                     muted 
                     loop 
                     playsInline
+                    preload="metadata"
                 />
             );
         }
 
         if (card.thumbnail) {
-            return <img src={card.thumbnail} alt={card.cardId} className={className} />;
+            return <img src={card.thumbnail} alt={card.cardId} className={className} loading="lazy" />;
         }
 
         return (
@@ -944,13 +1079,37 @@ const CardLibrary: React.FC = () => {
         });
     };
 
-    // Get the image set from a card
-    const getImageSet = (card: CardIndexEntry): { images: any[]; heroIndex: number; displayOrder: number[] } => {
+    // Get the image set from a card (supports NEW children[] and LEGACY imageSet)
+    const getImageSet = (card: CardIndexEntry): { images: any[]; heroIndex: number; displayOrder: number[]; isNewTaxonomy: boolean } => {
         const rec = card.cardRecord || {};
-        if (rec.imageSet) {
-            return rec.imageSet;
+        
+        // NEW TAXONOMY: Check for image children first
+        const imageChildren = (rec.children || []).filter((c: any) => c.type === 'image');
+        if (imageChildren.length > 0) {
+            return {
+                images: imageChildren.map((child: any, i: number) => ({
+                    id: child.cardId,
+                    cardId: child.cardId,           // Mark as a card reference
+                    localPath: child.imageUrl?.replace('file:///', '').replace(/\//g, '\\') || '',
+                    imageUrl: child.imageUrl,
+                    label: child.label,
+                    craftedPrompt: '',              // Stored in child card
+                    generatedAt: child.createdAt,
+                    creationOrder: i,
+                    isCard: true,                   // Flag to indicate this is a separate card
+                })),
+                heroIndex: 0,
+                displayOrder: imageChildren.map((_: any, i: number) => i),
+                isNewTaxonomy: true,
+            };
         }
-        // Migration: If card has single image, convert to imageSet format
+        
+        // LEGACY: Check for imageSet
+        if (rec.imageSet) {
+            return { ...rec.imageSet, isNewTaxonomy: false };
+        }
+        
+        // LEGACY: Single image field
         if (rec.image?.localPath) {
             return {
                 images: [{
@@ -960,12 +1119,15 @@ const CardLibrary: React.FC = () => {
                     craftedPrompt: rec.image.generatedPrompt || '',
                     generatedAt: rec.image.generatedAt || new Date().toISOString(),
                     creationOrder: 0,
+                    isCard: false,
                 }],
                 heroIndex: 0,
                 displayOrder: [0],
+                isNewTaxonomy: false,
             };
         }
-        return { images: [], heroIndex: 0, displayOrder: [] };
+        
+        return { images: [], heroIndex: 0, displayOrder: [], isNewTaxonomy: false };
     };
 
     // Collect context from parent cards for richer generation
@@ -1122,61 +1284,132 @@ const CardLibrary: React.FC = () => {
             });
             
             if (result.success && result.localPath) {
-                // Create new image entry
-                const newImage = {
-                    id: `img-${Date.now()}`,
-                    localPath: result.localPath,
-                    mimeType: result.mimeType,
-                    craftedPrompt: result.craftedPrompt,
-                    generatedAt: new Date().toISOString(),
-                    creationOrder: imageNumber - 1,
-                };
+                // ============================================================
+                // NEW TAXONOMY: Create a separate Image Card for each generated image
+                // ============================================================
                 
-                // Build updated image set
-                const updatedImages = [...currentImageSet.images, newImage];
-                const updatedDisplayOrder = [...currentImageSet.displayOrder, updatedImages.length - 1];
+                const imageCardId = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                const now = new Date().toISOString();
                 
-                const updatedImageSet = {
-                    images: updatedImages,
-                    heroIndex: currentImageSet.heroIndex, // Keep existing hero
-                    displayOrder: updatedDisplayOrder,
-                };
-                
-                // Update the card with the new image set
-                const updatedRecord = {
-                    ...selected.cardRecord,
-                    updatedAt: new Date().toISOString(),
-                    imageSet: updatedImageSet,
-                    // Keep legacy image field pointing to hero for backwards compatibility
-                    image: {
-                        localPath: updatedImages[updatedImageSet.heroIndex]?.localPath,
-                        mimeType: updatedImages[updatedImageSet.heroIndex]?.mimeType,
-                        generatedPrompt: updatedImages[updatedImageSet.heroIndex]?.craftedPrompt,
-                        generatedAt: updatedImages[updatedImageSet.heroIndex]?.generatedAt,
+                // 1. Create Image Card record
+                const imageCardRecord = {
+                    id: imageCardId,
+                    type: 'card',
+                    mediaType: 'image',
+                    subType: 'generated',
+                    
+                    // Relationships
+                    parentId: selected.cardId,
+                    children: [], // Can have loop videos, upscaled versions, etc.
+                    
+                    // Content
+                    title: `${cardContext.name} - Image #${imageNumber}`,
+                    
+                    // File storage
+                    wormhole: {
+                        ingest: {
+                            originalPath: result.localPath,
+                            mimeType: result.mimeType,
+                        }
                     },
+                    
+                    // Generation metadata
+                    generationPrompt: result.craftedPrompt,
+                    generationModel: imageProvider,
+                    generationIndex: imageNumber,
+                    seriesContext: seriesContext ? {
+                        previousPrompt: seriesContext.previousPrompt,
+                        continuationOf: lastImage?.id,
+                    } : undefined,
+                    
+                    // Standard fields
+                    tags: ['generated', 'ai-image', ...(cardContext.tags?.slice(0, 5) || [])],
+                    createdAt: now,
+                    updatedAt: now,
                 };
                 
-                // Save to Hypercore - use cardId as the core name (standard pattern)
-                const coreToUse = selected.coreName || selected.cardId;
-                console.log('[ImageGen] Saving image #', imageNumber, 'to core:', coreToUse);
+                console.log('[ImageGen] Creating Image Card:', imageCardId);
                 
-                if (window.electronAPI.p2pAppend && coreToUse) {
-                    try {
-                        await window.electronAPI.p2pAppend({ 
-                            name: coreToUse, 
-                            data: JSON.stringify(updatedRecord) 
-                        });
-                        console.log('[ImageGen] Successfully saved to Hypercore');
-                    } catch (saveErr: any) {
-                        console.error('[ImageGen] Failed to save to Hypercore:', saveErr);
+                // 2. Create Hypercore for the Image Card
+                try {
+                    await window.electronAPI.p2pCreateCore(imageCardId);
+                    await window.electronAPI.p2pAppend({
+                        name: imageCardId,
+                        data: JSON.stringify(imageCardRecord)
+                    });
+                    console.log('[ImageGen] Image Card saved to Hypercore:', imageCardId);
+                } catch (err) {
+                    console.error('[ImageGen] Failed to create Image Card Hypercore:', err);
+                }
+                
+                // 3. Update PARENT card's children array
+                const parentCoreName = selected.coreName || selected.cardId;
+                const existingChildren = selected.cardRecord?.children || [];
+                
+                // Read latest parent record
+                let parentLatest = selected.cardRecord || {};
+                try {
+                    const parentRecords = await window.electronAPI.p2pRead(parentCoreName);
+                    for (const r of parentRecords) {
+                        try {
+                            const parsed = JSON.parse(r);
+                            if (parsed) parentLatest = parsed;
+                        } catch { }
                     }
-                } else {
-                    console.warn('[ImageGen] No valid core name, skipping Hypercore save. Image saved to:', result.localPath);
+                } catch { }
+                
+                const updatedParentRecord = {
+                    ...parentLatest,
+                    children: [
+                        ...(parentLatest.children || []),
+                        {
+                            cardId: imageCardId,
+                            type: 'image',
+                            label: `Image #${imageNumber}`,
+                            imageUrl: `file:///${result.localPath.replace(/\\/g, '/')}`,
+                            createdAt: now,
+                        }
+                    ],
+                    updatedAt: now,
+                    // Set first image as thumbnail if none exists
+                    thumbnail: parentLatest.thumbnail || `file:///${result.localPath.replace(/\\/g, '/')}`,
+                };
+                
+                try {
+                    await window.electronAPI.p2pAppend({
+                        name: parentCoreName,
+                        data: JSON.stringify(updatedParentRecord)
+                    });
+                    console.log('[ImageGen] Parent card updated with child reference');
+                } catch (err) {
+                    console.error('[ImageGen] Failed to update parent card:', err);
+                }
+                
+                // 4. Add Image Card to library index
+                try {
+                    await window.electronAPI.p2pCreateCore(CARD_LIBRARY_CORE_NAME);
+                    await window.electronAPI.p2pAppend({
+                        name: CARD_LIBRARY_CORE_NAME,
+                        data: JSON.stringify({
+                            type: 'card-index',
+                            cardId: imageCardId,
+                            coreName: imageCardId,
+                            name: imageCardRecord.title,
+                            mediaKind: 'image',
+                            subType: 'generated',
+                            thumbnail: `file:///${result.localPath.replace(/\\/g, '/')}`,
+                            createdAt: now,
+                            parentCardId: selected.cardId,
+                        })
+                    });
+                    console.log('[ImageGen] Image Card added to library index');
+                } catch (err) {
+                    console.error('[ImageGen] Failed to add to library index:', err);
                 }
                 
                 setImageGenState('complete');
                 
-                // Reload cards to show the new image
+                // Reload cards to show the new image card
                 await loadCards(selected.cardId);
                 
                 setTimeout(() => setImageGenState('idle'), 2000);
@@ -1293,44 +1526,90 @@ const CardLibrary: React.FC = () => {
         }));
         
         try {
+            // NEW TAXONOMY: If image is a card, use its cardId as parent
+            // The loop video's parent should be the IMAGE card, not the source document
+            const loopParentCardId = img.isCard && img.cardId ? img.cardId : selected.cardId;
+            
             const result = await window.electronAPI.createLoopVideoForImage({
-                parentCardId: selected.cardId,
+                parentCardId: loopParentCardId,
                 imageId: img.id,
                 imagePath: img.localPath,
                 originalPrompt: img.craftedPrompt || '',
-                cardName: selected.name || 'Untitled',
+                cardName: img.isCard ? (img.label || `Image #${img.creationOrder + 1}`) : (selected.name || 'Untitled'),
                 imageOrder: img.creationOrder,
             });
             
             if (result.success) {
-                // Update the image with loop video reference
-                const updatedImages = [...imageSet.images];
-                updatedImages[imgIdx] = {
-                    ...img,
-                    loopVideo: {
-                        cardId: result.videoCardId,
-                        localPath: result.videoPath,
-                        generatedAt: new Date().toISOString(),
-                        status: 'complete' as const,
-                    },
-                };
+                const now = new Date().toISOString();
                 
-                const updatedRecord = {
-                    ...selected.cardRecord,
-                    updatedAt: new Date().toISOString(),
-                    imageSet: {
-                        ...imageSet,
-                        images: updatedImages,
-                    },
-                };
+                // NEW TAXONOMY: Update the IMAGE card's children array
+                if (img.isCard && img.cardId) {
+                    try {
+                        // Read the image card
+                        const imageCardRecords = await window.electronAPI.p2pRead(img.cardId);
+                        let imageCardLatest: any = {};
+                        for (const r of imageCardRecords) {
+                            try {
+                                const parsed = JSON.parse(r);
+                                if (parsed) imageCardLatest = parsed;
+                            } catch { }
+                        }
+                        
+                        // Update with loop video child
+                        const updatedImageCard = {
+                            ...imageCardLatest,
+                            children: [
+                                ...(imageCardLatest.children || []),
+                                {
+                                    cardId: result.videoCardId,
+                                    type: 'loop-video',
+                                    label: 'Loop Video',
+                                    createdAt: now,
+                                }
+                            ],
+                            updatedAt: now,
+                        };
+                        
+                        await window.electronAPI.p2pAppend({
+                            name: img.cardId,
+                            data: JSON.stringify(updatedImageCard),
+                        });
+                        console.log('[LoopVideo] Updated Image Card with loop video child');
+                    } catch (err) {
+                        console.error('[LoopVideo] Failed to update Image Card:', err);
+                    }
+                }
                 
-                // Save to Hypercore
-                const coreToUse = selected.coreName || selected.cardId;
-                if (window.electronAPI?.p2pAppend && coreToUse) {
-                    await window.electronAPI.p2pAppend({
-                        name: coreToUse,
-                        data: JSON.stringify(updatedRecord),
-                    });
+                // LEGACY: Update the source card's imageSet
+                else {
+                    const updatedImages = [...imageSet.images];
+                    updatedImages[imgIdx] = {
+                        ...img,
+                        loopVideo: {
+                            cardId: result.videoCardId,
+                            localPath: result.videoPath,
+                            generatedAt: now,
+                            status: 'complete' as const,
+                        },
+                    };
+                    
+                    const updatedRecord = {
+                        ...selected.cardRecord,
+                        updatedAt: now,
+                        imageSet: {
+                            ...imageSet,
+                            images: updatedImages,
+                        },
+                    };
+                    
+                    // Save to Hypercore
+                    const coreToUse = selected.coreName || selected.cardId;
+                    if (window.electronAPI?.p2pAppend && coreToUse) {
+                        await window.electronAPI.p2pAppend({
+                            name: coreToUse,
+                            data: JSON.stringify(updatedRecord),
+                        });
+                    }
                 }
                 
                 // Reload cards
@@ -1350,6 +1629,91 @@ const CardLibrary: React.FC = () => {
         }
     };
     
+    // Create loop video directly from an Image Card (new taxonomy)
+    const handleCreateLoopVideoFromImageCard = async (imageCard: CardIndexEntry) => {
+        if (!window.electronAPI?.createLoopVideoForImage) return;
+        
+        const imageId = imageCard.cardId;
+        const imagePath = imageCard.cardRecord?.wormhole?.ingest?.originalPath || imageCard.mediaLocalPath || '';
+        const imagePrompt = imageCard.cardRecord?.generationPrompt || '';
+        const imageName = imageCard.name || imageCard.cardRecord?.title || 'Image';
+        
+        if (!imagePath) {
+            console.error('[LoopVideo] No image path found for Image Card:', imageId);
+            return;
+        }
+        
+        // Set generating status
+        setLoopGenStatus(prev => ({
+            ...prev,
+            [imageId]: { status: 'generating', message: 'Starting loop generation...' },
+        }));
+        
+        try {
+            const result = await window.electronAPI.createLoopVideoForImage({
+                parentCardId: imageId, // Parent is the IMAGE card itself
+                imageId: imageId,
+                imagePath: imagePath,
+                originalPrompt: imagePrompt,
+                cardName: imageName,
+                imageOrder: imageCard.cardRecord?.generationIndex || 0,
+            });
+            
+            if (result.success) {
+                const now = new Date().toISOString();
+                
+                // Update the Image Card's children array with loop video
+                try {
+                    const imageCardRecords = await window.electronAPI.p2pRead(imageId);
+                    let imageCardLatest: any = {};
+                    for (const r of imageCardRecords) {
+                        try {
+                            const parsed = JSON.parse(r);
+                            if (parsed) imageCardLatest = parsed;
+                        } catch { }
+                    }
+                    
+                    const updatedImageCard = {
+                        ...imageCardLatest,
+                        children: [
+                            ...(imageCardLatest.children || []),
+                            {
+                                cardId: result.videoCardId,
+                                type: 'loop-video',
+                                label: 'Loop Video',
+                                videoPath: result.videoPath,
+                                createdAt: now,
+                            }
+                        ],
+                        updatedAt: now,
+                    };
+                    
+                    await window.electronAPI.p2pAppend({
+                        name: imageId,
+                        data: JSON.stringify(updatedImageCard),
+                    });
+                    console.log('[LoopVideo] Updated Image Card with loop video child');
+                } catch (err) {
+                    console.error('[LoopVideo] Failed to update Image Card:', err);
+                }
+                
+                // Reload to show the new video
+                await loadCards(imageId);
+                
+                setLoopGenStatus(prev => ({
+                    ...prev,
+                    [imageId]: { status: 'complete', message: 'Loop video created!' },
+                }));
+            }
+        } catch (err: any) {
+            console.error('[LoopVideo] Error creating loop from Image Card:', err);
+            setLoopGenStatus(prev => ({
+                ...prev,
+                [imageId]: { status: 'error', message: err?.message || 'Failed to create loop' },
+            }));
+        }
+    };
+
     // Navigate to a loop video's card page
     const handleNavigateToLoopVideo = async (loopVideoCardId: string) => {
         console.log('[LoopVideo] Navigating to video card:', loopVideoCardId);
@@ -2000,6 +2364,24 @@ const CardLibrary: React.FC = () => {
                                                     <h3 className="font-bold uppercase tracking-wider text-sm">Loop Video Details</h3>
                                                 </div>
                                                 
+                                                {/* View Parent Image Card Button */}
+                                                {selected.cardRecord?.parentCardId && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const parentCard = cards.find(c => c.cardId === selected.cardRecord?.parentCardId);
+                                                            if (parentCard) {
+                                                                setSelected(parentCard);
+                                                            } else {
+                                                                loadCards(selected.cardRecord?.parentCardId);
+                                                            }
+                                                        }}
+                                                        className="w-full py-2 px-4 bg-cyan-900/30 hover:bg-cyan-900/50 border border-cyan-500/50 rounded-lg flex items-center justify-center gap-2 text-cyan-300 transition-all"
+                                                    >
+                                                        <rux-icon icon="image" size="small"></rux-icon>
+                                                        <span className="font-bold text-sm">← View Source Image Card</span>
+                                                    </button>
+                                                )}
+                                                
                                                 {/* Loop Prompt */}
                                                 <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-4">
                                                     <div className="text-[10px] uppercase font-bold text-purple-400 mb-2 tracking-wider">
@@ -2020,8 +2402,10 @@ const CardLibrary: React.FC = () => {
                                                             </div>
                                                         </div>
                                                         <div>
-                                                            <div className="text-gray-500 mb-1">Source</div>
-                                                            <div className="text-gray-300 font-mono">Image Loop</div>
+                                                            <div className="text-gray-500 mb-1">Parent</div>
+                                                            <div className="text-gray-300 font-mono truncate" title={selected.cardRecord?.parentCardId}>
+                                                                {selected.cardRecord?.parentCardId?.slice(0, 20)}...
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 )}
@@ -2035,6 +2419,118 @@ const CardLibrary: React.FC = () => {
                                                         <p className="text-gray-400 text-sm leading-relaxed">
                                                             {selected.cardRecord?.sourceImage?.craftedPrompt}
                                                         </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+
+                                    {/* Image Card Details - Show for generated image cards */}
+                                    {selected.mediaKind === 'image' && selected.cardRecord?.subType === 'generated' && (
+                                        <>
+                                            <div className="h-px bg-gray-800"></div>
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 text-cyan-400">
+                                                    <rux-icon icon="image" size="small"></rux-icon>
+                                                    <h3 className="font-bold uppercase tracking-wider text-sm">Image Details</h3>
+                                                </div>
+                                                
+                                                {/* Generation Prompt */}
+                                                {selected.cardRecord?.generationPrompt && (
+                                                    <div className="bg-cyan-900/20 border border-cyan-500/30 rounded-lg p-4">
+                                                        <div className="text-[10px] uppercase font-bold text-cyan-400 mb-2 tracking-wider">
+                                                            AI-Crafted Image Prompt
+                                                        </div>
+                                                        <p className="text-gray-300 text-sm leading-relaxed">
+                                                            {selected.cardRecord?.generationPrompt}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                                
+                                                {/* Generation Info */}
+                                                <div className="grid grid-cols-2 gap-4 text-xs">
+                                                    <div>
+                                                        <div className="text-gray-500 mb-1">Model</div>
+                                                        <div className="text-gray-300 font-mono">
+                                                            {selected.cardRecord?.generationModel || 'Unknown'}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-gray-500 mb-1">Series #</div>
+                                                        <div className="text-gray-300 font-mono">
+                                                            #{selected.cardRecord?.generationIndex || 1}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Create Loop Video Button / Status */}
+                                                {(() => {
+                                                    const hasLoopVideo = selected.cardRecord?.children?.some((c: any) => c.type === 'loop-video');
+                                                    const loopStatus = loopGenStatus[selected.cardId];
+                                                    const isGenerating = loopStatus?.status === 'generating';
+                                                    
+                                                    if (hasLoopVideo) {
+                                                        // Already has loop video - show success state
+                                                        return (
+                                                            <div className="pt-2">
+                                                                <div className="w-full py-3 px-4 bg-green-900/20 border border-green-500/30 rounded-lg flex items-center justify-center gap-2 text-green-400">
+                                                                    <rux-icon icon="check-circle" size="small"></rux-icon>
+                                                                    <span className="font-bold uppercase text-sm tracking-wider">Loop Video Created</span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    
+                                                    if (isGenerating) {
+                                                        // Currently generating
+                                                        return (
+                                                            <div className="pt-2">
+                                                                <div className="w-full py-3 px-4 bg-purple-900/40 border border-purple-500/50 rounded-lg flex items-center justify-center gap-2 text-purple-300 animate-pulse">
+                                                                    <rux-icon icon="autorenew" size="small" className="animate-spin"></rux-icon>
+                                                                    <span className="font-bold uppercase text-sm tracking-wider">Creating Loop Video...</span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    
+                                                    // Show create button
+                                                    return (
+                                                        <div className="pt-2">
+                                                            <button
+                                                                onClick={() => handleCreateLoopVideoFromImageCard(selected)}
+                                                                className="w-full py-3 px-4 bg-purple-900/30 hover:bg-purple-900/50 border border-purple-500/50 rounded-lg flex items-center justify-center gap-2 text-purple-300 transition-all hover:border-purple-400"
+                                                            >
+                                                                <rux-icon icon="movie" size="small"></rux-icon>
+                                                                <span className="font-bold uppercase text-sm tracking-wider">Create Loop Video</span>
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })()}
+                                                
+                                                {/* Child Loop Videos */}
+                                                {selected.cardRecord?.children?.filter((c: any) => c.type === 'loop-video').length > 0 && (
+                                                    <div className="pt-4">
+                                                        <div className="text-[10px] uppercase font-bold text-gray-500 mb-3 tracking-wider">
+                                                            Derived Loop Videos
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            {selected.cardRecord.children.filter((c: any) => c.type === 'loop-video').map((child: any) => (
+                                                                <button
+                                                                    key={child.cardId}
+                                                                    onClick={() => {
+                                                                        const videoCard = cards.find(c => c.cardId === child.cardId);
+                                                                        if (videoCard) setSelected(videoCard);
+                                                                        else loadCards(child.cardId);
+                                                                    }}
+                                                                    className="p-3 bg-purple-900/20 border border-purple-500/30 rounded-lg text-left hover:bg-purple-900/40 transition-colors"
+                                                                >
+                                                                    <div className="flex items-center gap-2 text-purple-300">
+                                                                        <rux-icon icon="loop" size="extra-small"></rux-icon>
+                                                                        <span className="text-xs font-mono truncate">{child.label || 'Loop Video'}</span>
+                                                                    </div>
+                                                                </button>
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
@@ -2065,8 +2561,22 @@ const CardLibrary: React.FC = () => {
                                                             const img = imageSet.images[imgIdx];
                                                             if (!img) return null;
                                                             const isHero = imgIdx === imageSet.heroIndex;
-                                                            const hasLoop = img.loopVideo?.status === 'complete';
-                                                            const loopStatus = loopGenStatus[img.id];
+                                                            
+                                                            // Check for loop video (supports both new and legacy)
+                                                            // NEW TAXONOMY: Look up Image Card's children for loop-video
+                                                            let hasLoop = img.loopVideo?.status === 'complete';
+                                                            let loopVideoPath = img.loopVideo?.localPath;
+                                                            
+                                                            if (img.isCard && img.cardId) {
+                                                                const imageCard = cards.find(c => c.cardId === img.cardId);
+                                                                const loopChild = imageCard?.cardRecord?.children?.find((c: any) => c.type === 'loop-video');
+                                                                if (loopChild) {
+                                                                    hasLoop = true;
+                                                                    loopVideoPath = loopChild.videoPath;
+                                                                }
+                                                            }
+                                                            
+                                                            const loopStatus = loopGenStatus[img.id] || loopGenStatus[img.cardId];
                                                             const isGeneratingLoop = loopStatus?.status === 'generating' || loopStatus?.status === 'crafted';
                                                             const isHovered = hoveredImageId === img.id;
                                                             
@@ -2085,14 +2595,25 @@ const CardLibrary: React.FC = () => {
                                                                     onMouseEnter={() => setHoveredImageId(img.id)}
                                                                     onMouseLeave={() => setHoveredImageId(null)}
                                                                     onClick={() => {
-                                                                        if (hasLoop && img.loopVideo?.cardId) {
+                                                                        // NEW TAXONOMY: Navigate to Image Card if it's a card
+                                                                        if (img.isCard && img.cardId) {
+                                                                            const imageCard = cards.find(c => c.cardId === img.cardId);
+                                                                            if (imageCard) {
+                                                                                setSelected(imageCard);
+                                                                            } else {
+                                                                                // Card not in local list, try to load it
+                                                                                loadCards(img.cardId);
+                                                                            }
+                                                                        }
+                                                                        // LEGACY: Navigate to loop video if exists
+                                                                        else if (hasLoop && img.loopVideo?.cardId) {
                                                                             handleNavigateToLoopVideo(img.loopVideo.cardId);
                                                                         }
                                                                     }}
                                                                 >
                                                                     {/* Base Image */}
                                                                     <img 
-                                                                        src={toFileUrl(img.localPath)} 
+                                                                        src={img.imageUrl || toFileUrl(img.localPath)} 
                                                                         alt={`Image #${img.creationOrder + 1}`}
                                                                         className={`w-full h-full object-cover transition-opacity ${
                                                                             hasLoop && isHovered ? 'opacity-0' : 'opacity-100'
@@ -2100,13 +2621,14 @@ const CardLibrary: React.FC = () => {
                                                                     />
                                                                     
                                                                     {/* Loop Video Preview on Hover */}
-                                                                    {hasLoop && img.loopVideo?.localPath && isHovered && (
+                                                                    {hasLoop && loopVideoPath && isHovered && (
                                                                         <video
-                                                                            src={toFileUrl(img.loopVideo.localPath)}
+                                                                            src={toFileUrl(loopVideoPath)}
                                                                             autoPlay
                                                                             loop
                                                                             muted
                                                                             playsInline
+                                                                            preload="metadata"
                                                                             className="absolute inset-0 w-full h-full object-cover"
                                                                         />
                                                                     )}
@@ -2142,9 +2664,31 @@ const CardLibrary: React.FC = () => {
                                                                         #{img.creationOrder + 1}
                                                                     </div>
                                                                     
+                                                                    {/* Image Card indicator */}
+                                                                    {img.isCard && (
+                                                                        <div className="absolute bottom-1 left-1 bg-cyan-500/80 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                                                                            <rux-icon icon="open-in-new" size="extra-small"></rux-icon>
+                                                                        </div>
+                                                                    )}
+                                                                    
                                                                     {/* Hover controls */}
                                                                     {!isGeneratingLoop && (
                                                                         <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                                                            {/* View Image Card Button (new taxonomy) */}
+                                                                            {img.isCard && img.cardId && (
+                                                                                <button
+                                                                                    onClick={(e) => { 
+                                                                                        e.stopPropagation(); 
+                                                                                        const imageCard = cards.find(c => c.cardId === img.cardId);
+                                                                                        if (imageCard) setSelected(imageCard);
+                                                                                        else loadCards(img.cardId);
+                                                                                    }}
+                                                                                    className="p-1.5 bg-cyan-500/30 hover:bg-cyan-500/50 rounded text-cyan-300"
+                                                                                    title="View Image Card"
+                                                                                >
+                                                                                    <rux-icon icon="open-in-new" size="extra-small"></rux-icon>
+                                                                                </button>
+                                                                            )}
                                                                             {/* Create Loop Button */}
                                                                             {!hasLoop && (
                                                                                 <button
@@ -2341,9 +2885,9 @@ const CardLibrary: React.FC = () => {
                                                         >
                                                             <div className="w-16 h-16 rounded overflow-hidden border border-gray-700 flex-shrink-0 bg-gray-800">
                                                                 {parentThumb ? (
-                                                                    <img src={parentThumb} alt="" className="w-full h-full object-cover" />
+                                                                    <img src={parentThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
                                                                 ) : parent.mediaKind === 'video' && parent.mediaLocalPath ? (
-                                                                    <video src={toFileUrl(parent.mediaLocalPath)} className="w-full h-full object-cover" muted />
+                                                                    <video src={toFileUrl(parent.mediaLocalPath)} className="w-full h-full object-cover" muted preload="metadata" />
                                                                 ) : (
                                                                     <div className="w-full h-full flex items-center justify-center">
                                                                         <rux-icon icon={parent.mediaKind === 'video' ? 'videocam' : parent.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="small" className="text-gray-600"></rux-icon>
@@ -2386,7 +2930,7 @@ const CardLibrary: React.FC = () => {
                                                                 >
                                                                     <div className="w-14 h-14 rounded overflow-hidden border border-gray-700 bg-gray-800">
                                                                         {childThumb ? (
-                                                                            <img src={childThumb} alt="" className="w-full h-full object-cover" />
+                                                                            <img src={childThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
                                                                         ) : (
                                                                             <div className="w-full h-full flex items-center justify-center">
                                                                                 <rux-icon 
@@ -2426,7 +2970,7 @@ const CardLibrary: React.FC = () => {
                                                                 >
                                                                     <div className="w-12 h-12 rounded overflow-hidden border border-gray-700 bg-gray-800">
                                                                         {siblingThumb ? (
-                                                                            <img src={siblingThumb} alt="" className="w-full h-full object-cover" />
+                                                                            <img src={siblingThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
                                                                         ) : (
                                                                             <div className="w-full h-full flex items-center justify-center">
                                                                                 <rux-icon 
@@ -2554,6 +3098,72 @@ const CardLibrary: React.FC = () => {
                                         )}
                                     </div>
 
+                                    {/* SCROLLS Section - Context documents for LLM analysis */}
+                                    <div className="space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2 text-amber-400">
+                                                <rux-icon icon="description" size="small"></rux-icon>
+                                                <h3 className="font-bold uppercase tracking-wider text-sm">Scrolls (Context)</h3>
+                                            </div>
+                                            <button
+                                                onClick={async () => {
+                                                    if (!window.electronAPI?.getTextCardsForScroll) return;
+                                                    try {
+                                                        const textCards = await window.electronAPI.getTextCardsForScroll();
+                                                        setAvailableScrollCards(textCards || []);
+                                                        setShowScrollPicker(true);
+                                                    } catch (e) {
+                                                        console.error('Failed to load text cards:', e);
+                                                    }
+                                                }}
+                                                className="text-xs px-3 py-1 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-500/30 rounded text-amber-300 transition-colors"
+                                            >
+                                                + Attach Scroll
+                                            </button>
+                                        </div>
+                                        
+                                        {/* Attached Scrolls */}
+                                        {selected.cardRecord?.scrolls && selected.cardRecord.scrolls.length > 0 ? (
+                                            <div className="space-y-2">
+                                                {selected.cardRecord.scrolls.map((scroll: any) => (
+                                                    <div 
+                                                        key={scroll.cardId}
+                                                        className="flex items-center justify-between p-3 bg-amber-900/20 border border-amber-500/30 rounded-lg"
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <rux-icon icon="text-snippet" size="extra-small" className="text-amber-300"></rux-icon>
+                                                            <span className="text-sm text-amber-200 font-mono truncate max-w-[200px]">
+                                                                {scroll.label || scroll.cardId}
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            onClick={async () => {
+                                                                if (!window.electronAPI?.detachCardScroll || !selected) return;
+                                                                try {
+                                                                    await window.electronAPI.detachCardScroll({
+                                                                        cardId: selected.cardId,
+                                                                        scrollCardId: scroll.cardId,
+                                                                    });
+                                                                    await loadCards(selected.cardId);
+                                                                } catch (e: any) {
+                                                                    setError(e?.message || 'Failed to detach scroll');
+                                                                }
+                                                            }}
+                                                            className="text-red-400 hover:text-red-300 text-xs px-2"
+                                                            title="Remove scroll"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="text-gray-500 text-xs italic p-3 bg-gray-900/30 rounded-lg border border-gray-800">
+                                                No scrolls attached. Attach a text/markdown card to provide context for AI analysis.
+                                            </div>
+                                        )}
+                                    </div>
+
                                     {/* Raw Data Section */}
                                     <div className="space-y-2">
                                         <div className="flex items-center gap-2 text-gray-500">
@@ -2601,6 +3211,90 @@ const CardLibrary: React.FC = () => {
                     onClose={() => setShow3DViewer(false)}
                 />
             </Suspense>
+        )}
+        
+        {/* Scroll Picker Modal */}
+        {showScrollPicker && selected && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                <div className="bg-gray-900 border border-amber-500/30 rounded-xl p-6 w-full max-w-md max-h-[70vh] overflow-hidden flex flex-col">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-bold text-amber-400 flex items-center gap-2">
+                            <rux-icon icon="description" size="small"></rux-icon>
+                            Attach Scroll
+                        </h2>
+                        <button
+                            onClick={() => setShowScrollPicker(false)}
+                            className="text-gray-400 hover:text-white text-xl"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                    
+                    <p className="text-sm text-gray-400 mb-4">
+                        Select a text or markdown card to attach as context for AI analysis.
+                    </p>
+                    
+                    <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                        {availableScrollCards.length === 0 ? (
+                            <div className="text-gray-500 text-sm italic text-center py-8">
+                                No text or markdown cards found in your library.
+                            </div>
+                        ) : (
+                            availableScrollCards
+                                .filter(sc => sc.cardId !== selected.cardId) // Don't show self
+                                .filter(sc => !selected.cardRecord?.scrolls?.some((s: any) => s.cardId === sc.cardId)) // Don't show already attached
+                                .map(scrollCard => (
+                                    <button
+                                        key={scrollCard.cardId}
+                                        onClick={async () => {
+                                            if (!window.electronAPI?.attachCardScroll || scrollAttaching) return;
+                                            setScrollAttaching(true);
+                                            try {
+                                                await window.electronAPI.attachCardScroll({
+                                                    cardId: selected.cardId,
+                                                    scrollCardId: scrollCard.cardId,
+                                                });
+                                                await loadCards(selected.cardId);
+                                                setShowScrollPicker(false);
+                                            } catch (e: any) {
+                                                setError(e?.message || 'Failed to attach scroll');
+                                            } finally {
+                                                setScrollAttaching(false);
+                                            }
+                                        }}
+                                        disabled={scrollAttaching}
+                                        className="w-full text-left p-3 bg-gray-800/50 hover:bg-amber-900/30 border border-gray-700 hover:border-amber-500/50 rounded-lg transition-all"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <rux-icon 
+                                                icon={scrollCard.mediaType === 'markdown' ? 'article' : 'text-snippet'} 
+                                                size="small" 
+                                                className="text-amber-400"
+                                            ></rux-icon>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm text-gray-200 truncate font-mono">
+                                                    {scrollCard.name}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {scrollCard.mediaType.toUpperCase()}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                ))
+                        )}
+                    </div>
+                    
+                    <div className="mt-4 pt-4 border-t border-gray-800 flex justify-end">
+                        <button
+                            onClick={() => setShowScrollPicker(false)}
+                            className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
         )}
         </>
     );

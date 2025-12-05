@@ -55,6 +55,42 @@ const LOCAL_VISION_SETTINGS_KEY = 'localVisionSettings';
 const WORMHOLE_SETTINGS_KEY = 'wormholeSettings';
 const CARD_LIBRARY_CORE_NAME = 'card-library';
 const WIKI_CORE_NAME = 'wormhole-wiki-entries';
+// ============================================================================
+// MEMORY MANAGEMENT UTILITIES
+// ============================================================================
+/** Log memory usage for debugging memory issues */
+const logMemory = (label) => {
+    const used = process.memoryUsage();
+    console.log(`[Memory] ${label}:`, {
+        heapUsed: Math.round(used.heapUsed / 1024 / 1024) + 'MB',
+        heapTotal: Math.round(used.heapTotal / 1024 / 1024) + 'MB',
+        external: Math.round(used.external / 1024 / 1024) + 'MB',
+        rss: Math.round(used.rss / 1024 / 1024) + 'MB',
+    });
+};
+/** Hint to garbage collector if available (run with --expose-gc) */
+const hintGC = () => {
+    if (global.gc) {
+        global.gc();
+    }
+};
+/** Track active operations for memory debugging */
+const activeOperations = new Map();
+const startOperation = (id, type, sizeMB) => {
+    activeOperations.set(id, { startTime: Date.now(), type, sizeMB });
+    if (activeOperations.size > 5) {
+        console.warn(`[Ops] Warning: ${activeOperations.size} concurrent operations active`);
+    }
+};
+const endOperation = (id) => {
+    const op = activeOperations.get(id);
+    if (op) {
+        const duration = Date.now() - op.startTime;
+        console.log(`[Ops] Completed ${op.type} (${id}) in ${duration}ms. Active ops: ${activeOperations.size - 1}`);
+        activeOperations.delete(id);
+    }
+};
+// ============================================================================
 const appendGeminiRequestLog = (entry) => {
     const current = store.get(GEMINI_REQUEST_LOG_KEY, []) || [];
     const next = [...current, entry];
@@ -824,6 +860,356 @@ const summarizeTextWithGemini = async (text, modelName) => {
         model: resolvedModel,
     };
 };
+const analyzeImageWithGemini = async (imagePath, comprehensiveContext, modelName) => {
+    const opId = `img-analyze-${Date.now()}`;
+    startOperation(opId, 'analyzeImage');
+    const apiKey = store.get('geminiKey');
+    if (!apiKey) {
+        endOperation(opId);
+        throw new Error('Gemini API Key not found. Please configure it in Settings.');
+    }
+    // Use a multimodal-capable model, preferring 2.5 flash for speed
+    const resolvedModel = resolveGeminiModelName(modelName) || 'gemini-2.5-flash';
+    const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: resolvedModel });
+    // Read and encode image - use let so we can null after use
+    let imageBuffer = await fs.promises.readFile(imagePath);
+    const fileSizeMB = imageBuffer.length / (1024 * 1024);
+    console.log('[VisualAnalysis] Image size:', fileSizeMB.toFixed(2), 'MB');
+    let base64Image = imageBuffer.toString('base64');
+    imageBuffer = null; // Release buffer immediately after encoding
+    // Detect MIME type from extension
+    const ext = path.extname(imagePath).toLowerCase();
+    const mimeMap = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+    };
+    const mimeType = mimeMap[ext] || 'image/png';
+    // Build context-aware prompt
+    let contextSection = '';
+    if (comprehensiveContext && comprehensiveContext.trim()) {
+        const trimmedContext = comprehensiveContext.length > 16000 ? comprehensiveContext.slice(0, 16000) : comprehensiveContext;
+        contextSection = `\n\nCONTEXT DOCUMENT (attached scroll):\n${trimmedContext}\n\nAlso analyze how this visual relates to the context document above.`;
+    }
+    const prompt = `Analyze this image and provide a structured analysis in the following JSON format:
+{
+  "description": "A detailed description of what is shown - scene, subjects, composition, action",
+  "colors": ["color1", "color2", "color3"],
+  "themes": ["theme1", "theme2"],
+  "mood": "The overall mood or atmosphere",
+  "people": "Description of any people/characters if present, or null if none",
+  "textContent": "Any visible text, titles, or labels, or null if none",
+  "technicalStyle": "Art style/technique (photo, illustration, 3D render, pixel art, etc.)",
+  "summary": "A 2-3 sentence summary capturing the essence of this image"
+}
+${contextSection}
+
+Return ONLY valid JSON, no markdown code blocks.`;
+    console.log('[VisualAnalysis] Analyzing image:', imagePath);
+    const result = await model.generateContent([
+        { text: prompt },
+        {
+            inlineData: {
+                mimeType,
+                data: base64Image,
+            },
+        },
+    ]);
+    // Release base64 after API call
+    base64Image = null;
+    hintGC();
+    const response = await result.response;
+    const rawText = response.text?.() || '';
+    // Parse JSON response
+    let parsed = {};
+    try {
+        // Clean up potential markdown code blocks
+        const cleaned = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        parsed = JSON.parse(cleaned);
+    }
+    catch (parseErr) {
+        console.error('[VisualAnalysis] Failed to parse JSON response:', parseErr);
+        // Fallback: use raw text as description
+        parsed = {
+            description: rawText.slice(0, 2000),
+            colors: [],
+            themes: [],
+            mood: 'unknown',
+            technicalStyle: 'unknown',
+            summary: rawText.slice(0, 400),
+        };
+    }
+    const description = parsed.description || '';
+    const summary = parsed.summary || description.slice(0, 400);
+    const shortSummary = summary.split(/[.!?]/).slice(0, 2).join('. ').trim() || summary.slice(0, 200);
+    endOperation(opId);
+    return {
+        description,
+        colors: Array.isArray(parsed.colors) ? parsed.colors : [],
+        themes: Array.isArray(parsed.themes) ? parsed.themes : [],
+        mood: parsed.mood || 'unknown',
+        people: parsed.people || undefined,
+        textContent: parsed.textContent || undefined,
+        technicalStyle: parsed.technicalStyle || 'unknown',
+        short: shortSummary,
+        medium: summary,
+        model: resolvedModel,
+    };
+};
+// Multimodal analysis: Analyze video with Gemini
+const analyzeVideoWithGemini = async (videoPath, comprehensiveContext, modelName) => {
+    const opId = `vid-analyze-${Date.now()}`;
+    startOperation(opId, 'analyzeVideo');
+    const apiKey = store.get('geminiKey');
+    if (!apiKey) {
+        endOperation(opId);
+        throw new Error('Gemini API Key not found. Please configure it in Settings.');
+    }
+    // Check file size - Gemini inline limit is ~20MB for videos
+    const stats = await fs.promises.stat(videoPath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    if (fileSizeMB > 20) {
+        endOperation(opId);
+        throw new Error(`Video file is ${fileSizeMB.toFixed(1)}MB. Maximum supported size for inline analysis is 20MB. Please use a shorter/smaller video.`);
+    }
+    const resolvedModel = resolveGeminiModelName(modelName) || 'gemini-2.5-flash';
+    const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: resolvedModel });
+    // Read and encode video - use let so we can null after use
+    let videoBuffer = await fs.promises.readFile(videoPath);
+    console.log('[VideoAnalysis] Video size:', fileSizeMB.toFixed(2), 'MB');
+    let base64Video = videoBuffer.toString('base64');
+    videoBuffer = null; // Release buffer immediately after encoding
+    // Detect MIME type from extension
+    const ext = path.extname(videoPath).toLowerCase();
+    const mimeMap = {
+        '.mp4': 'video/mp4',
+        '.mpeg': 'video/mpeg',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.webm': 'video/webm',
+        '.mkv': 'video/x-matroska',
+        '.wmv': 'video/x-ms-wmv',
+    };
+    const mimeType = mimeMap[ext] || 'video/mp4';
+    // Build context-aware prompt
+    let contextSection = '';
+    if (comprehensiveContext && comprehensiveContext.trim()) {
+        const trimmedContext = comprehensiveContext.length > 16000 ? comprehensiveContext.slice(0, 16000) : comprehensiveContext;
+        contextSection = `\n\nCONTEXT DOCUMENT (attached scroll):\n${trimmedContext}\n\nAlso analyze how this video relates to the context document above.`;
+    }
+    const prompt = `Analyze this video (both visuals and any audio) and provide a structured analysis in the following JSON format:
+{
+  "description": "A detailed description of what happens in the video - scenes, subjects, action, narrative",
+  "colors": ["color1", "color2", "color3"],
+  "themes": ["theme1", "theme2"],
+  "mood": "The overall mood or atmosphere",
+  "people": "Description of any people/characters if present, or null if none",
+  "textContent": "Any visible text, speech, or dialogue, or null if none",
+  "technicalStyle": "Video style (live action, animation, screen recording, etc.)",
+  "summary": "A 2-4 sentence summary capturing the essence of this video"
+}
+${contextSection}
+
+Return ONLY valid JSON, no markdown code blocks.`;
+    console.log('[VideoAnalysis] Analyzing video:', videoPath, `(${fileSizeMB.toFixed(1)}MB)`);
+    const result = await model.generateContent([
+        { text: prompt },
+        {
+            inlineData: {
+                mimeType,
+                data: base64Video,
+            },
+        },
+    ]);
+    // Release base64 after API call
+    base64Video = null;
+    hintGC();
+    const response = await result.response;
+    const rawText = response.text?.() || '';
+    // Parse JSON response
+    let parsed = {};
+    try {
+        const cleaned = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        parsed = JSON.parse(cleaned);
+    }
+    catch (parseErr) {
+        console.error('[VideoAnalysis] Failed to parse JSON response:', parseErr);
+        parsed = {
+            description: rawText.slice(0, 2000),
+            colors: [],
+            themes: [],
+            mood: 'unknown',
+            technicalStyle: 'unknown',
+            summary: rawText.slice(0, 400),
+        };
+    }
+    const description = parsed.description || '';
+    const summary = parsed.summary || description.slice(0, 400);
+    const shortSummary = summary.split(/[.!?]/).slice(0, 2).join('. ').trim() || summary.slice(0, 200);
+    endOperation(opId);
+    return {
+        description,
+        colors: Array.isArray(parsed.colors) ? parsed.colors : [],
+        themes: Array.isArray(parsed.themes) ? parsed.themes : [],
+        mood: parsed.mood || 'unknown',
+        people: parsed.people || undefined,
+        textContent: parsed.textContent || undefined,
+        technicalStyle: parsed.technicalStyle || 'unknown',
+        short: shortSummary,
+        medium: summary,
+        model: resolvedModel,
+    };
+};
+// Helper: Get scroll text from attached scroll cards
+const getScrollContextForCard = async (cardRecord) => {
+    if (!cardRecord.scrolls || !Array.isArray(cardRecord.scrolls) || cardRecord.scrolls.length === 0) {
+        return '';
+    }
+    const scrollTexts = [];
+    for (const scroll of cardRecord.scrolls) {
+        if (!scroll.cardId || !scroll.includeInSummarization)
+            continue;
+        try {
+            const scrollRecords = await (0, p2p_1.readCore)(scroll.cardId);
+            if (!Array.isArray(scrollRecords) || scrollRecords.length === 0)
+                continue;
+            // Find the card record in the scroll's Hypercore
+            let scrollCardRecord = null;
+            for (let i = scrollRecords.length - 1; i >= 0; i--) {
+                const raw = scrollRecords[i];
+                if (!raw || typeof raw !== 'string')
+                    continue;
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && (parsed.type === 'card' || parsed.mediaKind)) {
+                        scrollCardRecord = parsed;
+                        break;
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            if (!scrollCardRecord)
+                continue;
+            // Get text content from scroll card
+            const scrollMediaType = scrollCardRecord.mediaType || '';
+            const scrollIngest = scrollCardRecord.wormhole?.ingest;
+            const scrollOriginalPath = scrollIngest?.originalPath;
+            if (scrollOriginalPath && (scrollMediaType === 'text' || scrollMediaType === 'markdown')) {
+                try {
+                    const scrollText = await fs.promises.readFile(scrollOriginalPath, 'utf-8');
+                    if (scrollText.trim()) {
+                        const label = scroll.label || scrollCardRecord.title || scroll.cardId;
+                        scrollTexts.push(`--- ${label} ---\n${scrollText.trim()}`);
+                    }
+                }
+                catch { /* ignore read errors */ }
+            }
+        }
+        catch (err) {
+            console.warn('[Scroll] Failed to read scroll card:', scroll.cardId, err);
+        }
+    }
+    if (scrollTexts.length === 0)
+        return '';
+    // Combine and cap at 32KB
+    const combined = scrollTexts.join('\n\n');
+    return combined.length > 32000 ? combined.slice(0, 32000) + '\n[...truncated]' : combined;
+};
+// Helper: Build comprehensive context for LLM analysis
+// Includes: scroll text, existing summaries, image prompts, video prompts, derivatives info
+const buildComprehensiveContext = async (cardRecord, cardId) => {
+    const contextParts = [];
+    // 1. Scroll context
+    const scrollText = await getScrollContextForCard(cardRecord);
+    if (scrollText) {
+        contextParts.push(`=== ATTACHED SCROLLS ===\n${scrollText}`);
+    }
+    // 2. Existing summaries (from previous runs)
+    if (cardRecord.summaries && Array.isArray(cardRecord.summaries)) {
+        const latestSummary = cardRecord.summaries.find((s) => s.kind === 'medium' || s.kind === 'visual-analysis');
+        if (latestSummary && latestSummary.text) {
+            contextParts.push(`=== EXISTING SUMMARY ===\n${latestSummary.text}`);
+        }
+        // Include visual analysis details if present
+        const visualAnalysis = cardRecord.summaries.find((s) => s.kind === 'visual-analysis');
+        if (visualAnalysis) {
+            const details = [];
+            if (visualAnalysis.description)
+                details.push(`Description: ${visualAnalysis.description}`);
+            if (visualAnalysis.colors?.length)
+                details.push(`Colors: ${visualAnalysis.colors.join(', ')}`);
+            if (visualAnalysis.themes?.length)
+                details.push(`Themes: ${visualAnalysis.themes.join(', ')}`);
+            if (visualAnalysis.mood)
+                details.push(`Mood: ${visualAnalysis.mood}`);
+            if (visualAnalysis.people)
+                details.push(`People: ${visualAnalysis.people}`);
+            if (visualAnalysis.textContent)
+                details.push(`Visible Text: ${visualAnalysis.textContent}`);
+            if (visualAnalysis.technicalStyle)
+                details.push(`Style: ${visualAnalysis.technicalStyle}`);
+            if (details.length > 0) {
+                contextParts.push(`=== VISUAL ANALYSIS ===\n${details.join('\n')}`);
+            }
+        }
+    }
+    // 3. Image generation prompts (from card or derived images)
+    if (cardRecord.imagePrompt) {
+        contextParts.push(`=== IMAGE GENERATION PROMPT ===\n${cardRecord.imagePrompt}`);
+    }
+    if (cardRecord.prompt) {
+        contextParts.push(`=== GENERATION PROMPT ===\n${cardRecord.prompt}`);
+    }
+    // 4. Video generation prompts
+    if (cardRecord.videoPrompt) {
+        contextParts.push(`=== VIDEO GENERATION PROMPT ===\n${cardRecord.videoPrompt}`);
+    }
+    // 5. Check for children/derivatives and include their prompts
+    if (cardRecord.children && Array.isArray(cardRecord.children)) {
+        for (const child of cardRecord.children) {
+            if (!child.cardId)
+                continue;
+            try {
+                const childRecords = await (0, p2p_1.readCore)(child.cardId);
+                if (!Array.isArray(childRecords) || childRecords.length === 0)
+                    continue;
+                for (let i = childRecords.length - 1; i >= 0; i--) {
+                    const raw = childRecords[i];
+                    if (!raw || typeof raw !== 'string')
+                        continue;
+                    try {
+                        const childData = JSON.parse(raw);
+                        if (childData) {
+                            if (childData.imagePrompt) {
+                                contextParts.push(`=== DERIVED IMAGE PROMPT (${child.type || 'image'}) ===\n${childData.imagePrompt}`);
+                            }
+                            if (childData.videoPrompt || childData.prompt) {
+                                contextParts.push(`=== DERIVED VIDEO PROMPT (${child.type || 'video'}) ===\n${childData.videoPrompt || childData.prompt}`);
+                            }
+                            break; // Only need latest record from child
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+            catch { /* ignore */ }
+        }
+    }
+    // 6. Title and metadata
+    if (cardRecord.title || cardRecord.name) {
+        contextParts.push(`=== CARD TITLE ===\n${cardRecord.title || cardRecord.name}`);
+    }
+    if (contextParts.length === 0)
+        return '';
+    const combined = contextParts.join('\n\n');
+    // Cap at 48KB to leave room for the main content
+    return combined.length > 48000 ? combined.slice(0, 48000) + '\n[...context truncated]' : combined;
+};
 const extractKeyTermsWithGemini = async (text, modelName) => {
     const apiKey = store.get('geminiKey');
     if (!apiKey) {
@@ -1211,8 +1597,12 @@ electron_1.app.whenReady().then(() => {
     // Generate image for a card using LLM to craft prompt, then image model
     electron_1.ipcMain.handle('generate-image-for-card', async (_event, { cardContext, seriesContext, provider = 'gemini', // Default to Gemini
      }) => {
+        const opId = `img-gen-${Date.now()}`;
+        startOperation(opId, 'generateImage');
+        logMemory('ImageGen Start');
         const apiKey = store.get('geminiKey');
         if (!apiKey && provider === 'gemini') {
+            endOperation(opId);
             throw new Error('Gemini API Key not found. Please configure it in Settings.');
         }
         const adminSettings = getAdminSettings();
@@ -1417,6 +1807,11 @@ Create a vivid image prompt that visually represents this content:`;
             const filePath = path.join(imagesDir, fileName);
             await fs.promises.writeFile(filePath, Buffer.from(imageBase64, 'base64'));
             console.log('[ImageGen] Saved image to:', filePath);
+            // Release base64 after saving to disk
+            imageBase64 = null;
+            hintGC();
+            logMemory('ImageGen Complete');
+            endOperation(opId);
             return {
                 success: true,
                 localPath: filePath,
@@ -1426,21 +1821,30 @@ Create a vivid image prompt that visually represents this content:`;
         }
         catch (error) {
             console.error('[ImageGen] Error:', error);
+            endOperation(opId);
             throw new Error(`Image generation failed: ${error.message}`);
         }
     });
     // Create looping video from an image (one-click loop generation)
     electron_1.ipcMain.handle('create-loop-video-for-image', async (_event, { parentCardId, imageId, imagePath, originalPrompt, cardName, imageOrder, }) => {
+        const opId = `loop-vid-${Date.now()}`;
+        startOperation(opId, 'createLoopVideo');
+        logMemory('LoopVideo Start');
         const apiKey = store.get('geminiKey');
         if (!apiKey) {
+            endOperation(opId);
             throw new Error('Gemini API Key not found. Please configure it in Settings.');
         }
         console.log('[LoopVideo] Starting loop video creation for image:', imageId);
         console.log('[LoopVideo] Original prompt:', originalPrompt?.substring(0, 100));
         try {
             // Step 1: Read the source image and convert to base64
-            const imageBuffer = await fs.promises.readFile(imagePath);
-            const imageBase64 = imageBuffer.toString('base64');
+            // Use let so we can null after API call to free memory during polling
+            let imageBuffer = await fs.promises.readFile(imagePath);
+            const imageSizeMB = imageBuffer.length / (1024 * 1024);
+            console.log('[LoopVideo] Image size:', imageSizeMB.toFixed(2), 'MB');
+            let imageBase64 = imageBuffer.toString('base64');
+            imageBuffer = null; // Release buffer immediately
             const imageMimeType = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
             // Step 2: Craft a loop-optimized prompt using LLM
             const adminSettings = getAdminSettings();
@@ -1540,6 +1944,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 throw new Error('No operation name returned from video generation');
             }
             console.log('[LoopVideo] Video generation started, operation:', operationName);
+            // CRITICAL: Release base64 data BEFORE the polling loop
+            // This was staying in memory for 5+ minutes during polling!
+            imageBase64 = null;
+            hintGC();
+            logMemory('LoopVideo After Request (before polling)');
             // Step 4: Poll for completion
             const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
             const maxAttempts = 60; // 5 minutes with 5 second intervals
@@ -1580,17 +1989,22 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                     const videoPath = path.join(videosDir, videoFileName);
                     await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
                     console.log('[LoopVideo] Saved video to:', videoPath);
-                    // Step 5: Create child video card
+                    // Step 5: Create child video card with full lineage
                     const videoCardRecord = {
                         cardId: videoCardId,
                         name: `${cardName} - Loop #${imageOrder + 1}`,
+                        title: `${cardName} - Loop #${imageOrder + 1}`,
                         mediaKind: 'video',
+                        subType: 'loop-video',
                         mediaLocalPath: videoPath,
                         createdAt: new Date().toISOString(),
-                        parentCardId: parentCardId,
+                        parentCardId: parentCardId, // The IMAGE card that generated this
+                        parentType: 'image',
                         sourceImage: {
+                            cardId: imageId, // Reference to parent Image Card
                             imageId,
                             imagePath,
+                            localPath: imagePath,
                             craftedPrompt: originalPrompt,
                         },
                         generationParams: {
@@ -1605,21 +2019,28 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                     await (0, p2p_1.appendToCore)(videoCardId, JSON.stringify(videoCardRecord));
                     // Add to card library index
                     const libraryEntry = {
+                        type: 'card-index', // REQUIRED: Frontend filters for this
                         cardId: videoCardId,
                         name: videoCardRecord.name,
                         mediaKind: 'video',
+                        subType: 'loop-video',
                         createdAt: videoCardRecord.createdAt,
                         parentCardId: parentCardId,
+                        coreName: videoCardId,
                         thumbnail: imagePath, // Use source image as thumbnail
                         mediaLocalPath: videoPath,
                     };
                     await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+                    console.log('[LoopVideo] Added video card to library index:', videoCardId);
                     // Broadcast completion
                     broadcastLoopProgress({
                         imageId,
                         status: 'complete',
                         message: 'Loop video created!',
                     });
+                    logMemory('LoopVideo Complete');
+                    endOperation(opId);
+                    hintGC();
                     return {
                         success: true,
                         videoCardId,
@@ -1638,10 +2059,12 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                     message: `Generating loop video... ${progress}%`,
                 });
             }
+            endOperation(opId);
             throw new Error('Loop video generation timed out');
         }
         catch (error) {
             console.error('[LoopVideo] Error:', error);
+            endOperation(opId);
             // Broadcast error - need to create helper here since it might not be defined yet
             const [errWin] = electron_1.BrowserWindow.getAllWindows();
             if (errWin) {
@@ -2902,7 +3325,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 continue;
             try {
                 const parsed = JSON.parse(raw);
-                if (parsed && parsed.type === 'card') {
+                if (parsed && (parsed.type === 'card' || parsed.mediaKind)) {
                     cardRecord = parsed;
                 }
                 else if (parsed && parsed.type === 'wormhole-transcript') {
@@ -2916,31 +3339,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         if (!cardRecord) {
             throw new Error('Card record not found in Hypercore for Wormhole summarization.');
         }
-        const mediaType = (cardRecord.mediaType || '').toString();
-        let textSource = '';
-        if (transcripts.length > 0) {
-            const latest = transcripts[transcripts.length - 1];
-            if (latest && typeof latest.text === 'string') {
-                textSource = latest.text;
-            }
-        }
-        if (!textSource) {
-            const ingest = cardRecord.wormhole && cardRecord.wormhole.ingest;
-            const originalPath = ingest && typeof ingest.originalPath === 'string' ? ingest.originalPath : '';
-            if (originalPath && (mediaType === 'text' || mediaType === 'markdown')) {
-                try {
-                    const buf = await fs.promises.readFile(originalPath, 'utf-8');
-                    textSource = buf.toString();
-                }
-                catch (error) {
-                    console.error('Failed to read original text file for Wormhole summarization:', error);
-                }
-            }
-        }
-        const cleanedText = (textSource || '').trim();
-        if (!cleanedText) {
-            throw new Error('No text source available for Wormhole summarization. Run transcription or ingest text first.');
-        }
+        // Determine media type - support both old mediaType and new mediaKind
+        const mediaType = (cardRecord.mediaType || cardRecord.mediaKind || '').toString();
+        console.log('[Summarization] Card mediaType:', mediaType, 'cardId:', cardId);
+        // Get model configuration
         const globalWormhole = store.get(WORMHOLE_SETTINGS_KEY, {}) || {};
         let provider = 'gemini';
         if (overrideProvider && typeof overrideProvider === 'string') {
@@ -2951,50 +3353,190 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             globalWormhole.summarization.provider.trim().length > 0) {
             provider = globalWormhole.summarization.provider;
         }
-        const configuredModel = globalWormhole.summarization && typeof globalWormhole.summarization.model === 'string'
-            ? globalWormhole.summarization.model
-            : undefined;
-        const modelName = (overrideModel && typeof overrideModel === 'string' && overrideModel) || configuredModel || 'gemini-pro';
+        else if (globalWormhole.defaultModel &&
+            typeof globalWormhole.defaultModel.provider === 'string') {
+            // Fall back to default model if set
+            provider = globalWormhole.defaultModel.provider;
+        }
+        const configuredModel = globalWormhole.summarization?.model ||
+            globalWormhole.defaultModel?.model ||
+            undefined;
+        const modelName = (overrideModel && typeof overrideModel === 'string' && overrideModel) ||
+            configuredModel ||
+            'gemini-2.5-flash'; // Updated default to multimodal-capable model
         if (provider !== 'gemini') {
             throw new Error('Wormhole summarization is currently implemented only for Gemini provider.');
         }
-        const { short, medium, outline, model } = await summarizeTextWithGemini(cleanedText, modelName);
-        if (!medium) {
-            throw new Error('Summarization produced empty text.');
-        }
+        // Get comprehensive context for all card types (scrolls, prompts, derivatives)
+        const comprehensiveContext = await buildComprehensiveContext(cardRecord, cardId);
         const now = new Date().toISOString();
         const baseId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const outlineText = outline.join('\n');
+        let newSummaries = [];
+        let usedModel = modelName;
+        // Route based on media type
+        if (mediaType === 'image') {
+            // IMAGE CARD: Use visual analysis
+            const ingest = cardRecord.wormhole?.ingest;
+            const imagePath = ingest?.originalPath || cardRecord.mediaLocalPath;
+            if (!imagePath) {
+                throw new Error('Image card does not have a file path for analysis.');
+            }
+            console.log('[Summarization] Running image analysis on:', imagePath);
+            const analysis = await analyzeImageWithGemini(imagePath, comprehensiveContext, modelName);
+            usedModel = analysis.model;
+            newSummaries = [
+                {
+                    id: `${baseId}-visual`,
+                    kind: 'visual-analysis',
+                    description: analysis.description,
+                    colors: analysis.colors,
+                    themes: analysis.themes,
+                    mood: analysis.mood,
+                    people: analysis.people,
+                    textContent: analysis.textContent,
+                    technicalStyle: analysis.technicalStyle,
+                    text: analysis.medium,
+                    provider: 'gemini',
+                    model: analysis.model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+                {
+                    id: `${baseId}-short`,
+                    kind: 'short',
+                    text: analysis.short,
+                    provider: 'gemini',
+                    model: analysis.model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+                {
+                    id: `${baseId}-medium`,
+                    kind: 'medium',
+                    text: analysis.medium,
+                    provider: 'gemini',
+                    model: analysis.model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+            ];
+        }
+        else if (mediaType === 'video') {
+            // VIDEO CARD: Use video analysis
+            const ingest = cardRecord.wormhole?.ingest;
+            const videoPath = ingest?.originalPath || cardRecord.mediaLocalPath;
+            if (!videoPath) {
+                throw new Error('Video card does not have a file path for analysis.');
+            }
+            console.log('[Summarization] Running video analysis on:', videoPath);
+            const analysis = await analyzeVideoWithGemini(videoPath, comprehensiveContext, modelName);
+            usedModel = analysis.model;
+            newSummaries = [
+                {
+                    id: `${baseId}-visual`,
+                    kind: 'visual-analysis',
+                    description: analysis.description,
+                    colors: analysis.colors,
+                    themes: analysis.themes,
+                    mood: analysis.mood,
+                    people: analysis.people,
+                    textContent: analysis.textContent,
+                    technicalStyle: analysis.technicalStyle,
+                    text: analysis.medium,
+                    provider: 'gemini',
+                    model: analysis.model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+                {
+                    id: `${baseId}-short`,
+                    kind: 'short',
+                    text: analysis.short,
+                    provider: 'gemini',
+                    model: analysis.model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+                {
+                    id: `${baseId}-medium`,
+                    kind: 'medium',
+                    text: analysis.medium,
+                    provider: 'gemini',
+                    model: analysis.model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+            ];
+        }
+        else {
+            // TEXT/AUDIO/OTHER: Use text summarization (existing logic)
+            let textSource = '';
+            // Check for transcripts first (audio cards)
+            if (transcripts.length > 0) {
+                const latest = transcripts[transcripts.length - 1];
+                if (latest && typeof latest.text === 'string') {
+                    textSource = latest.text;
+                }
+            }
+            // Try to read from original file (text/markdown)
+            if (!textSource) {
+                const ingest = cardRecord.wormhole && cardRecord.wormhole.ingest;
+                const originalPath = ingest && typeof ingest.originalPath === 'string' ? ingest.originalPath : '';
+                if (originalPath && (mediaType === 'text' || mediaType === 'markdown')) {
+                    try {
+                        const buf = await fs.promises.readFile(originalPath, 'utf-8');
+                        textSource = buf.toString();
+                    }
+                    catch (error) {
+                        console.error('Failed to read original text file for Wormhole summarization:', error);
+                    }
+                }
+            }
+            // Include scroll context in text summarization
+            if (comprehensiveContext) {
+                textSource = `${textSource}\n\n--- ATTACHED SCROLLS ---\n${comprehensiveContext}`;
+            }
+            const cleanedText = (textSource || '').trim();
+            if (!cleanedText) {
+                throw new Error('No text source available for Wormhole summarization. For text/audio cards, run transcription or ingest text first. For image/video cards, ensure the file path is valid.');
+            }
+            const { short, medium, outline, model } = await summarizeTextWithGemini(cleanedText, modelName);
+            usedModel = model;
+            if (!medium) {
+                throw new Error('Summarization produced empty text.');
+            }
+            const outlineText = outline.join('\n');
+            newSummaries = [
+                {
+                    id: `${baseId}-short`,
+                    kind: 'short',
+                    text: short || medium,
+                    provider: 'gemini',
+                    model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+                {
+                    id: `${baseId}-medium`,
+                    kind: 'medium',
+                    text: medium,
+                    provider: 'gemini',
+                    model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+                {
+                    id: `${baseId}-outline`,
+                    kind: 'outline',
+                    text: outlineText,
+                    provider: 'gemini',
+                    model,
+                    createdAt: now,
+                    version: 'v1',
+                },
+            ];
+        }
         const existingSummaries = (Array.isArray(cardRecord.summaries) ? cardRecord.summaries : []) || [];
-        const newSummaries = [
-            {
-                id: `${baseId}-short`,
-                kind: 'short',
-                text: short || medium,
-                provider: 'gemini',
-                model,
-                createdAt: now,
-                version: 'v1',
-            },
-            {
-                id: `${baseId}-medium`,
-                kind: 'medium',
-                text: medium,
-                provider: 'gemini',
-                model,
-                createdAt: now,
-                version: 'v1',
-            },
-            {
-                id: `${baseId}-outline`,
-                kind: 'outline',
-                text: outlineText,
-                provider: 'gemini',
-                model,
-                createdAt: now,
-                version: 'v1',
-            },
-        ];
         const updatedSummaries = [...existingSummaries, ...newSummaries];
         const existingProcessing = (cardRecord.wormhole && typeof cardRecord.wormhole === 'object' && cardRecord.wormhole.processing) || {};
         const existingSummarization = existingProcessing.summarization || {};
@@ -3003,7 +3545,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             summarization: {
                 status: 'complete',
                 provider: 'gemini',
-                model,
+                model: usedModel,
                 startedAt: existingSummarization.startedAt || now,
                 completedAt: now,
                 error: undefined,
@@ -3042,7 +3584,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 continue;
             try {
                 const parsed = JSON.parse(raw);
-                if (parsed && parsed.type === 'card') {
+                if (parsed && (parsed.type === 'card' || parsed.mediaKind || parsed.mediaType)) {
                     cardRecord = parsed;
                 }
                 else if (parsed && parsed.type === 'wormhole-transcript') {
@@ -3056,31 +3598,72 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         if (!cardRecord) {
             throw new Error('Card record not found in Hypercore for Wormhole key-term extraction.');
         }
-        const mediaType = (cardRecord.mediaType || '').toString();
-        let textSource = '';
+        // Determine media type - support both old and new formats
+        const mediaType = (cardRecord.mediaType || cardRecord.mediaKind || '').toString();
+        console.log('[KeyTerms] Card mediaType:', mediaType, 'cardId:', cardId);
+        // Build comprehensive context from ALL sources
+        const comprehensiveContext = await buildComprehensiveContext(cardRecord, cardId);
+        // Build text source from multiple places
+        const textParts = [];
+        // 1. Transcripts (for audio/video cards)
         if (transcripts.length > 0) {
             const latest = transcripts[transcripts.length - 1];
             if (latest && typeof latest.text === 'string') {
-                textSource = latest.text;
+                textParts.push(`=== TRANSCRIPT ===\n${latest.text}`);
             }
         }
-        if (!textSource) {
-            const ingest = cardRecord.wormhole && cardRecord.wormhole.ingest;
-            const originalPath = ingest && typeof ingest.originalPath === 'string' ? ingest.originalPath : '';
-            if (originalPath && (mediaType === 'text' || mediaType === 'markdown')) {
-                try {
-                    const buf = await fs.promises.readFile(originalPath, 'utf-8');
-                    textSource = buf.toString();
+        // 2. Original text file content (for text/markdown cards)
+        const ingest = cardRecord.wormhole && cardRecord.wormhole.ingest;
+        const originalPath = ingest && typeof ingest.originalPath === 'string' ? ingest.originalPath : '';
+        if (originalPath && (mediaType === 'text' || mediaType === 'markdown')) {
+            try {
+                const buf = await fs.promises.readFile(originalPath, 'utf-8');
+                if (buf.toString().trim()) {
+                    textParts.push(`=== ORIGINAL CONTENT ===\n${buf.toString()}`);
                 }
-                catch (error) {
-                    console.error('Failed to read original text file for Wormhole key-term extraction:', error);
+            }
+            catch (error) {
+                console.error('Failed to read original text file for Wormhole key-term extraction:', error);
+            }
+        }
+        // 3. Add comprehensive context (scrolls, summaries, prompts, derivatives)
+        if (comprehensiveContext) {
+            textParts.push(comprehensiveContext);
+        }
+        // 4. For image/video cards without text, use visual analysis from summaries
+        if ((mediaType === 'image' || mediaType === 'video') && textParts.length === 0) {
+            // Check if we have a visual analysis summary
+            const visualSummary = cardRecord.summaries?.find((s) => s.kind === 'visual-analysis' || s.kind === 'medium');
+            if (visualSummary && visualSummary.text) {
+                textParts.push(`=== VISUAL CONTENT ANALYSIS ===\n${visualSummary.text}`);
+            }
+            // Also add visual analysis details if present
+            const visualAnalysis = cardRecord.summaries?.find((s) => s.kind === 'visual-analysis');
+            if (visualAnalysis) {
+                const details = [];
+                if (visualAnalysis.description)
+                    details.push(`Description: ${visualAnalysis.description}`);
+                if (visualAnalysis.colors?.length)
+                    details.push(`Colors: ${visualAnalysis.colors.join(', ')}`);
+                if (visualAnalysis.themes?.length)
+                    details.push(`Themes: ${visualAnalysis.themes.join(', ')}`);
+                if (visualAnalysis.mood)
+                    details.push(`Mood: ${visualAnalysis.mood}`);
+                if (visualAnalysis.people)
+                    details.push(`People: ${visualAnalysis.people}`);
+                if (visualAnalysis.textContent)
+                    details.push(`Visible Text: ${visualAnalysis.textContent}`);
+                if (details.length > 0) {
+                    textParts.push(`=== VISUAL DETAILS ===\n${details.join('\n')}`);
                 }
             }
         }
-        const cleanedText = (textSource || '').trim();
+        // Combine all text parts
+        const cleanedText = textParts.join('\n\n').trim();
         if (!cleanedText) {
-            throw new Error('No text source available for Wormhole key-term extraction. Run transcription or ingest text first.');
+            throw new Error('No text source available for Wormhole key-term extraction. For image/video cards, run Summarization first to generate visual analysis.');
         }
+        console.log('[KeyTerms] Text source length:', cleanedText.length, 'chars');
         const globalWormhole = store.get(WORMHOLE_SETTINGS_KEY, {}) || {};
         let provider = 'gemini';
         if (overrideProvider && typeof overrideProvider === 'string') {
@@ -3091,10 +3674,14 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             globalWormhole.keyTerms.provider.trim().length > 0) {
             provider = globalWormhole.keyTerms.provider;
         }
-        const configuredModel = globalWormhole.keyTerms && typeof globalWormhole.keyTerms.model === 'string'
-            ? globalWormhole.keyTerms.model
-            : undefined;
-        const modelName = (overrideModel && typeof overrideModel === 'string' && overrideModel) || configuredModel || 'gemini-pro';
+        else if (globalWormhole.defaultModel &&
+            typeof globalWormhole.defaultModel.provider === 'string') {
+            provider = globalWormhole.defaultModel.provider;
+        }
+        const configuredModel = globalWormhole.keyTerms?.model ||
+            globalWormhole.defaultModel?.model ||
+            undefined;
+        const modelName = (overrideModel && typeof overrideModel === 'string' && overrideModel) || configuredModel || 'gemini-2.5-flash';
         if (provider !== 'gemini') {
             throw new Error('Wormhole key-term extraction is currently implemented only for Gemini provider.');
         }
@@ -3400,6 +3987,202 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             }
         }
         return '';
+    });
+    // ============================================
+    // SCROLL ATTACHMENT HANDLERS
+    // ============================================
+    // Attach a scroll (text/markdown card) to another card
+    electron_1.ipcMain.handle('attach-card-scroll', async (_event, payload) => {
+        const { cardId, scrollCardId, label, includeInSummarization = true, includeInKeyTerms = true, includeInWikiUpdate = true } = payload || {};
+        if (!cardId || typeof cardId !== 'string') {
+            throw new Error('cardId is required to attach scroll.');
+        }
+        if (!scrollCardId || typeof scrollCardId !== 'string') {
+            throw new Error('scrollCardId is required to attach scroll.');
+        }
+        if (cardId === scrollCardId) {
+            throw new Error('Cannot attach a card as a scroll to itself.');
+        }
+        // Read the target card
+        const records = await (0, p2p_1.readCore)(cardId);
+        if (!Array.isArray(records) || records.length === 0) {
+            throw new Error('Card Hypercore is empty.');
+        }
+        let cardRecord = null;
+        for (let i = records.length - 1; i >= 0; i -= 1) {
+            const raw = records[i];
+            if (!raw || typeof raw !== 'string')
+                continue;
+            try {
+                const parsed = JSON.parse(raw);
+                if (parsed && (parsed.type === 'card' || parsed.mediaKind || parsed.cardId)) {
+                    cardRecord = parsed;
+                    break;
+                }
+            }
+            catch { /* ignore */ }
+        }
+        if (!cardRecord) {
+            throw new Error('Card record not found.');
+        }
+        // Verify scroll card exists and is text/markdown
+        const scrollRecords = await (0, p2p_1.readCore)(scrollCardId);
+        if (!Array.isArray(scrollRecords) || scrollRecords.length === 0) {
+            throw new Error('Scroll card not found.');
+        }
+        let scrollCardRecord = null;
+        for (let i = scrollRecords.length - 1; i >= 0; i -= 1) {
+            const raw = scrollRecords[i];
+            if (!raw || typeof raw !== 'string')
+                continue;
+            try {
+                const parsed = JSON.parse(raw);
+                if (parsed && (parsed.type === 'card' || parsed.mediaKind || parsed.cardId)) {
+                    scrollCardRecord = parsed;
+                    break;
+                }
+            }
+            catch { /* ignore */ }
+        }
+        if (!scrollCardRecord) {
+            throw new Error('Scroll card record not found.');
+        }
+        const scrollMediaType = scrollCardRecord.mediaType || scrollCardRecord.mediaKind || '';
+        if (scrollMediaType !== 'text' && scrollMediaType !== 'markdown') {
+            throw new Error(`Scroll must be a text or markdown card. Got: ${scrollMediaType}`);
+        }
+        // Add scroll to card's scrolls array
+        const existingScrolls = Array.isArray(cardRecord.scrolls) ? cardRecord.scrolls : [];
+        // Check if already attached
+        if (existingScrolls.some((s) => s.cardId === scrollCardId)) {
+            throw new Error('This scroll is already attached to the card.');
+        }
+        const newScroll = {
+            cardId: scrollCardId,
+            label: label || scrollCardRecord.title || scrollCardRecord.name || scrollCardId,
+            attachedAt: new Date().toISOString(),
+            includeInSummarization,
+            includeInKeyTerms,
+            includeInWikiUpdate,
+        };
+        const updatedCardRecord = {
+            ...cardRecord,
+            updatedAt: new Date().toISOString(),
+            scrolls: [...existingScrolls, newScroll],
+        };
+        await (0, p2p_1.appendToCore)(cardId, JSON.stringify(updatedCardRecord));
+        console.log('[Scroll] Attached scroll', scrollCardId, 'to card', cardId);
+        return { success: true, scroll: newScroll };
+    });
+    // Detach a scroll from a card
+    electron_1.ipcMain.handle('detach-card-scroll', async (_event, payload) => {
+        const { cardId, scrollCardId } = payload || {};
+        if (!cardId || typeof cardId !== 'string') {
+            throw new Error('cardId is required to detach scroll.');
+        }
+        if (!scrollCardId || typeof scrollCardId !== 'string') {
+            throw new Error('scrollCardId is required to detach scroll.');
+        }
+        const records = await (0, p2p_1.readCore)(cardId);
+        if (!Array.isArray(records) || records.length === 0) {
+            throw new Error('Card Hypercore is empty.');
+        }
+        let cardRecord = null;
+        for (let i = records.length - 1; i >= 0; i -= 1) {
+            const raw = records[i];
+            if (!raw || typeof raw !== 'string')
+                continue;
+            try {
+                const parsed = JSON.parse(raw);
+                if (parsed && (parsed.type === 'card' || parsed.mediaKind || parsed.cardId)) {
+                    cardRecord = parsed;
+                    break;
+                }
+            }
+            catch { /* ignore */ }
+        }
+        if (!cardRecord) {
+            throw new Error('Card record not found.');
+        }
+        const existingScrolls = Array.isArray(cardRecord.scrolls) ? cardRecord.scrolls : [];
+        const filteredScrolls = existingScrolls.filter((s) => s.cardId !== scrollCardId);
+        if (filteredScrolls.length === existingScrolls.length) {
+            throw new Error('Scroll not found on this card.');
+        }
+        const updatedCardRecord = {
+            ...cardRecord,
+            updatedAt: new Date().toISOString(),
+            scrolls: filteredScrolls,
+        };
+        await (0, p2p_1.appendToCore)(cardId, JSON.stringify(updatedCardRecord));
+        console.log('[Scroll] Detached scroll', scrollCardId, 'from card', cardId);
+        return { success: true };
+    });
+    // Get list of text/markdown cards for scroll picker
+    electron_1.ipcMain.handle('get-text-cards-for-scroll', async () => {
+        try {
+            const records = await (0, p2p_1.readCore)(CARD_LIBRARY_CORE_NAME);
+            const textCards = [];
+            const seenCardIds = new Set();
+            for (const raw of records) {
+                if (!raw || typeof raw !== 'string')
+                    continue;
+                try {
+                    const data = JSON.parse(raw);
+                    if (!data || data.type !== 'card-index')
+                        continue;
+                    const cardId = data.cardId || data.coreName;
+                    if (!cardId || seenCardIds.has(cardId))
+                        continue;
+                    seenCardIds.add(cardId);
+                    // Check index entry first for mediaType
+                    let mediaType = data.mediaType || data.mediaKind || '';
+                    let name = data.name || data.title || cardId;
+                    // If no mediaType in index, read the actual card core
+                    if (!mediaType) {
+                        try {
+                            const cardRecords = await (0, p2p_1.readCore)(cardId);
+                            if (Array.isArray(cardRecords) && cardRecords.length > 0) {
+                                // Find the card record (usually last one with type='card')
+                                for (let i = cardRecords.length - 1; i >= 0; i--) {
+                                    const cardRaw = cardRecords[i];
+                                    if (!cardRaw || typeof cardRaw !== 'string')
+                                        continue;
+                                    try {
+                                        const cardData = JSON.parse(cardRaw);
+                                        if (cardData && (cardData.type === 'card' || cardData.mediaType || cardData.mediaKind)) {
+                                            mediaType = cardData.mediaType || cardData.mediaKind || '';
+                                            name = cardData.name || cardData.title || name;
+                                            break;
+                                        }
+                                    }
+                                    catch { /* ignore */ }
+                                }
+                            }
+                        }
+                        catch { /* card core might not exist */ }
+                    }
+                    // Check if it's a text or markdown card
+                    if (mediaType === 'text' || mediaType === 'markdown') {
+                        textCards.push({
+                            cardId,
+                            name,
+                            mediaType,
+                            createdAt: data.createdAt,
+                        });
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            // Sort by createdAt descending
+            textCards.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+            console.log('[Scroll] Found', textCards.length, 'text/markdown cards');
+            return textCards;
+        }
+        catch (error) {
+            console.error('[Scroll] Failed to get text cards:', error);
+            return [];
+        }
     });
     electron_1.ipcMain.handle('wormhole-get-wiki-index', async () => {
         try {

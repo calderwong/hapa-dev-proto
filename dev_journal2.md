@@ -1771,3 +1771,289 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 **Tags:** #feature #sprite-animation #hierarchy #multi-animation #ux
 **Est. Avg. Human Dev Time:** 1.5 hours
 
+## Entry 39 – Derivative Card Taxonomy Overhaul
+**Prompt:** "Set a policy that every AI-generated derivative gets its own Card and Hypercore with parent-child relationships. Images should be their own cards."
+
+**Summary of actions:**
+- **Created Design Document:** `docs/DERIVATIVE_CARD_TAXONOMY.md`
+    - Core principle: Every AI derivative = own Card + Hypercore
+    - Hierarchy: Source Card → Image Cards → Loop Video Cards
+    - Backwards compatibility with legacy `imageSet` arrays
+
+- **Created TypeScript Types:** `src/types/cards.ts`
+    - `ImageCard`, `VideoCard` interfaces
+    - `ChildReference` for parent's children array
+    - Utility functions: `getCardImages()`, `getLoopVideoChild()`, `hasImageChildren()`
+
+- **Image Generation Overhaul:** `handleGenerateImage` in `CardLibrary.tsx`
+    - Each generated image now creates:
+        1. New Hypercore via `p2pCreateCore(imageCardId)`
+        2. Image Card record with `mediaType: 'image'`, `subType: 'generated'`
+        3. `parentId` linking to source card
+        4. Entry in parent's `children[]` array
+        5. Entry in `card-library` index
+
+- **Gallery Updates:**
+    - Images now clickable → navigates to Image Card detail view
+    - Added cyan "open" badge on Image Cards
+    - Added "View Image Card" button in hover controls
+    - Updated `getImageSet()` to support both new `children[]` and legacy `imageSet`
+
+- **Image Card Detail View:**
+    - Shows generation prompt, model, series number
+    - "Create Loop Video" button
+    - Lists derived loop videos if any
+
+- **Loop Video Parent Update:** `handleCreateLoopVideo`
+    - Loop videos now parent to IMAGE card, not source document
+    - Updates Image Card's `children[]` with loop video reference
+    - "View Parent Card" on loop video → Image Card
+
+**New Hierarchy:**
+```
+📄 Source Card (document, audio, etc.)
+    └── 📷 Image Card #1 (has own Hypercore)
+            └── 🎬 Loop Video Card
+    └── 📷 Image Card #2
+    └── 📷 Image Card #3
+```
+
+**Tags:** #taxonomy #architecture #hierarchy #image-cards #loop-video
+**Est. Avg. Human Dev Time:** 3.5 hours
+
+## Entry 40 – Modular HoverVideoThumbnail Component
+**Prompt:** "Make all images/videos with child videos have that video play on-hover in the card library and everywhere in the app... make it modular."
+
+**Summary of actions:**
+- **Created `src/components/HoverVideoThumbnail.tsx`**
+    - Reusable component for hover-to-play video thumbnails
+    - Shows image normally, plays video on hover
+    - Props: `imageSrc`, `videoSrc`, `className`, `showLoopBadge`, `badgePosition`, `children`
+    - Auto-manages video play/pause on mouse enter/leave
+    
+- **Helper Functions (exported):**
+    - `getCardVideoPath(card)` - Extracts video path from card data (children array or legacy)
+    - `getCardImagePath(card)` - Gets thumbnail/image source from card
+
+- **Updated `CardLibrary.tsx`:**
+    - Imported `HoverVideoThumbnail` and helpers
+    - Image cards in grid now use `HoverVideoThumbnail` for hover-to-play
+    - Video cards in grid now use `HoverVideoThumbnail` with thumbnail + video
+    - Detail views still use full video players
+
+**Usage anywhere in app:**
+```tsx
+import { HoverVideoThumbnail, getCardVideoPath } from '../components/HoverVideoThumbnail';
+
+<HoverVideoThumbnail
+    imageSrc={thumbnailUrl}
+    videoSrc={loopVideoUrl}
+    className="w-full h-40 rounded-lg"
+    showLoopBadge
+/>
+```
+
+**Tags:** #component #modular #hover-video #ux
+**Est. Avg. Human Dev Time:** 45 minutes
+
+## Entry 41 – Fix Loop Video Card Creation & Lineage
+**Prompt:** "Loop video created but did NOT create a child video card. Make sure all loop videos end up with their own cards that link back to the image."
+
+**Root Cause:**
+- Backend was missing `type: 'card-index'` in the library entry
+- Frontend `loadCards()` filters for `type === 'card-index'` so video cards were being skipped
+
+**Fixes Applied:**
+
+1. **Backend `electron/main.ts`:**
+```javascript
+const libraryEntry = {
+    type: 'card-index',  // REQUIRED - was missing!
+    cardId: videoCardId,
+    subType: 'loop-video',
+    parentCardId: parentCardId,
+    coreName: videoCardId,
+    // ... other fields
+};
+```
+
+2. **Video Card Record now includes:**
+   - `parentCardId` - links to parent Image Card
+   - `parentType: 'image'` - type of parent
+   - `sourceImage.cardId` - explicit card reference
+   - `subType: 'loop-video'` - card classification
+
+3. **UI Updates:**
+   - Added "← View Source Image Card" button in Loop Video Details
+   - Shows parent card ID in video card info section
+
+**Lineage Flow:**
+```
+📄 Source Document Card
+    └── 📷 Image Card (has own Hypercore)
+            ├── parentCardId: source-doc-id
+            └── children: [{ cardId: loop-video-id, type: 'loop-video' }]
+                    └── 🎬 Loop Video Card (has own Hypercore)
+                            ├── parentCardId: image-card-id
+                            └── sourceImage.cardId: image-card-id
+```
+
+**Tags:** #bugfix #hypercore #lineage #taxonomy
+**Est. Avg. Human Dev Time:** 30 minutes
+
+## Entry 42 – Multimodal Summarization & Scroll Attachments
+**Prompt:** "Make Run Summarization, Key Terms, and Wiki Update work for image/video cards using Gemini multimodal analysis. Add scroll attachment feature to provide context documents for cards without text."
+
+**Feature Design Document:** `docs/features/MULTIMODAL_SUMMARIZATION_SCROLLS.md`
+
+**Implementation Summary:**
+
+### Backend (electron/main.ts)
+1. **`analyzeImageWithGemini()`** - Sends image to Gemini 2.5 Flash for visual analysis:
+   - Colors, themes, mood, people, text content, technical style
+   - Returns structured JSON with description and summaries
+   - Supports scroll context injection
+
+2. **`analyzeVideoWithGemini()`** - Sends video (<20MB) for analysis:
+   - Processes both visual and audio streams
+   - Same structured output as image analysis
+
+3. **`getScrollContextForCard()`** - Reads attached scroll text:
+   - Combines text from all attached text/markdown cards
+   - Caps at 32KB to stay within token limits
+
+4. **Updated `wormhole-run-summarization`**:
+   - Routes based on mediaKind: image → analyzeImage, video → analyzeVideo, text/audio → existing logic
+   - Injects scroll context into all analysis types
+   - Saves visual summaries with colors, themes, mood, etc.
+
+5. **New IPC Handlers**:
+   - `attach-card-scroll` - Attach text/markdown card as context
+   - `detach-card-scroll` - Remove attached scroll
+   - `get-text-cards-for-scroll` - List available text cards for picker
+
+### Frontend (CardLibrary.tsx)
+1. Removed restriction on summarization (now allows image/video)
+2. Added SCROLLS UI section to Card Inspector:
+   - Shows attached scrolls with remove button
+   - "+ Attach Scroll" button opens picker modal
+3. Scroll picker modal:
+   - Lists all text/markdown cards
+   - Filters out self and already-attached
+   - One-click attach
+
+### Gemini Models Used
+- `gemini-2.5-flash` (default) - Fast multimodal analysis
+- Supports: image, video, audio, text inputs
+
+**Visual Summary Output Structure:**
+```typescript
+{
+  kind: 'visual-analysis',
+  description: string,
+  colors: string[],
+  themes: string[],
+  mood: string,
+  people?: string,
+  textContent?: string,
+  technicalStyle: string,
+  text: string,  // Medium summary
+}
+```
+
+**Tags:** #feature #multimodal #gemini #scrolls #summarization
+**Est. Avg. Human Dev Time:** 4 hours
+
+## Entry 43 – Memory Management Audit & Fixes
+**Prompt:** "App crash after repeated image/video generation - investigate memory leaks and fix buffer retention issues."
+
+**Root Cause:** Base64 image/video data was being retained in memory during long-running operations (especially the 5-minute polling loop for video generation).
+
+**Error Pattern:**
+```
+[ERROR:mojo\public\cpp\bindings\lib\interface_endpoint_client.cc:732] 
+Message 0 rejected by interface blink.mojom.WidgetHost
+```
+This indicates IPC buffer overflow due to memory pressure.
+
+### Fixes Implemented
+
+#### 1. Memory Management Utilities Added
+- `logMemory(label)` - Logs heap usage at critical points
+- `hintGC()` - Hints to garbage collector when available
+- `startOperation(id, type)` / `endOperation(id)` - Tracks active operations
+- Warns when >5 concurrent operations are active
+
+#### 2. `analyzeImageWithGemini()` Fixed
+- Buffer nulled immediately after base64 encoding
+- Base64 nulled after API call
+- Operation tracking added
+- File size logged
+
+#### 3. `analyzeVideoWithGemini()` Fixed
+- Same buffer cleanup pattern
+- Size check before loading (20MB limit enforced)
+
+#### 4. `generate-image-for-card` Handler Fixed
+- Operation tracking with memory logging
+- Base64 nulled after saving to disk
+- Cleanup on both success and error paths
+
+#### 5. `create-loop-video-for-image` Handler Fixed (CRITICAL)
+- **This was the main culprit** - imageBase64 stayed in memory during 5-min polling!
+- Buffer nulled immediately after encoding
+- **Base64 nulled BEFORE polling loop starts**
+- Memory logged at start, after request, and completion
+- Cleanup on all exit paths (success, timeout, error)
+
+### Pattern Applied
+```typescript
+// Before (memory leak):
+const buffer = await fs.promises.readFile(path);
+const base64 = buffer.toString('base64');
+await callAPI(base64);
+// buffer and base64 still in scope for minutes
+
+// After (fixed):
+let buffer: Buffer | null = await fs.promises.readFile(path);
+let base64: string | null = buffer.toString('base64');
+buffer = null; // Release immediately
+await callAPI(base64);
+base64 = null; // Release after use
+hintGC();
+```
+
+**Docs:** `docs/MEMORY_AUDIT_PLAN.md` - Full audit plan with remaining tasks
+
+**Tags:** #bugfix #memory #performance #stability
+**Est. Avg. Human Dev Time:** 2 hours
+
+### Phase 2: Operation Tracking (continued)
+Added operation tracking to Wormhole handlers:
+- `wormhole-run-transcription` - with audio buffer cleanup
+- `wormhole-run-summarization` - tracking added
+- `wormhole-run-keyterms` - tracking added
+
+### Phase 3: Frontend Optimization
+Fixed lazy loading and video preload across CardLibrary:
+
+1. **Image Lazy Loading** - All `<img>` tags now have `loading="lazy"`:
+   - Main thumbnail images
+   - Parent/child/sibling thumbnails
+   - HoverVideoThumbnail component
+
+2. **Video Preload Optimization** - Changed `preload="auto"` to `preload="metadata"`:
+   - HoverVideoThumbnail videos
+   - Card detail view videos
+   - Loop video previews
+   - Parent thumbnail fallback videos
+
+**Files Modified:**
+- `src/pages/CardLibrary.tsx` - 10+ img/video elements fixed
+- `src/components/HoverVideoThumbnail.tsx` - lazy loading + metadata preload
+
+**Impact:**
+- Images only load when scrolled into view
+- Videos only load metadata until played
+- Significantly reduced initial memory footprint with 361+ cards
+

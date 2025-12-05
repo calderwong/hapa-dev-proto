@@ -189,7 +189,7 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({
 
     }, [image, rows, cols, offsetTop, offsetBottom, offsetLeft, offsetRight, removeBackground, processedImage]);
 
-    const handleGenerate = () => {
+    const handleGenerate = async () => {
         if (!image) return;
 
         setIsGenerating(true);
@@ -209,28 +209,27 @@ const SpriteSheetConverter: React.FC<SpriteSheetConverterProps> = ({
         const frameWidth = Math.floor(effectiveWidth / cols);
         const frameHeight = Math.floor(effectiveHeight / rows);
 
-        // Determine worker script path - handle both dev and production
-        // In Electron, the path needs to be relative to the served content
-        let workerScript = './lib/gif.worker.js';
-        
-        // Try to detect if we need an absolute path (Electron file:// protocol)
-        if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
-            // In Electron with file:// protocol, try an absolute path
-            const basePath = window.location.pathname.replace(/\/[^\/]*$/, '');
-            workerScript = `${basePath}/lib/gif.worker.js`;
-        }
-
         // Configure GIF with transparency support
-        // Use full URL for worker script to ensure it loads in Electron/Vite
-        const workerUrl = new URL('/lib/gif.worker.js', window.location.origin).href;
-        console.log('[GIF] Worker URL:', workerUrl);
+        // Create inline worker from fetched script to avoid path issues in Electron
+        let workerScript: string | undefined = undefined;
+        
+        try {
+            // Fetch the worker script and create a blob URL
+            const workerResponse = await fetch('/lib/gif.worker.js');
+            const workerCode = await workerResponse.text();
+            const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+            workerScript = URL.createObjectURL(workerBlob);
+            console.log('[GIF] Created inline worker blob URL');
+        } catch (err) {
+            console.warn('[GIF] Could not create inline worker, falling back:', err);
+        }
         
         const gifOptions: any = {
-            workers: 1,
+            workers: workerScript ? 2 : 0, // Use workers if we got the blob, otherwise fallback
             quality: 10,
             width: frameWidth,
             height: frameHeight,
-            workerScript: workerUrl,
+            workerScript: workerScript,
             background: '#000000',
             debug: true
         };

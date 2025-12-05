@@ -79,6 +79,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     wormholeGetCardText: (params: { cardId: string }) =>
         ipcRenderer.invoke('wormhole-get-card-text', params),
     wormholeGetWikiIndex: () => ipcRenderer.invoke('wormhole-get-wiki-index'),
+    // Scroll attachment handlers
+    attachCardScroll: (params: { cardId: string; scrollCardId: string; label?: string; includeInSummarization?: boolean; includeInKeyTerms?: boolean; includeInWikiUpdate?: boolean }) =>
+        ipcRenderer.invoke('attach-card-scroll', params),
+    detachCardScroll: (params: { cardId: string; scrollCardId: string }) =>
+        ipcRenderer.invoke('detach-card-scroll', params),
+    getTextCardsForScroll: () => ipcRenderer.invoke('get-text-cards-for-scroll'),
     p2pCreateCore: (name: string) => ipcRenderer.invoke('p2p-create-core', name),
     p2pAppend: (data: { name: string; data: string }) => ipcRenderer.invoke('p2p-append', data),
     p2pRead: (name: string, options?: any) => ipcRenderer.invoke('p2p-read', name, options),

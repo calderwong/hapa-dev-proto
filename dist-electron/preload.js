@@ -58,6 +58,10 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     wormholeGetDerivedArtifacts: (params) => electron_1.ipcRenderer.invoke('wormhole-get-derived-artifacts', params),
     wormholeGetCardText: (params) => electron_1.ipcRenderer.invoke('wormhole-get-card-text', params),
     wormholeGetWikiIndex: () => electron_1.ipcRenderer.invoke('wormhole-get-wiki-index'),
+    // Scroll attachment handlers
+    attachCardScroll: (params) => electron_1.ipcRenderer.invoke('attach-card-scroll', params),
+    detachCardScroll: (params) => electron_1.ipcRenderer.invoke('detach-card-scroll', params),
+    getTextCardsForScroll: () => electron_1.ipcRenderer.invoke('get-text-cards-for-scroll'),
     p2pCreateCore: (name) => electron_1.ipcRenderer.invoke('p2p-create-core', name),
     p2pAppend: (data) => electron_1.ipcRenderer.invoke('p2p-append', data),
     p2pRead: (name, options) => electron_1.ipcRenderer.invoke('p2p-read', name, options),
