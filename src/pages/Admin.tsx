@@ -16,9 +16,19 @@ interface ImageGenSettings {
     defaultPromptLLM: string;
 }
 
+interface PipelineSettings {
+    thorThrottleMs: number;
+    mediaThrottleMs: number;
+}
+
 const DEFAULT_IMAGE_GEN_SETTINGS: ImageGenSettings = {
     defaultImageModel: 'gemini-2.0-flash-preview-image-generation',
     defaultPromptLLM: 'gemini-1.5-pro',
+};
+
+const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = {
+    thorThrottleMs: 2000,
+    mediaThrottleMs: 3000,
 };
 
 const Admin: React.FC = () => {
@@ -35,6 +45,26 @@ const Admin: React.FC = () => {
     const [imageGenSettings, setImageGenSettings] = useState<ImageGenSettings>(DEFAULT_IMAGE_GEN_SETTINGS);
     const [availableModels, setAvailableModels] = useState<{name: string, displayName: string}[]>([]);
     const [imageGenStatus, setImageGenStatus] = useState('');
+    
+    // Pipeline Settings (Hell Week)
+    const [pipelineSettings, setPipelineSettings] = useState<PipelineSettings>(DEFAULT_PIPELINE_SETTINGS);
+    const [pipelineStatus, setPipelineStatus] = useState('');
+
+    // Vertex AI Settings
+    const [vertexSettings, setVertexSettings] = useState({
+        enabled: false,
+        projectId: '',
+        region: 'us-central1',
+        apiKey: '',
+        defaultSmartLLM: 'gemini-3.0-pro',
+        defaultFastLLM: 'gemini-2.5-flash-lite',
+        defaultProImage: 'imagen-4.0-generate-001',
+        defaultCommonImage: 'gemini-2.0-flash-exp',
+        defaultVideo: 'veo-3.1-generate-preview',
+    });
+    const [vertexStatus, setVertexStatus] = useState('');
+    const [vertexSaving, setVertexSaving] = useState(false);
+    const [vertexTesting, setVertexTesting] = useState(false);
 
     const loadEntries = async () => {
         if (!window.electronAPI || !window.electronAPI.geminiListRequests) {
@@ -78,6 +108,13 @@ const Admin: React.FC = () => {
                         defaultPromptLLM: settings.imageGenSettings.defaultPromptLLM || DEFAULT_IMAGE_GEN_SETTINGS.defaultPromptLLM,
                     });
                 }
+                // Load pipeline settings
+                if (settings?.pipelineSettings) {
+                    setPipelineSettings({
+                        thorThrottleMs: settings.pipelineSettings.thorThrottleMs ?? DEFAULT_PIPELINE_SETTINGS.thorThrottleMs,
+                        mediaThrottleMs: settings.pipelineSettings.mediaThrottleMs ?? DEFAULT_PIPELINE_SETTINGS.mediaThrottleMs,
+                    });
+                }
             } catch (err) {
                 console.error('Failed to load admin settings', err);
             }
@@ -96,6 +133,21 @@ const Admin: React.FC = () => {
             }
         };
         loadModels();
+
+        // Load Vertex AI settings
+        const loadVertexSettings = async () => {
+            if (window.electronAPI?.getVertexAISettings) {
+                try {
+                    const settings = await window.electronAPI.getVertexAISettings();
+                    if (settings) {
+                        setVertexSettings(prev => ({ ...prev, ...settings }));
+                    }
+                } catch (e) {
+                    console.error('Failed to load Vertex AI settings', e);
+                }
+            }
+        };
+        loadVertexSettings();
     }, []);
 
     const handleSelect = (entry: GeminiRequestEntry) => {
@@ -120,6 +172,42 @@ const Admin: React.FC = () => {
             setSettingsStatus('Failed to save audio mode');
         } finally {
             setSettingsSaving(false);
+        }
+    };
+
+    // Vertex AI handlers
+    const handleSaveVertexSettings = async () => {
+        if (!window.electronAPI?.saveVertexAISettings) return;
+        try {
+            setVertexSaving(true);
+            setVertexStatus('');
+            await window.electronAPI.saveVertexAISettings(vertexSettings);
+            setVertexStatus('Saved successfully!');
+            setTimeout(() => setVertexStatus(''), 3000);
+        } catch (err) {
+            console.error('Failed to save Vertex AI settings', err);
+            setVertexStatus('Failed to save settings');
+        } finally {
+            setVertexSaving(false);
+        }
+    };
+
+    const handleTestVertexConnection = async () => {
+        if (!window.electronAPI?.testVertexAIConnection) return;
+        try {
+            setVertexTesting(true);
+            setVertexStatus('Testing connection...');
+            const result = await window.electronAPI.testVertexAIConnection();
+            if (result.success) {
+                setVertexStatus(`✓ Connection successful! ${result.message}`);
+            } else {
+                setVertexStatus(`✗ Connection failed: ${result.message}`);
+            }
+        } catch (err: any) {
+            console.error('Failed to test Vertex AI connection', err);
+            setVertexStatus(`✗ Error: ${err.message || 'Unknown error'}`);
+        } finally {
+            setVertexTesting(false);
         }
     };
     
@@ -305,17 +393,142 @@ const Admin: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+
+                        {/* Vertex AI Configuration - PRIMARY PROVIDER */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-emerald-400 font-bold tracking-widest text-xs uppercase mb-2">
+                                <rux-icon icon="cloud" size="extra-small"></rux-icon>
+                                Vertex AI (Default Provider)
+                            </div>
+                            <div className="glass-panel p-4 rounded-xl relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500 opacity-60"></div>
+                                
+                                {/* Enable Toggle */}
+                                <div className="flex items-center justify-between mb-4">
+                                    <span className="text-xs font-bold text-white">ENABLE VERTEX AI</span>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={vertexSettings.enabled}
+                                            onChange={(e) => setVertexSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                                            className="sr-only peer"
+                                        />
+                                        <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                                    </label>
+                                </div>
+
+                                {/* Project ID */}
+                                <div className="mb-3">
+                                    <label className="text-[10px] text-gray-400 uppercase tracking-wider mb-1 block">
+                                        Google Cloud Project ID
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={vertexSettings.projectId}
+                                        onChange={(e) => setVertexSettings(prev => ({ ...prev, projectId: e.target.value }))}
+                                        placeholder="my-gcp-project-id"
+                                        className="w-full bg-gray-900/50 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                    />
+                                </div>
+
+                                {/* Region */}
+                                <div className="mb-3">
+                                    <label className="text-[10px] text-gray-400 uppercase tracking-wider mb-1 block">
+                                        Region
+                                    </label>
+                                    <select
+                                        value={vertexSettings.region}
+                                        onChange={(e) => setVertexSettings(prev => ({ ...prev, region: e.target.value }))}
+                                        className="w-full bg-gray-900/50 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                    >
+                                        <option value="us-central1">US Central (Iowa)</option>
+                                        <option value="us-east4">US East (Virginia)</option>
+                                        <option value="us-west1">US West (Oregon)</option>
+                                        <option value="europe-west4">Europe West (Netherlands)</option>
+                                        <option value="asia-northeast1">Asia Northeast (Tokyo)</option>
+                                    </select>
+                                </div>
+
+                                {/* API Key */}
+                                <div className="mb-4">
+                                    <label className="text-[10px] text-gray-400 uppercase tracking-wider mb-1 block">
+                                        Vertex AI API Key
+                                    </label>
+                                    <input
+                                        type="password"
+                                        value={vertexSettings.apiKey}
+                                        onChange={(e) => setVertexSettings(prev => ({ ...prev, apiKey: e.target.value }))}
+                                        placeholder="Enter your Vertex AI API key"
+                                        className="w-full bg-gray-900/50 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                    />
+                                </div>
+
+                                {/* Model Shortcuts */}
+                                <div className="border-t border-gray-700 pt-3 mb-3">
+                                    <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-2">Default Models</div>
+                                    <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                        <div className="flex justify-between items-center bg-gray-800/50 rounded px-2 py-1">
+                                            <span className="text-emerald-300">Smart LLM</span>
+                                            <span className="text-gray-400 font-mono">Gemini 2.5 Pro</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-gray-800/50 rounded px-2 py-1">
+                                            <span className="text-emerald-300">Fast LLM</span>
+                                            <span className="text-gray-400 font-mono">Gemini 2.5 Flash</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-gray-800/50 rounded px-2 py-1">
+                                            <span className="text-emerald-300">Pro Image</span>
+                                            <span className="text-gray-400 font-mono">Imagen 3</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-gray-800/50 rounded px-2 py-1">
+                                            <span className="text-emerald-300">Common Image</span>
+                                            <span className="text-gray-400 font-mono">Gemini 2.0 Flash</span>
+                                        </div>
+                                        <div className="flex justify-between items-center bg-gray-800/50 rounded px-2 py-1 col-span-2">
+                                            <span className="text-emerald-300">Video</span>
+                                            <span className="text-gray-400 font-mono">Veo 2</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={handleSaveVertexSettings}
+                                        disabled={vertexSaving}
+                                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-600 text-white text-xs rounded transition-colors font-mono"
+                                    >
+                                        {vertexSaving ? 'Saving...' : 'Save Settings'}
+                                    </button>
+                                    <button
+                                        onClick={handleTestVertexConnection}
+                                        disabled={vertexTesting || !vertexSettings.projectId || !vertexSettings.apiKey}
+                                        className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white text-xs rounded transition-colors font-mono"
+                                    >
+                                        {vertexTesting ? 'Testing...' : 'Test Connection'}
+                                    </button>
+                                </div>
+                                {vertexStatus && (
+                                    <div className={`mt-2 text-xs font-mono ${vertexStatus.includes('success') || vertexStatus.includes('Saved') ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {vertexStatus}
+                                    </div>
+                                )}
+                                
+                                <div className="mt-3 text-[9px] text-gray-500 font-mono">
+                                    Vertex AI provides enterprise-grade access to Gemini 2.5, Imagen 3, and Veo 2
+                                </div>
+                            </div>
+                        </div>
                         
                         {/* Image Generation Settings */}
                         <div className="space-y-2">
                             <div className="flex items-center gap-2 text-cyan-400 font-bold tracking-widest text-xs uppercase mb-2">
                                 <rux-icon icon="image" size="extra-small"></rux-icon>
-                                Image Generation
+                                Image Generation (Legacy)
                             </div>
                             <div className="glass-panel p-4 rounded-xl relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 opacity-60"></div>
                                 <div className="flex items-center justify-between mb-3">
-                                    <span className="text-xs font-bold text-white">AI IMAGE DEFAULTS</span>
+                                    <span className="text-xs font-bold text-white">AI IMAGE DEFAULTS (Google AI Studio)</span>
                                     {imageGenStatus && (
                                         <span className={`text-[10px] font-mono animate-pulse ${imageGenStatus === 'Saved' ? 'text-green-400' : 'text-cyan-400'}`}>
                                             {imageGenStatus}
@@ -373,6 +586,73 @@ const Admin: React.FC = () => {
                                 
                                 <div className="mt-3 text-[9px] text-gray-500 font-mono">
                                     Used for one-click "Create Image" on cards
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Hell Week Pipeline Settings */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-orange-400 font-bold tracking-widest text-xs uppercase mb-2">
+                                <rux-icon icon="rocket" size="extra-small"></rux-icon>
+                                Hell Week Pipeline
+                            </div>
+                            <div className="glass-panel rounded-xl p-4 relative">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-orange-500 opacity-60"></div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] text-gray-400 uppercase tracking-wider mb-1 block">
+                                            Thor Throttle (ms)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            value={pipelineSettings.thorThrottleMs}
+                                            onChange={(e) => setPipelineSettings(prev => ({ ...prev, thorThrottleMs: parseInt(e.target.value) || 0 }))}
+                                            className="w-full bg-gray-900/50 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500 font-mono"
+                                            min={0}
+                                            step={500}
+                                            title="Delay between chunk processing (ms)"
+                                            placeholder="2000"
+                                        />
+                                        <div className="text-[9px] text-gray-500 mt-1">Delay between chunks</div>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] text-gray-400 uppercase tracking-wider mb-1 block">
+                                            Media Throttle (ms)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            value={pipelineSettings.mediaThrottleMs}
+                                            onChange={(e) => setPipelineSettings(prev => ({ ...prev, mediaThrottleMs: parseInt(e.target.value) || 0 }))}
+                                            className="w-full bg-gray-900/50 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500 font-mono"
+                                            min={0}
+                                            step={500}
+                                            title="Delay between image generations (ms)"
+                                            placeholder="3000"
+                                        />
+                                        <div className="text-[9px] text-gray-500 mt-1">Delay between images</div>
+                                    </div>
+                                </div>
+                                
+                                <button
+                                    onClick={async () => {
+                                        if (window.electronAPI?.saveAdminSettings) {
+                                            setPipelineStatus('Saving...');
+                                            await window.electronAPI.saveAdminSettings({ pipelineSettings });
+                                            setPipelineStatus('Saved!');
+                                            setTimeout(() => setPipelineStatus(''), 2000);
+                                        }
+                                    }}
+                                    className="mt-3 px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs rounded transition-colors font-mono"
+                                >
+                                    Save Pipeline Settings
+                                </button>
+                                {pipelineStatus && (
+                                    <span className="ml-2 text-xs text-orange-400">{pipelineStatus}</span>
+                                )}
+                                
+                                <div className="mt-3 text-[9px] text-gray-500 font-mono">
+                                    Throttle API calls to avoid rate limits (429 errors)
                                 </div>
                             </div>
                         </div>

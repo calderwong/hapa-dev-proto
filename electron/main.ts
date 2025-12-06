@@ -8,6 +8,13 @@ import isDev from 'electron-is-dev';
 import Store from 'electron-store';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { initP2P, createCore, appendToCore, readCore, getCoreLength, getP2PStats } from './p2p';
+import { initPipeline } from './pipeline';
+import { 
+  isVertexAIConfigured, 
+  getVertexAIClient, 
+  getVertexAISettings,
+  resetVertexAIClient 
+} from './vertexai';
 
 const store: any = new Store();
 
@@ -27,9 +34,15 @@ interface ImageGenSettings {
   defaultPromptLLM: string;
 }
 
+interface PipelineSettings {
+  thorThrottleMs: number;  // Delay between chunk processing (ms)
+  mediaThrottleMs: number; // Delay between image generations (ms)
+}
+
 interface AdminSettings {
   audioMode: AudioMode;
   imageGenSettings?: ImageGenSettings;
+  pipelineSettings?: PipelineSettings;
 }
 
 interface LlamaSettingsInternal {
@@ -1577,6 +1590,9 @@ function createWindow() {
   } else {
     win.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
   }
+
+  // Initialize Hell Week Pipeline
+  initPipeline(win);
 }
 
 app.whenReady().then(() => {
@@ -2055,6 +2071,40 @@ app.whenReady().then(() => {
     },
   );
 
+  // Vertex AI Settings handlers
+  ipcMain.handle('get-vertex-ai-settings', () => {
+    const { getVertexAISettings } = require('./vertexai');
+    return getVertexAISettings();
+  });
+
+  ipcMain.handle('save-vertex-ai-settings', (_event, settings: any) => {
+    const { saveVertexAISettings, resetVertexAIClient } = require('./vertexai');
+    saveVertexAISettings(settings);
+    resetVertexAIClient(); // Reset client to pick up new settings
+    return true;
+  });
+
+  ipcMain.handle('test-vertex-ai-connection', async () => {
+    const { getVertexAIClient, isVertexAIConfigured } = require('./vertexai');
+    if (!isVertexAIConfigured()) {
+      return { success: false, message: 'Vertex AI is not configured. Please enter Project ID and API Key.' };
+    }
+    const client = getVertexAIClient();
+    return await client.testConnection();
+  });
+
+  ipcMain.handle('get-vertex-ai-models', () => {
+    const { MODEL_SHORTHAND_MAP, MODEL_DISPLAY_NAMES, VERTEX_REGIONS } = require('./vertexai');
+    return {
+      models: Object.entries(MODEL_SHORTHAND_MAP).map(([shorthand, modelId]) => ({
+        shorthand,
+        modelId,
+        displayName: MODEL_DISPLAY_NAMES[shorthand] || shorthand,
+      })),
+      regions: VERTEX_REGIONS,
+    };
+  });
+
   // Generate image for a card using LLM to craft prompt, then image model
   ipcMain.handle(
     'generate-image-for-card',
@@ -2180,33 +2230,50 @@ ${cardContext.image ? '(REFER TO ATTACHED IMAGE FOR CHARACTER/VISUAL CONTEXT)' :
 Create a vivid image prompt that visually represents this content:`;
         }
 
-        // Call LLM to craft the prompt using SDK (more robust)
-        if (!apiKey) {
-            throw new Error('Gemini API Key is required for prompt refinement.');
-        }
-
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
-        
+        // Call LLM to craft the prompt
         let craftedPrompt = '';
-        try {
-            // Construct Multimodal Request
-            const promptParts: any[] = [promptCraftingRequest];
-            if (cardContext.image) {
-                promptParts.push({
-                    inlineData: {
-                        mimeType: cardContext.mimeType || 'image/png',
-                        data: cardContext.image // Base64 string
-                    }
-                });
+        
+        // Check if Vertex AI is configured (preferred)
+        if (isVertexAIConfigured()) {
+            console.log('[ImageGen] Using Vertex AI for prompt crafting');
+            try {
+                const vertexClient = getVertexAIClient();
+                // Note: Vertex AI multimodal requires different handling
+                // For now, use text-only prompt crafting
+                const result = await vertexClient.generateContent(promptCraftingRequest, 'fast-llm');
+                craftedPrompt = result.text.trim();
+            } catch (e: any) {
+                console.error('[ImageGen] Vertex AI Prompt Crafting failed:', e);
+                throw new Error(`Vertex AI prompt crafting failed: ${e.message}`);
+            }
+        } else {
+            // Fallback to Google AI Studio
+            if (!apiKey) {
+                throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
             }
 
-            const result = await promptModel.generateContent(promptParts);
-            const response = await result.response;
-            craftedPrompt = response.text().trim();
-        } catch (e: any) {
-            console.error('[ImageGen] SDK Prompt Crafting failed:', e);
-            throw new Error(`LLM prompt crafting failed: ${e.message}`);
+            const genAI = new GoogleGenerativeAI(apiKey);
+            const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
+            
+            try {
+                // Construct Multimodal Request
+                const promptParts: any[] = [promptCraftingRequest];
+                if (cardContext.image) {
+                    promptParts.push({
+                        inlineData: {
+                            mimeType: cardContext.mimeType || 'image/png',
+                            data: cardContext.image // Base64 string
+                        }
+                    });
+                }
+
+                const result = await promptModel.generateContent(promptParts);
+                const response = await result.response;
+                craftedPrompt = response.text().trim();
+            } catch (e: any) {
+                console.error('[ImageGen] SDK Prompt Crafting failed:', e);
+                throw new Error(`LLM prompt crafting failed: ${e.message}`);
+            }
         }
 
         if (!craftedPrompt) {
@@ -2254,8 +2321,24 @@ Create a vivid image prompt that visually represents this content:`;
                 throw new Error('Local server returned no images.');
             }
 
+        } else if (isVertexAIConfigured()) {
+            // Vertex AI Image Generation
+            console.log('[ImageGen] Using Vertex AI for image generation');
+            try {
+                const vertexClient = getVertexAIClient();
+                const result = await vertexClient.generateImageGemini(craftedPrompt, 'common-image');
+                imageBase64 = result.base64;
+                mimeType = result.mimeType;
+            } catch (e: any) {
+                console.error('[ImageGen] Vertex AI Image Generation failed:', e);
+                throw new Error(`Vertex AI image generation failed: ${e.message}`);
+            }
         } else {
-            // Gemini Image Generation
+            // Fallback: Google AI Studio Gemini Image Generation
+            if (!apiKey) {
+                throw new Error('No AI provider configured for image generation.');
+            }
+            
             const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultImageModel}:generateContent?key=${apiKey}`;
             
             console.log(`[ImageGen] Calling Gemini Image API: ${imageUrl.replace(apiKey!, 'HIDDEN_KEY')}`);
@@ -2436,11 +2519,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
         console.log('[LoopVideo] Crafted loop prompt:', loopPrompt.substring(0, 150));
 
-        // Broadcast progress to renderer
+        // Broadcast progress to renderer (safely handles disposed windows)
         const broadcastLoopProgress = (data: any) => {
-          const [mainWin] = BrowserWindow.getAllWindows();
-          if (mainWin) {
-            mainWin.webContents.send('loop-video-progress', data);
+          try {
+            const [mainWin] = BrowserWindow.getAllWindows();
+            if (mainWin && !mainWin.isDestroyed() && mainWin.webContents && !mainWin.webContents.isDestroyed()) {
+              mainWin.webContents.send('loop-video-progress', data);
+            }
+          } catch (e) {
+            // Silently ignore - window may have been closed during video generation
           }
         };
 
@@ -2452,35 +2539,6 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
         // Step 3: Generate the video using Veo with loop mode
         // Use Veo 3.1 for best loop quality (supports last_frame for seamless looping)
-        const videoModel = 'veo-3.1-generate-preview';
-        
-        const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
-
-        // Build instance with image as start frame and loop mode
-        const instance: any = {
-          prompt: loopPrompt,
-          image: {
-            bytesBase64Encoded: imageBase64,
-            mimeType: imageMimeType,
-          },
-          // For loop mode: use same image as lastFrame for seamless loop
-          lastFrame: {
-            bytesBase64Encoded: imageBase64,
-            mimeType: imageMimeType,
-          },
-        };
-
-        const parameters: any = {
-          aspectRatio: '16:9',
-          // durationSeconds must be string format for REST API
-        };
-
-        const videoRequestBody = {
-          instances: [instance],
-          parameters,
-        };
-
-        console.log('[LoopVideo] Calling Veo API for loop generation...');
         
         broadcastLoopProgress({
           imageId,
@@ -2488,25 +2546,81 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           message: 'Generating loop video...',
         });
 
-        const videoResponse = await fetch(videoUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(videoRequestBody),
-        });
+        let operationName: string = '';
+        let useVertex = false;
 
-        if (!videoResponse.ok) {
-          const errText = await videoResponse.text();
-          throw new Error(`Video generation request failed: ${errText}`);
+        // Check if Vertex AI is configured (preferred)
+        if (isVertexAIConfigured()) {
+          console.log('[LoopVideo] Using Vertex AI for video generation');
+          useVertex = true;
+          try {
+            const vertexClient = getVertexAIClient();
+            const result = await vertexClient.generateVideo(loopPrompt, {
+              startFrameBase64: imageBase64!,
+              startFrameMimeType: imageMimeType,
+              endFrameBase64: imageBase64!, // Same image for seamless loop
+              endFrameMimeType: imageMimeType,
+              aspectRatio: '16:9',
+              loopMode: true,
+            });
+            operationName = result.operationName;
+            console.log('[LoopVideo] Vertex AI video generation started, operation:', operationName);
+          } catch (vertexErr: any) {
+            console.error('[LoopVideo] Vertex AI failed, falling back to AI Studio:', vertexErr.message);
+            useVertex = false;
+          }
         }
+        
+        // Fallback to Google AI Studio if Vertex not configured or failed
+        if (!useVertex) {
+          const videoModel = 'veo-3.1-generate-preview';
+          const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
 
-        const videoOpData = await videoResponse.json();
-        const operationName = videoOpData.name;
+          // Build instance with image as start frame and loop mode
+          const instance: any = {
+            prompt: loopPrompt,
+            image: {
+              bytesBase64Encoded: imageBase64,
+              mimeType: imageMimeType,
+            },
+            // For loop mode: use same image as lastFrame for seamless loop
+            lastFrame: {
+              bytesBase64Encoded: imageBase64,
+              mimeType: imageMimeType,
+            },
+          };
 
-        if (!operationName) {
-          throw new Error('No operation name returned from video generation');
+          const parameters: any = {
+            aspectRatio: '16:9',
+          };
+
+          const videoRequestBody = {
+            instances: [instance],
+            parameters,
+          };
+
+          console.log('[LoopVideo] Calling AI Studio Veo API for loop generation...');
+
+          const videoResponse = await fetch(videoUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(videoRequestBody),
+          });
+
+          if (!videoResponse.ok) {
+            const errText = await videoResponse.text();
+            throw new Error(`Video generation request failed: ${errText}`);
+          }
+
+          const videoOpData = await videoResponse.json();
+          operationName = videoOpData.name;
+
+          if (!operationName) {
+            throw new Error('No operation name returned from video generation');
+          }
+
+          console.log('[LoopVideo] AI Studio video generation started, operation:', operationName);
         }
-
-        console.log('[LoopVideo] Video generation started, operation:', operationName);
 
         // CRITICAL: Release base64 data BEFORE the polling loop
         // This was staying in memory for 5+ minutes during polling!
@@ -2515,137 +2629,215 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         logMemory('LoopVideo After Request (before polling)');
 
         // Step 4: Poll for completion
-        const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+        const videoModel = 'veo-3.1-generate-preview';
         const maxAttempts = 60; // 5 minutes with 5 second intervals
+        let videoBuffer: ArrayBuffer | null = null;
         
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-
-          const pollResponse = await fetch(pollUrl);
-          if (!pollResponse.ok) continue;
-
-          const pollData = await pollResponse.json();
+        if (useVertex) {
+          // Poll using Vertex AI
+          console.log('[LoopVideo] Polling Vertex AI for completion...');
+          const vertexClient = getVertexAIClient();
+          try {
+            const result = await vertexClient.pollVideoOperation(
+              operationName,
+              maxAttempts,
+              5000,
+              (attempt, max) => {
+                broadcastLoopProgress({
+                  imageId,
+                  status: 'generating',
+                  message: `Generating video... ${Math.round((attempt / max) * 100)}%`,
+                  progress: Math.round((attempt / max) * 100),
+                });
+              }
+            );
+            // Vertex returns base64 directly
+            videoBuffer = Buffer.from(result.videoBase64, 'base64').buffer;
+            console.log('[LoopVideo] Vertex AI video generation complete!');
+          } catch (pollErr: any) {
+            throw new Error(`Vertex AI polling failed: ${pollErr.message}`);
+          }
+        } else {
+          // Poll using AI Studio
+          const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
           
-          if (pollData.done) {
-            console.log('[LoopVideo] Video generation complete!');
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
-            // Extract video from response
-            const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples || 
-                                     pollData.response?.generatedVideos || [];
-            if (generatedSamples.length === 0) {
-              throw new Error('No video generated');
-            }
-
-            const sample = generatedSamples[0];
-            const videoUri = sample.video?.uri || sample.uri;
-
-            if (!videoUri) {
-              throw new Error('No video URI in response');
-            }
-
-            // Download the video
-            const downloadResponse = await fetch(videoUri, {
-              headers: { 'x-goog-api-key': apiKey },
-              redirect: 'follow',
-            });
-
-            if (!downloadResponse.ok) {
-              throw new Error('Failed to download generated video');
-            }
-
-            const videoBuffer = await downloadResponse.arrayBuffer();
-
-            // Save video to card-videos directory
-            const userDataDir = app.getPath('userData');
-            const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
-            await fs.promises.mkdir(videosDir, { recursive: true });
-
-            const videoCardId = `loop-video-${Date.now()}`;
-            const videoFileName = `${videoCardId}.mp4`;
-            const videoPath = path.join(videosDir, videoFileName);
-            await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
-
-            console.log('[LoopVideo] Saved video to:', videoPath);
-
-            // Step 5: Create child video card with full lineage
-            const videoCardRecord = {
-              cardId: videoCardId,
-              name: `${cardName} - Loop #${imageOrder + 1}`,
-              title: `${cardName} - Loop #${imageOrder + 1}`,
-              mediaKind: 'video',
-              subType: 'loop-video',
-              mediaLocalPath: videoPath,
-              createdAt: new Date().toISOString(),
-              parentCardId: parentCardId, // The IMAGE card that generated this
-              parentType: 'image',
-              sourceImage: {
-                cardId: imageId, // Reference to parent Image Card
-                imageId,
-                imagePath,
-                localPath: imagePath,
-                craftedPrompt: originalPrompt,
-              },
-              generationParams: {
-                model: videoModel,
-                loopMode: true,
-                loopPrompt,
-                durationSeconds: 5,
-              },
-            };
-
-            // Save video card to Hypercore
-            await createCore(videoCardId);
-            await appendToCore(videoCardId, JSON.stringify(videoCardRecord));
-
-            // Add to card library index
-            const libraryEntry = {
-              type: 'card-index', // REQUIRED: Frontend filters for this
-              cardId: videoCardId,
-              name: videoCardRecord.name,
-              mediaKind: 'video',
-              subType: 'loop-video',
-              createdAt: videoCardRecord.createdAt,
-              parentCardId: parentCardId,
-              coreName: videoCardId,
-              thumbnail: imagePath, // Use source image as thumbnail
-              mediaLocalPath: videoPath,
-            };
-            await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
-            console.log('[LoopVideo] Added video card to library index:', videoCardId);
-
-            // Broadcast completion
             broadcastLoopProgress({
               imageId,
-              status: 'complete',
-              message: 'Loop video created!',
+              status: 'generating',
+              message: `Generating video... ${Math.round((attempt / maxAttempts) * 100)}%`,
+              progress: Math.round((attempt / maxAttempts) * 100),
             });
 
-            logMemory('LoopVideo Complete');
-            endOperation(opId);
-            hintGC();
+            const pollResponse = await fetch(pollUrl);
+            if (!pollResponse.ok) continue;
 
-            return {
-              success: true,
-              videoCardId,
-              videoPath,
-              loopPrompt,
-              parentCardId,
-              imageId,
-            };
+            const pollData = await pollResponse.json();
+            
+            if (pollData.done) {
+              console.log('[LoopVideo] AI Studio video generation complete!');
+
+              // Extract video from response
+              const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples || 
+                                       pollData.response?.generatedVideos || [];
+              if (generatedSamples.length === 0) {
+                throw new Error('No video generated');
+              }
+
+              const sample = generatedSamples[0];
+              const videoUri = sample.video?.uri || sample.uri;
+
+              if (!videoUri) {
+                throw new Error('No video URI in response');
+              }
+
+              // Download the video
+              const downloadResponse = await fetch(videoUri, {
+                headers: { 'x-goog-api-key': apiKey },
+                redirect: 'follow',
+              });
+
+              if (!downloadResponse.ok) {
+                throw new Error('Failed to download generated video');
+              }
+
+              videoBuffer = await downloadResponse.arrayBuffer();
+              break;
+            }
           }
-
-          // Broadcast progress
-          const progress = Math.min(90, Math.round((attempt / maxAttempts) * 100));
-          broadcastLoopProgress({
-            imageId,
-            status: 'generating',
-            progress,
-            message: `Generating loop video... ${progress}%`,
-          });
+        }
+        
+        if (!videoBuffer) {
+          throw new Error('Video generation timed out');
         }
 
+        // Save video to card-videos directory
+        const userDataDir = app.getPath('userData');
+        const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
+        await fs.promises.mkdir(videosDir, { recursive: true });
+
+        const videoCardId = `loop-video-${Date.now()}`;
+        const videoFileName = `${videoCardId}.mp4`;
+        const videoPath = path.join(videosDir, videoFileName);
+        await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
+
+        console.log('[LoopVideo] Saved video to:', videoPath);
+
+        // Step 5: Create child video card with full lineage
+        const videoCardRecord = {
+          cardId: videoCardId,
+          name: `${cardName} - Loop #${imageOrder + 1}`,
+          title: `${cardName} - Loop #${imageOrder + 1}`,
+          mediaKind: 'video',
+          subType: 'loop-video',
+          mediaLocalPath: videoPath,
+          createdAt: new Date().toISOString(),
+          parentCardId: parentCardId, // The IMAGE card that generated this
+          parentType: 'image',
+          sourceImage: {
+            cardId: imageId, // Reference to parent Image Card
+            imageId,
+            imagePath,
+            localPath: imagePath,
+            craftedPrompt: originalPrompt,
+          },
+          generationParams: {
+            model: videoModel,
+            loopMode: true,
+            loopPrompt,
+            durationSeconds: 5,
+          },
+        };
+
+        // Save video card to Hypercore
+        await createCore(videoCardId);
+        await appendToCore(videoCardId, JSON.stringify(videoCardRecord));
+
+        // Add to card library index
+        const libraryEntry = {
+          type: 'card-index', // REQUIRED: Frontend filters for this
+          cardId: videoCardId,
+          name: videoCardRecord.name,
+          mediaKind: 'video',
+          subType: 'loop-video',
+          createdAt: videoCardRecord.createdAt,
+          parentCardId: parentCardId,
+          coreName: videoCardId,
+          thumbnail: imagePath, // Use source image as thumbnail
+          mediaLocalPath: videoPath,
+        };
+        await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+        console.log('[LoopVideo] Added video card to library index:', videoCardId);
+
+        // Update parent card to include this video in its children array
+        // Read current parent card data and append updated record
+        try {
+          const parentRecords = await readCore(parentCardId);
+          let parentCardData: any = null;
+          // Find the latest card record from parent
+          for (let i = parentRecords.length - 1; i >= 0; i--) {
+            const raw = parentRecords[i];
+            if (!raw || typeof raw !== 'string') continue;
+            try {
+              const parsed = JSON.parse(raw);
+              // Check for Hell Week card format (card-state with card property)
+              if (parsed.type === 'card-state' && parsed.card) {
+                parentCardData = parsed.card;
+                break;
+              }
+              // Or regular card format
+              if (parsed.cardId || parsed.type === 'card') {
+                parentCardData = parsed;
+                break;
+              }
+            } catch { /* ignore */ }
+          }
+          
+          if (parentCardData) {
+            // Initialize children array if not exists
+            if (!parentCardData.children) {
+              parentCardData.children = [];
+            }
+            // Add the new video child reference
+            parentCardData.children.push({
+              type: 'loop-video',
+              cardId: videoCardId,
+              videoPath: videoPath,
+              createdAt: new Date().toISOString(),
+            });
+            // Append updated record to parent's hypercore
+            await appendToCore(parentCardId, JSON.stringify({
+              type: 'card-state',
+              card: parentCardData,
+              updatedAt: new Date().toISOString(),
+            }));
+            console.log('[LoopVideo] Updated parent card children:', parentCardId);
+          }
+        } catch (parentErr: any) {
+          console.warn('[LoopVideo] Could not update parent card children:', parentErr.message);
+        }
+
+        // Broadcast completion
+        broadcastLoopProgress({
+          imageId,
+          status: 'complete',
+          message: 'Loop video created!',
+        });
+
+        logMemory('LoopVideo Complete');
         endOperation(opId);
-        throw new Error('Loop video generation timed out');
+        hintGC();
+
+        return {
+          success: true,
+          videoCardId,
+          videoPath,
+          loopPrompt,
+          parentCardId,
+          imageId,
+        };
       } catch (error: any) {
         console.error('[LoopVideo] Error:', error);
         endOperation(opId);
@@ -5327,6 +5519,130 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
   ipcMain.handle('p2p-get-length', async (_event, name: string) => {
     return getCoreLength(name);
+  });
+
+  // ============================================================================
+  // CARD SETS IPC HANDLERS
+  // ============================================================================
+  
+  const CARD_SETS_CORE_NAME = 'card-sets';
+  
+  // Get all card sets
+  ipcMain.handle('card-sets:list', async () => {
+    try {
+      await createCore(CARD_SETS_CORE_NAME);
+      const records = await readCore(CARD_SETS_CORE_NAME);
+      const sets: any[] = [];
+      
+      for (const raw of records) {
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.type === 'card-set' || parsed.type === 'merged-set') {
+            sets.push(parsed);
+          }
+        } catch { /* ignore parse errors */ }
+      }
+      
+      // Sort by createdAt descending (newest first)
+      sets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return sets;
+    } catch (err: any) {
+      console.error('[CardSets] Error listing sets:', err.message);
+      return [];
+    }
+  });
+  
+  // Get a specific card set by ID
+  ipcMain.handle('card-sets:get', async (_event, setId: string) => {
+    try {
+      const records = await readCore(CARD_SETS_CORE_NAME);
+      
+      for (const raw of records) {
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.setId === setId || parsed.mergedSetId === setId) {
+            return parsed;
+          }
+        } catch { /* ignore */ }
+      }
+      return null;
+    } catch (err: any) {
+      console.error('[CardSets] Error getting set:', err.message);
+      return null;
+    }
+  });
+  
+  // Create a new card set (called by pipeline)
+  ipcMain.handle('card-sets:create', async (_event, cardSet: any) => {
+    try {
+      await createCore(CARD_SETS_CORE_NAME);
+      await appendToCore(CARD_SETS_CORE_NAME, JSON.stringify(cardSet));
+      console.log('[CardSets] Created card set:', cardSet.setId, cardSet.name);
+      return { success: true, setId: cardSet.setId };
+    } catch (err: any) {
+      console.error('[CardSets] Error creating set:', err.message);
+      throw err;
+    }
+  });
+  
+  // Create a merged set (references other sets)
+  ipcMain.handle('card-sets:create-merged', async (_event, mergedSet: any) => {
+    try {
+      await createCore(CARD_SETS_CORE_NAME);
+      const record = {
+        ...mergedSet,
+        type: 'merged-set',
+        mergedSetId: mergedSet.mergedSetId || `merged-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await appendToCore(CARD_SETS_CORE_NAME, JSON.stringify(record));
+      console.log('[CardSets] Created merged set:', record.mergedSetId, record.name);
+      return { success: true, mergedSetId: record.mergedSetId };
+    } catch (err: any) {
+      console.error('[CardSets] Error creating merged set:', err.message);
+      throw err;
+    }
+  });
+  
+  // Get cards for a set (resolves merged sets recursively)
+  ipcMain.handle('card-sets:get-card-ids', async (_event, setId: string) => {
+    try {
+      const records = await readCore(CARD_SETS_CORE_NAME);
+      const cardIds: Set<string> = new Set();
+      
+      // Helper to resolve a set
+      const resolveSet = (id: string, visited: Set<string>) => {
+        if (visited.has(id)) return; // Prevent cycles
+        visited.add(id);
+        
+        for (const raw of records) {
+          if (!raw || typeof raw !== 'string') continue;
+          try {
+            const parsed = JSON.parse(raw);
+            
+            // Direct card set
+            if (parsed.type === 'card-set' && parsed.setId === id) {
+              parsed.cardIds?.forEach((cid: string) => cardIds.add(cid));
+            }
+            
+            // Merged set - resolve references
+            if (parsed.type === 'merged-set' && parsed.mergedSetId === id) {
+              parsed.sourceSetIds?.forEach((sid: string) => resolveSet(sid, visited));
+              parsed.sourceMergedSetIds?.forEach((mid: string) => resolveSet(mid, visited));
+            }
+          } catch { /* ignore */ }
+        }
+      };
+      
+      resolveSet(setId, new Set());
+      return Array.from(cardIds);
+    } catch (err: any) {
+      console.error('[CardSets] Error resolving set card IDs:', err.message);
+      return [];
+    }
   });
 
   // Profile & System Stats IPC

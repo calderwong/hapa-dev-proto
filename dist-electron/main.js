@@ -46,6 +46,8 @@ const electron_is_dev_1 = __importDefault(require("electron-is-dev"));
 const electron_store_1 = __importDefault(require("electron-store"));
 const generative_ai_1 = require("@google/generative-ai");
 const p2p_1 = require("./p2p");
+const pipeline_1 = require("./pipeline");
+const vertexai_1 = require("./vertexai");
 const store = new electron_store_1.default();
 const GEMINI_REQUEST_LOG_KEY = 'geminiRequestLog';
 const GEMINI_REQUEST_LOG_MAX_ENTRIES = 200;
@@ -1276,6 +1278,8 @@ function createWindow() {
     else {
         win.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
     }
+    // Initialize Hell Week Pipeline
+    (0, pipeline_1.initPipeline)(win);
 }
 electron_1.app.whenReady().then(() => {
     electron_1.ipcMain.handle('toggle-dev-tools', (event) => {
@@ -1594,6 +1598,36 @@ electron_1.app.whenReady().then(() => {
         saveAdminSettings(settings);
         return true;
     });
+    // Vertex AI Settings handlers
+    electron_1.ipcMain.handle('get-vertex-ai-settings', () => {
+        const { getVertexAISettings } = require('./vertexai');
+        return getVertexAISettings();
+    });
+    electron_1.ipcMain.handle('save-vertex-ai-settings', (_event, settings) => {
+        const { saveVertexAISettings, resetVertexAIClient } = require('./vertexai');
+        saveVertexAISettings(settings);
+        resetVertexAIClient(); // Reset client to pick up new settings
+        return true;
+    });
+    electron_1.ipcMain.handle('test-vertex-ai-connection', async () => {
+        const { getVertexAIClient, isVertexAIConfigured } = require('./vertexai');
+        if (!isVertexAIConfigured()) {
+            return { success: false, message: 'Vertex AI is not configured. Please enter Project ID and API Key.' };
+        }
+        const client = getVertexAIClient();
+        return await client.testConnection();
+    });
+    electron_1.ipcMain.handle('get-vertex-ai-models', () => {
+        const { MODEL_SHORTHAND_MAP, MODEL_DISPLAY_NAMES, VERTEX_REGIONS } = require('./vertexai');
+        return {
+            models: Object.entries(MODEL_SHORTHAND_MAP).map(([shorthand, modelId]) => ({
+                shorthand,
+                modelId,
+                displayName: MODEL_DISPLAY_NAMES[shorthand] || shorthand,
+            })),
+            regions: VERTEX_REGIONS,
+        };
+    });
     // Generate image for a card using LLM to craft prompt, then image model
     electron_1.ipcMain.handle('generate-image-for-card', async (_event, { cardContext, seriesContext, provider = 'gemini', // Default to Gemini
      }) => {
@@ -1684,31 +1718,49 @@ ${cardContext.image ? '(REFER TO ATTACHED IMAGE FOR CHARACTER/VISUAL CONTEXT)' :
 
 Create a vivid image prompt that visually represents this content:`;
             }
-            // Call LLM to craft the prompt using SDK (more robust)
-            if (!apiKey) {
-                throw new Error('Gemini API Key is required for prompt refinement.');
-            }
-            const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-            const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
+            // Call LLM to craft the prompt
             let craftedPrompt = '';
-            try {
-                // Construct Multimodal Request
-                const promptParts = [promptCraftingRequest];
-                if (cardContext.image) {
-                    promptParts.push({
-                        inlineData: {
-                            mimeType: cardContext.mimeType || 'image/png',
-                            data: cardContext.image // Base64 string
-                        }
-                    });
+            // Check if Vertex AI is configured (preferred)
+            if ((0, vertexai_1.isVertexAIConfigured)()) {
+                console.log('[ImageGen] Using Vertex AI for prompt crafting');
+                try {
+                    const vertexClient = (0, vertexai_1.getVertexAIClient)();
+                    // Note: Vertex AI multimodal requires different handling
+                    // For now, use text-only prompt crafting
+                    const result = await vertexClient.generateContent(promptCraftingRequest, 'fast-llm');
+                    craftedPrompt = result.text.trim();
                 }
-                const result = await promptModel.generateContent(promptParts);
-                const response = await result.response;
-                craftedPrompt = response.text().trim();
+                catch (e) {
+                    console.error('[ImageGen] Vertex AI Prompt Crafting failed:', e);
+                    throw new Error(`Vertex AI prompt crafting failed: ${e.message}`);
+                }
             }
-            catch (e) {
-                console.error('[ImageGen] SDK Prompt Crafting failed:', e);
-                throw new Error(`LLM prompt crafting failed: ${e.message}`);
+            else {
+                // Fallback to Google AI Studio
+                if (!apiKey) {
+                    throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+                }
+                const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
+                const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
+                try {
+                    // Construct Multimodal Request
+                    const promptParts = [promptCraftingRequest];
+                    if (cardContext.image) {
+                        promptParts.push({
+                            inlineData: {
+                                mimeType: cardContext.mimeType || 'image/png',
+                                data: cardContext.image // Base64 string
+                            }
+                        });
+                    }
+                    const result = await promptModel.generateContent(promptParts);
+                    const response = await result.response;
+                    craftedPrompt = response.text().trim();
+                }
+                catch (e) {
+                    console.error('[ImageGen] SDK Prompt Crafting failed:', e);
+                    throw new Error(`LLM prompt crafting failed: ${e.message}`);
+                }
             }
             if (!craftedPrompt) {
                 throw new Error('Failed to craft image prompt from LLM');
@@ -1750,8 +1802,25 @@ Create a vivid image prompt that visually represents this content:`;
                     throw new Error('Local server returned no images.');
                 }
             }
+            else if ((0, vertexai_1.isVertexAIConfigured)()) {
+                // Vertex AI Image Generation
+                console.log('[ImageGen] Using Vertex AI for image generation');
+                try {
+                    const vertexClient = (0, vertexai_1.getVertexAIClient)();
+                    const result = await vertexClient.generateImageGemini(craftedPrompt, 'common-image');
+                    imageBase64 = result.base64;
+                    mimeType = result.mimeType;
+                }
+                catch (e) {
+                    console.error('[ImageGen] Vertex AI Image Generation failed:', e);
+                    throw new Error(`Vertex AI image generation failed: ${e.message}`);
+                }
+            }
             else {
-                // Gemini Image Generation
+                // Fallback: Google AI Studio Gemini Image Generation
+                if (!apiKey) {
+                    throw new Error('No AI provider configured for image generation.');
+                }
                 const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultImageModel}:generateContent?key=${apiKey}`;
                 console.log(`[ImageGen] Calling Gemini Image API: ${imageUrl.replace(apiKey, 'HIDDEN_KEY')}`);
                 console.log(`[ImageGen] Payload:`, JSON.stringify({ contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }] }).substring(0, 200) + '...');
@@ -1900,167 +1969,268 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             });
             // Step 3: Generate the video using Veo with loop mode
             // Use Veo 3.1 for best loop quality (supports last_frame for seamless looping)
-            const videoModel = 'veo-3.1-generate-preview';
-            const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
-            // Build instance with image as start frame and loop mode
-            const instance = {
-                prompt: loopPrompt,
-                image: {
-                    bytesBase64Encoded: imageBase64,
-                    mimeType: imageMimeType,
-                },
-                // For loop mode: use same image as lastFrame for seamless loop
-                lastFrame: {
-                    bytesBase64Encoded: imageBase64,
-                    mimeType: imageMimeType,
-                },
-            };
-            const parameters = {
-                aspectRatio: '16:9',
-                // durationSeconds must be string format for REST API
-            };
-            const videoRequestBody = {
-                instances: [instance],
-                parameters,
-            };
-            console.log('[LoopVideo] Calling Veo API for loop generation...');
             broadcastLoopProgress({
                 imageId,
                 status: 'generating',
                 message: 'Generating loop video...',
             });
-            const videoResponse = await fetch(videoUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(videoRequestBody),
-            });
-            if (!videoResponse.ok) {
-                const errText = await videoResponse.text();
-                throw new Error(`Video generation request failed: ${errText}`);
+            let operationName = '';
+            let useVertex = false;
+            // Check if Vertex AI is configured (preferred)
+            if ((0, vertexai_1.isVertexAIConfigured)()) {
+                console.log('[LoopVideo] Using Vertex AI for video generation');
+                useVertex = true;
+                try {
+                    const vertexClient = (0, vertexai_1.getVertexAIClient)();
+                    const result = await vertexClient.generateVideo(loopPrompt, {
+                        startFrameBase64: imageBase64,
+                        startFrameMimeType: imageMimeType,
+                        endFrameBase64: imageBase64, // Same image for seamless loop
+                        endFrameMimeType: imageMimeType,
+                        aspectRatio: '16:9',
+                        loopMode: true,
+                    });
+                    operationName = result.operationName;
+                    console.log('[LoopVideo] Vertex AI video generation started, operation:', operationName);
+                }
+                catch (vertexErr) {
+                    console.error('[LoopVideo] Vertex AI failed, falling back to AI Studio:', vertexErr.message);
+                    useVertex = false;
+                }
             }
-            const videoOpData = await videoResponse.json();
-            const operationName = videoOpData.name;
-            if (!operationName) {
-                throw new Error('No operation name returned from video generation');
+            // Fallback to Google AI Studio if Vertex not configured or failed
+            if (!useVertex) {
+                const videoModel = 'veo-3.1-generate-preview';
+                const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
+                // Build instance with image as start frame and loop mode
+                const instance = {
+                    prompt: loopPrompt,
+                    image: {
+                        bytesBase64Encoded: imageBase64,
+                        mimeType: imageMimeType,
+                    },
+                    // For loop mode: use same image as lastFrame for seamless loop
+                    lastFrame: {
+                        bytesBase64Encoded: imageBase64,
+                        mimeType: imageMimeType,
+                    },
+                };
+                const parameters = {
+                    aspectRatio: '16:9',
+                };
+                const videoRequestBody = {
+                    instances: [instance],
+                    parameters,
+                };
+                console.log('[LoopVideo] Calling AI Studio Veo API for loop generation...');
+                const videoResponse = await fetch(videoUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(videoRequestBody),
+                });
+                if (!videoResponse.ok) {
+                    const errText = await videoResponse.text();
+                    throw new Error(`Video generation request failed: ${errText}`);
+                }
+                const videoOpData = await videoResponse.json();
+                operationName = videoOpData.name;
+                if (!operationName) {
+                    throw new Error('No operation name returned from video generation');
+                }
+                console.log('[LoopVideo] AI Studio video generation started, operation:', operationName);
             }
-            console.log('[LoopVideo] Video generation started, operation:', operationName);
             // CRITICAL: Release base64 data BEFORE the polling loop
             // This was staying in memory for 5+ minutes during polling!
             imageBase64 = null;
             hintGC();
             logMemory('LoopVideo After Request (before polling)');
             // Step 4: Poll for completion
-            const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+            const videoModel = 'veo-3.1-generate-preview';
             const maxAttempts = 60; // 5 minutes with 5 second intervals
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                const pollResponse = await fetch(pollUrl);
-                if (!pollResponse.ok)
-                    continue;
-                const pollData = await pollResponse.json();
-                if (pollData.done) {
-                    console.log('[LoopVideo] Video generation complete!');
-                    // Extract video from response
-                    const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples ||
-                        pollData.response?.generatedVideos || [];
-                    if (generatedSamples.length === 0) {
-                        throw new Error('No video generated');
-                    }
-                    const sample = generatedSamples[0];
-                    const videoUri = sample.video?.uri || sample.uri;
-                    if (!videoUri) {
-                        throw new Error('No video URI in response');
-                    }
-                    // Download the video
-                    const downloadResponse = await fetch(videoUri, {
-                        headers: { 'x-goog-api-key': apiKey },
-                        redirect: 'follow',
-                    });
-                    if (!downloadResponse.ok) {
-                        throw new Error('Failed to download generated video');
-                    }
-                    const videoBuffer = await downloadResponse.arrayBuffer();
-                    // Save video to card-videos directory
-                    const userDataDir = electron_1.app.getPath('userData');
-                    const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
-                    await fs.promises.mkdir(videosDir, { recursive: true });
-                    const videoCardId = `loop-video-${Date.now()}`;
-                    const videoFileName = `${videoCardId}.mp4`;
-                    const videoPath = path.join(videosDir, videoFileName);
-                    await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
-                    console.log('[LoopVideo] Saved video to:', videoPath);
-                    // Step 5: Create child video card with full lineage
-                    const videoCardRecord = {
-                        cardId: videoCardId,
-                        name: `${cardName} - Loop #${imageOrder + 1}`,
-                        title: `${cardName} - Loop #${imageOrder + 1}`,
-                        mediaKind: 'video',
-                        subType: 'loop-video',
-                        mediaLocalPath: videoPath,
-                        createdAt: new Date().toISOString(),
-                        parentCardId: parentCardId, // The IMAGE card that generated this
-                        parentType: 'image',
-                        sourceImage: {
-                            cardId: imageId, // Reference to parent Image Card
+            let videoBuffer = null;
+            if (useVertex) {
+                // Poll using Vertex AI
+                console.log('[LoopVideo] Polling Vertex AI for completion...');
+                const vertexClient = (0, vertexai_1.getVertexAIClient)();
+                try {
+                    const result = await vertexClient.pollVideoOperation(operationName, maxAttempts, 5000, (attempt, max) => {
+                        broadcastLoopProgress({
                             imageId,
-                            imagePath,
-                            localPath: imagePath,
-                            craftedPrompt: originalPrompt,
-                        },
-                        generationParams: {
-                            model: videoModel,
-                            loopMode: true,
-                            loopPrompt,
-                            durationSeconds: 5,
-                        },
-                    };
-                    // Save video card to Hypercore
-                    await (0, p2p_1.createCore)(videoCardId);
-                    await (0, p2p_1.appendToCore)(videoCardId, JSON.stringify(videoCardRecord));
-                    // Add to card library index
-                    const libraryEntry = {
-                        type: 'card-index', // REQUIRED: Frontend filters for this
-                        cardId: videoCardId,
-                        name: videoCardRecord.name,
-                        mediaKind: 'video',
-                        subType: 'loop-video',
-                        createdAt: videoCardRecord.createdAt,
-                        parentCardId: parentCardId,
-                        coreName: videoCardId,
-                        thumbnail: imagePath, // Use source image as thumbnail
-                        mediaLocalPath: videoPath,
-                    };
-                    await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
-                    console.log('[LoopVideo] Added video card to library index:', videoCardId);
-                    // Broadcast completion
+                            status: 'generating',
+                            message: `Generating video... ${Math.round((attempt / max) * 100)}%`,
+                            progress: Math.round((attempt / max) * 100),
+                        });
+                    });
+                    // Vertex returns base64 directly
+                    videoBuffer = Buffer.from(result.videoBase64, 'base64').buffer;
+                    console.log('[LoopVideo] Vertex AI video generation complete!');
+                }
+                catch (pollErr) {
+                    throw new Error(`Vertex AI polling failed: ${pollErr.message}`);
+                }
+            }
+            else {
+                // Poll using AI Studio
+                const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+                for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                     broadcastLoopProgress({
                         imageId,
-                        status: 'complete',
-                        message: 'Loop video created!',
+                        status: 'generating',
+                        message: `Generating video... ${Math.round((attempt / maxAttempts) * 100)}%`,
+                        progress: Math.round((attempt / maxAttempts) * 100),
                     });
-                    logMemory('LoopVideo Complete');
-                    endOperation(opId);
-                    hintGC();
-                    return {
-                        success: true,
-                        videoCardId,
-                        videoPath,
-                        loopPrompt,
-                        parentCardId,
-                        imageId,
-                    };
+                    const pollResponse = await fetch(pollUrl);
+                    if (!pollResponse.ok)
+                        continue;
+                    const pollData = await pollResponse.json();
+                    if (pollData.done) {
+                        console.log('[LoopVideo] AI Studio video generation complete!');
+                        // Extract video from response
+                        const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples ||
+                            pollData.response?.generatedVideos || [];
+                        if (generatedSamples.length === 0) {
+                            throw new Error('No video generated');
+                        }
+                        const sample = generatedSamples[0];
+                        const videoUri = sample.video?.uri || sample.uri;
+                        if (!videoUri) {
+                            throw new Error('No video URI in response');
+                        }
+                        // Download the video
+                        const downloadResponse = await fetch(videoUri, {
+                            headers: { 'x-goog-api-key': apiKey },
+                            redirect: 'follow',
+                        });
+                        if (!downloadResponse.ok) {
+                            throw new Error('Failed to download generated video');
+                        }
+                        videoBuffer = await downloadResponse.arrayBuffer();
+                        break;
+                    }
                 }
-                // Broadcast progress
-                const progress = Math.min(90, Math.round((attempt / maxAttempts) * 100));
-                broadcastLoopProgress({
-                    imageId,
-                    status: 'generating',
-                    progress,
-                    message: `Generating loop video... ${progress}%`,
-                });
             }
+            if (!videoBuffer) {
+                throw new Error('Video generation timed out');
+            }
+            // Save video to card-videos directory
+            const userDataDir = electron_1.app.getPath('userData');
+            const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
+            await fs.promises.mkdir(videosDir, { recursive: true });
+            const videoCardId = `loop-video-${Date.now()}`;
+            const videoFileName = `${videoCardId}.mp4`;
+            const videoPath = path.join(videosDir, videoFileName);
+            await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
+            console.log('[LoopVideo] Saved video to:', videoPath);
+            // Step 5: Create child video card with full lineage
+            const videoCardRecord = {
+                cardId: videoCardId,
+                name: `${cardName} - Loop #${imageOrder + 1}`,
+                title: `${cardName} - Loop #${imageOrder + 1}`,
+                mediaKind: 'video',
+                subType: 'loop-video',
+                mediaLocalPath: videoPath,
+                createdAt: new Date().toISOString(),
+                parentCardId: parentCardId, // The IMAGE card that generated this
+                parentType: 'image',
+                sourceImage: {
+                    cardId: imageId, // Reference to parent Image Card
+                    imageId,
+                    imagePath,
+                    localPath: imagePath,
+                    craftedPrompt: originalPrompt,
+                },
+                generationParams: {
+                    model: videoModel,
+                    loopMode: true,
+                    loopPrompt,
+                    durationSeconds: 5,
+                },
+            };
+            // Save video card to Hypercore
+            await (0, p2p_1.createCore)(videoCardId);
+            await (0, p2p_1.appendToCore)(videoCardId, JSON.stringify(videoCardRecord));
+            // Add to card library index
+            const libraryEntry = {
+                type: 'card-index', // REQUIRED: Frontend filters for this
+                cardId: videoCardId,
+                name: videoCardRecord.name,
+                mediaKind: 'video',
+                subType: 'loop-video',
+                createdAt: videoCardRecord.createdAt,
+                parentCardId: parentCardId,
+                coreName: videoCardId,
+                thumbnail: imagePath, // Use source image as thumbnail
+                mediaLocalPath: videoPath,
+            };
+            await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+            console.log('[LoopVideo] Added video card to library index:', videoCardId);
+            // Update parent card to include this video in its children array
+            // Read current parent card data and append updated record
+            try {
+                const parentRecords = await (0, p2p_1.readCore)(parentCardId);
+                let parentCardData = null;
+                // Find the latest card record from parent
+                for (let i = parentRecords.length - 1; i >= 0; i--) {
+                    const raw = parentRecords[i];
+                    if (!raw || typeof raw !== 'string')
+                        continue;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        // Check for Hell Week card format (card-state with card property)
+                        if (parsed.type === 'card-state' && parsed.card) {
+                            parentCardData = parsed.card;
+                            break;
+                        }
+                        // Or regular card format
+                        if (parsed.cardId || parsed.type === 'card') {
+                            parentCardData = parsed;
+                            break;
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+                if (parentCardData) {
+                    // Initialize children array if not exists
+                    if (!parentCardData.children) {
+                        parentCardData.children = [];
+                    }
+                    // Add the new video child reference
+                    parentCardData.children.push({
+                        type: 'loop-video',
+                        cardId: videoCardId,
+                        videoPath: videoPath,
+                        createdAt: new Date().toISOString(),
+                    });
+                    // Append updated record to parent's hypercore
+                    await (0, p2p_1.appendToCore)(parentCardId, JSON.stringify({
+                        type: 'card-state',
+                        card: parentCardData,
+                        updatedAt: new Date().toISOString(),
+                    }));
+                    console.log('[LoopVideo] Updated parent card children:', parentCardId);
+                }
+            }
+            catch (parentErr) {
+                console.warn('[LoopVideo] Could not update parent card children:', parentErr.message);
+            }
+            // Broadcast completion
+            broadcastLoopProgress({
+                imageId,
+                status: 'complete',
+                message: 'Loop video created!',
+            });
+            logMemory('LoopVideo Complete');
             endOperation(opId);
-            throw new Error('Loop video generation timed out');
+            hintGC();
+            return {
+                success: true,
+                videoCardId,
+                videoPath,
+                loopPrompt,
+                parentCardId,
+                imageId,
+            };
         }
         catch (error) {
             console.error('[LoopVideo] Error:', error);
@@ -3193,8 +3363,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         };
     });
     electron_1.ipcMain.handle('wormhole-run-transcription', async (_event, payload) => {
+        const opId = `transcription-${Date.now()}`;
+        startOperation(opId, 'transcription');
         const { cardId, overrideProvider, overrideModel } = payload || {};
         if (!cardId || typeof cardId !== 'string') {
+            endOperation(opId);
             throw new Error('cardId is required for Wormhole transcription.');
         }
         const records = await (0, p2p_1.readCore)(cardId);
@@ -3250,8 +3423,12 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         if (!apiKey) {
             throw new Error('OpenAI API Key not found. Please configure it in Settings.');
         }
-        const audioBuffer = await fs.promises.readFile(localPath);
-        const base64 = audioBuffer.toString('base64');
+        // Read audio - use let so we can null after use
+        let audioBuffer = await fs.promises.readFile(localPath);
+        const audioSizeMB = audioBuffer.length / (1024 * 1024);
+        console.log('[Transcription] Audio size:', audioSizeMB.toFixed(2), 'MB');
+        let base64 = audioBuffer.toString('base64');
+        audioBuffer = null; // Release buffer after encoding
         const ext = path.extname(localPath || '').toLowerCase();
         let mimeType = 'audio/mpeg';
         if (ext === '.wav')
@@ -3265,6 +3442,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         else if (ext === '.m4a')
             mimeType = 'audio/mp4';
         const transcriptText = (await transcribeAudioWithOpenAI(base64, mimeType, apiKey)).trim();
+        base64 = null; // Release base64 after API call
+        hintGC();
         if (!transcriptText) {
             throw new Error('Transcription produced empty text.');
         }
@@ -3302,6 +3481,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             },
         };
         await (0, p2p_1.appendToCore)(cardId, JSON.stringify(nextCardRecord));
+        endOperation(opId);
         return {
             cardId,
             step: 'transcription',
@@ -3309,8 +3489,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         };
     });
     electron_1.ipcMain.handle('wormhole-run-summarization', async (_event, payload) => {
+        const opId = `summarization-${Date.now()}`;
+        startOperation(opId, 'summarization');
         const { cardId, overrideProvider, overrideModel } = payload || {};
         if (!cardId || typeof cardId !== 'string') {
+            endOperation(opId);
             throw new Error('cardId is required for Wormhole summarization.');
         }
         const records = await (0, p2p_1.readCore)(cardId);
@@ -3561,6 +3744,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             },
         };
         await (0, p2p_1.appendToCore)(cardId, JSON.stringify(nextCardRecord));
+        endOperation(opId);
         return {
             cardId,
             step: 'summarization',
@@ -3568,8 +3752,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         };
     });
     electron_1.ipcMain.handle('wormhole-run-keyterms', async (_event, payload) => {
+        const opId = `keyterms-${Date.now()}`;
+        startOperation(opId, 'keyTerms');
         const { cardId, overrideProvider, overrideModel } = payload || {};
         if (!cardId || typeof cardId !== 'string') {
+            endOperation(opId);
             throw new Error('cardId is required for Wormhole key-term extraction.');
         }
         const records = await (0, p2p_1.readCore)(cardId);
@@ -3715,6 +3902,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             },
         };
         await (0, p2p_1.appendToCore)(cardId, JSON.stringify(nextCardRecord));
+        endOperation(opId);
         return {
             cardId,
             step: 'keyTerms',
@@ -4253,6 +4441,127 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     });
     electron_1.ipcMain.handle('p2p-get-length', async (_event, name) => {
         return (0, p2p_1.getCoreLength)(name);
+    });
+    // ============================================================================
+    // CARD SETS IPC HANDLERS
+    // ============================================================================
+    const CARD_SETS_CORE_NAME = 'card-sets';
+    // Get all card sets
+    electron_1.ipcMain.handle('card-sets:list', async () => {
+        try {
+            await (0, p2p_1.createCore)(CARD_SETS_CORE_NAME);
+            const records = await (0, p2p_1.readCore)(CARD_SETS_CORE_NAME);
+            const sets = [];
+            for (const raw of records) {
+                if (!raw || typeof raw !== 'string')
+                    continue;
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed.type === 'card-set' || parsed.type === 'merged-set') {
+                        sets.push(parsed);
+                    }
+                }
+                catch { /* ignore parse errors */ }
+            }
+            // Sort by createdAt descending (newest first)
+            sets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            return sets;
+        }
+        catch (err) {
+            console.error('[CardSets] Error listing sets:', err.message);
+            return [];
+        }
+    });
+    // Get a specific card set by ID
+    electron_1.ipcMain.handle('card-sets:get', async (_event, setId) => {
+        try {
+            const records = await (0, p2p_1.readCore)(CARD_SETS_CORE_NAME);
+            for (const raw of records) {
+                if (!raw || typeof raw !== 'string')
+                    continue;
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed.setId === setId || parsed.mergedSetId === setId) {
+                        return parsed;
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            return null;
+        }
+        catch (err) {
+            console.error('[CardSets] Error getting set:', err.message);
+            return null;
+        }
+    });
+    // Create a new card set (called by pipeline)
+    electron_1.ipcMain.handle('card-sets:create', async (_event, cardSet) => {
+        try {
+            await (0, p2p_1.createCore)(CARD_SETS_CORE_NAME);
+            await (0, p2p_1.appendToCore)(CARD_SETS_CORE_NAME, JSON.stringify(cardSet));
+            console.log('[CardSets] Created card set:', cardSet.setId, cardSet.name);
+            return { success: true, setId: cardSet.setId };
+        }
+        catch (err) {
+            console.error('[CardSets] Error creating set:', err.message);
+            throw err;
+        }
+    });
+    // Create a merged set (references other sets)
+    electron_1.ipcMain.handle('card-sets:create-merged', async (_event, mergedSet) => {
+        try {
+            await (0, p2p_1.createCore)(CARD_SETS_CORE_NAME);
+            const record = {
+                ...mergedSet,
+                type: 'merged-set',
+                mergedSetId: mergedSet.mergedSetId || `merged-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            };
+            await (0, p2p_1.appendToCore)(CARD_SETS_CORE_NAME, JSON.stringify(record));
+            console.log('[CardSets] Created merged set:', record.mergedSetId, record.name);
+            return { success: true, mergedSetId: record.mergedSetId };
+        }
+        catch (err) {
+            console.error('[CardSets] Error creating merged set:', err.message);
+            throw err;
+        }
+    });
+    // Get cards for a set (resolves merged sets recursively)
+    electron_1.ipcMain.handle('card-sets:get-card-ids', async (_event, setId) => {
+        try {
+            const records = await (0, p2p_1.readCore)(CARD_SETS_CORE_NAME);
+            const cardIds = new Set();
+            // Helper to resolve a set
+            const resolveSet = (id, visited) => {
+                if (visited.has(id))
+                    return; // Prevent cycles
+                visited.add(id);
+                for (const raw of records) {
+                    if (!raw || typeof raw !== 'string')
+                        continue;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        // Direct card set
+                        if (parsed.type === 'card-set' && parsed.setId === id) {
+                            parsed.cardIds?.forEach((cid) => cardIds.add(cid));
+                        }
+                        // Merged set - resolve references
+                        if (parsed.type === 'merged-set' && parsed.mergedSetId === id) {
+                            parsed.sourceSetIds?.forEach((sid) => resolveSet(sid, visited));
+                            parsed.sourceMergedSetIds?.forEach((mid) => resolveSet(mid, visited));
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+            };
+            resolveSet(setId, new Set());
+            return Array.from(cardIds);
+        }
+        catch (err) {
+            console.error('[CardSets] Error resolving set card IDs:', err.message);
+            return [];
+        }
     });
     // Profile & System Stats IPC
     electron_1.ipcMain.handle('get-profile', async () => {

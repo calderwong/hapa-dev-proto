@@ -151,6 +151,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onLoopVideoProgress: (listener: (payload: any) => void) => {
         ipcRenderer.on('loop-video-progress', (_event, payload) => listener(payload));
     },
+    
+    // Hell Week Pipeline
+    pipelineStart: (filePath: string) => ipcRenderer.invoke('pipeline:start', filePath),
+    pipelineStartWithContent: (fileName: string, content: string) => 
+        ipcRenderer.invoke('pipeline:start-with-content', { fileName, content }),
+    pipelineAdvance: () => ipcRenderer.invoke('pipeline:advance'),
+    onPipelineUpdate: (listener: (state: any) => void) => {
+        ipcRenderer.on('pipeline:update', (_event, state) => listener(state));
+    },
+    // Pipeline Settings
+    getPipelineSettings: () => ipcRenderer.invoke('pipeline:get-settings'),
+    savePipelineSettings: (settings: any) => ipcRenderer.invoke('pipeline:save-settings', settings),
+    setThorModel: (model: 'fast-llm' | 'smart-llm') => ipcRenderer.invoke('pipeline:set-thor-model', model),
+    // Skip/Retry for failed images
+    pipelineSkipMedia: () => ipcRenderer.invoke('pipeline:skip-media'),
+    pipelineSkipFailed: () => ipcRenderer.invoke('pipeline:skip-failed'),
+    pipelineRetryFailed: () => ipcRenderer.invoke('pipeline:retry-failed'),
+    pipelineGetFailedCount: () => ipcRenderer.invoke('pipeline:get-failed-count'),
+    // Recovery for orphaned cards
+    pipelineRecoverCards: () => ipcRenderer.invoke('pipeline:recover-cards'),
+    
+    // Card Sets
+    cardSetsCreate: (cardSet: any) => ipcRenderer.invoke('card-sets:create', cardSet),
+    cardSetsList: () => ipcRenderer.invoke('card-sets:list'),
+    cardSetsGet: (setId: string) => ipcRenderer.invoke('card-sets:get', setId),
+    cardSetsCreateMerged: (mergedSet: any) => ipcRenderer.invoke('card-sets:create-merged', mergedSet),
+    cardSetsGetCardIds: (setId: string) => ipcRenderer.invoke('card-sets:get-card-ids', setId),
+    
+    // Vertex AI
+    getVertexAISettings: () => ipcRenderer.invoke('get-vertex-ai-settings'),
+    saveVertexAISettings: (settings: any) => ipcRenderer.invoke('save-vertex-ai-settings', settings),
+    testVertexAIConnection: () => ipcRenderer.invoke('test-vertex-ai-connection'),
+    getVertexAIModels: () => ipcRenderer.invoke('get-vertex-ai-models'),
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

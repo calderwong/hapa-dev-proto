@@ -125,17 +125,20 @@ export const HoverVideoThumbnail: React.FC<HoverVideoThumbnailProps> = ({
  * 
  * For IMAGE cards: Returns child loop video path if exists
  * For VIDEO cards: Returns the video itself (use getCardImagePath for thumbnail)
+ * For HELL WEEK cards (no mediaKind): Check children for loop-video
  */
 export function getCardVideoPath(card: any): string | null {
     if (!card) return null;
     
-    // For IMAGE cards - check for loop video child (new taxonomy)
+    // Check for loop video child in children array (new taxonomy)
+    // This works for both IMAGE cards and HELL WEEK cards (which may not have mediaKind)
+    const loopChild = card.cardRecord?.children?.find((c: any) => c.type === 'loop-video');
+    if (loopChild?.videoPath) {
+        return loopChild.videoPath;
+    }
+    
+    // For IMAGE cards - also check legacy format
     if (card.mediaKind === 'image') {
-        const loopChild = card.cardRecord?.children?.find((c: any) => c.type === 'loop-video');
-        if (loopChild?.videoPath) {
-            return loopChild.videoPath;
-        }
-        
         // Legacy: embedded loopVideo
         if (card.cardRecord?.loopVideo?.localPath) {
             return card.cardRecord.loopVideo.localPath;

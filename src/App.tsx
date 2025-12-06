@@ -21,6 +21,7 @@ import WormholeAstro from './pages/WormholeAstro';
 import Wiki from './pages/Wiki';
 import Profile from './pages/Profile';
 import Pets from './pages/Pets';
+import Pipeline from './pages/Pipeline';
 
 function App() {
   useEffect(() => {
@@ -61,6 +62,7 @@ function App() {
           <Route path="wiki" element={<Wiki />} />
           <Route path="profile" element={<Profile />} />
           <Route path="pets" element={<Pets />} />
+          <Route path="pipeline" element={<Pipeline />} />
         </Route>
       </Routes>
     </Router>

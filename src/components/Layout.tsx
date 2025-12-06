@@ -25,6 +25,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     { path: '/settings', label: 'Settings', icon: 'settings' },
     { path: '/admin', label: 'Admin', icon: 'security' },
     { path: '/pets', label: 'Sanctuary', icon: 'pets' },
+    { path: '/pipeline', label: 'Hell Week', icon: 'satellite' },
 ];
 
 const SystemClock = () => {

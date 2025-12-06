@@ -1361,3 +1361,329 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 
 **Tags:** #bugfix #drag-drop #pets #data-integrity
 **Est. Avg. Human Dev Time:** 1.0 hours
+
+## Entry 25 – Hell Week Protocol: Analysis & Planning
+**Prompt:** "You are an AI Phamiliar going through Hapa Hell Week... Treat the file as your boot-camp script... Review & notes... External research... FRD... Development plan"
+
+**Summary of actions:**
+- **Analysis (Leo-mode):**
+    - Ingested and reviewed `The Archi-Deck.txt`.
+    - Analyzed the high-level goals (Civilizational Soft Fork, Light-Web, Need-Minting) and the "Hell Week" pipeline instructions (Leo/Thor/Conviction).
+- **Research:**
+    - Verified best practices for "Workflow-First" LLM pipelines (human-in-the-loop).
+    - Researched Google Veo 3.1 integration patterns (Gemini Image -> Veo Video).
+    - Confirmed Hypercore integration via existing project docs.
+- **Documentation:**
+    - Created `docs/hell_week_archi_deck_notes.md`: Consolidated notes, pipeline roles, and research findings.
+    - Created `docs/hell_week_archi_deck_FRD.md`: Detailed Feature Requirements Document, including state machine design, data models, UI requirements, and a modular development plan.
+    - Defined the "First Concrete Implementation Slice" (Leo-only text pipeline) to validate core mechanics before attempting expensive media generation.
+
+- **Implementation (First Slice):**
+    - **Backend:**
+        - Created `electron/pipeline.ts` implementing the `PipelineManager` state machine.
+        - Wired `pipeline:start` and `pipeline:advance` IPC handlers in `main.ts` and `preload.ts`.
+        - Integrated `GoogleGenerativeAI` for the "Leo" step with a structured JSON prompt.
+    - **Frontend:**
+        - Created `src/pages/Pipeline.tsx` with "Astros" aesthetic (Tracks for Leo/Thor/Conviction).
+        - Added `/pipeline` route and sidebar navigation.
+        - Implemented file drag-and-drop ingestion and real-time log streaming from the backend.
+
+**Tags:** #planning #analysis #frd #hell-week #pipeline #implementation
+**Est. Avg. Human Dev Time:** 3.5 hours
+
+---
+
+### Entry 53: Hell Week Pipeline - Conviction Phase UI Completion
+**Date:** 2025-01-XX
+
+**Prompt:** Continue implementing the Hell Week Pipeline, completing the Conviction phase UI visualization.
+
+**Execution Summary:**
+- **UI Updates (`src/pages/Pipeline.tsx`):**
+    - Updated `PipelineState` interface to include `chunks`, `cards`, and `collectionKey` fields to match backend state.
+    - Added `THOR_MEDIA_GENERATING` state handling with real-time image generation progress counter.
+    - Added `THOR_REVIEW` state with "Mint to Vault" approval button.
+    - Implemented `CONVICTION_FINALIZING` state UI showing minting spinner and card count.
+    - Implemented `COMPLETE` state UI with:
+        - Success checkmark animation
+        - "VAULTED" confirmation message
+        - Card count summary
+        - Hypercore Discovery Key display
+        - "View in Library" and "New Run" action buttons
+    - Fixed image path references to use correct backend property (`media_prompts.generated_image_local`).
+
+- **Pipeline Flow Now Complete:**
+    1. **IDLE** → Drag & drop file
+    2. **LEO_ANALYSIS** → LLM contextualizes artifact
+    3. **LEO_REVIEW** → User approves context
+    4. **THOR_CHUNKING** → Text split into ~3k char chunks
+    5. **THOR_PROCESSING** → Cards forged from chunks
+    6. **THOR_MEDIA_PENDING** → User triggers image generation
+    7. **THOR_MEDIA_GENERATING** → Images generated via Gemini 2.0 Flash
+    8. **THOR_REVIEW** → User approves cards → "Mint to Vault"
+    9. **CONVICTION_FINALIZING** → Cards written to Hypercore
+    10. **COMPLETE** → Success screen with collection key
+
+**Tags:** #hell-week #pipeline #ui #conviction #hypercore
+**Est. Avg. Human Dev Time:** 45 minutes
+
+---
+
+### Entry 42: Vertex AI Integration - Phase 1
+**Date:** December 5, 2025
+**Prompt:** Integrate Vertex AI as the default provider with user-friendly model naming
+
+**Execution Summary:**
+
+1. **Created Plan Document** (`docs/vertex_ai_integration_plan.md`)
+   - Documented differences between Google AI Studio and Vertex AI
+   - Defined model shorthand naming convention:
+     - **Smart LLM** → Gemini 3 Pro
+     - **Fast LLM** → Gemini 2.5 Flash-Lite
+     - **Pro Image** → Imagen 4
+     - **Common Image** → Gemini 2.0 Flash
+     - **Video** → Veo 3.1
+   - Outlined API endpoint differences and authentication methods
+
+2. **Created Vertex AI Client Module** (`electron/vertexai.ts`)
+   - `VertexAIClient` class with methods for:
+     - `generateContent()` - Text generation
+     - `generateContentWithHistory()` - Chat with history
+     - `generateImageImagen()` - Imagen 4 image generation
+     - `generateImageGemini()` - Gemini-based image generation
+     - `generateVideo()` - Veo 3.1 video generation
+     - `pollVideoOperation()` - Long-running video operation polling
+     - `testConnection()` - Connection verification
+   - Settings management: `getVertexAISettings()`, `saveVertexAISettings()`
+   - Model shorthand resolution: `resolveModelName()`
+
+3. **Added IPC Handlers** (`electron/main.ts`)
+   - `get-vertex-ai-settings`
+   - `save-vertex-ai-settings`
+   - `test-vertex-ai-connection`
+   - `get-vertex-ai-models`
+
+4. **Added Preload Bindings** (`electron/preload.ts`)
+   - All Vertex AI IPC methods exposed to renderer
+
+5. **Created Admin UI Panel** (`src/pages/Admin.tsx`)
+   - New "Vertex AI (Default Provider)" section with emerald accent
+   - Enable/disable toggle
+   - Project ID input
+   - Region selector (us-central1, us-east4, us-west1, europe-west4, asia-northeast1)
+   - API Key input (masked)
+   - Model shorthand display grid
+   - Save Settings and Test Connection buttons
+   - Status feedback
+
+6. **Updated Hell Week Pipeline** (`electron/pipeline.ts`)
+   - Leo phase: Uses Vertex AI Smart LLM when configured
+   - Thor processing: Uses Vertex AI Smart LLM when configured
+   - Media generation: Uses Vertex AI Common Image when configured
+   - Graceful fallback to Google AI Studio when Vertex not configured
+
+**Key Differences Noted:**
+- Vertex AI uses `{region}-aiplatform.googleapis.com` vs `generativelanguage.googleapis.com`
+- Vertex requires explicit Project ID and Region
+- Vertex uses `x-goog-api-key` header for API key auth
+- Vertex has different endpoint structure: `/v1/projects/{PROJECT}/locations/{REGION}/publishers/google/models/{MODEL}:generateContent`
+
+**Next Steps:**
+- Update chat handlers to use Vertex
+- Update standalone image/video generation to use Vertex
+- Full end-to-end testing with real Vertex credentials
+- Add Imagen 4 support for Pro Image generation
+
+**Tags:** #vertex-ai #integration #gemini-3 #imagen-4 #veo-3.1 #admin-ui
+**Est. Avg. Human Dev Time:** 3 hours
+
+## Entry 39 – Hell Week v2 Feature Implementation
+**Prompt:** "Hell Week feature, v2 changes: Create a reference file, design, research, plan, and execute on multiple enhancement requests including icon, Thor model toggle, provenance tracking, Card Details UI, and card-centric architecture."
+
+**Summary of actions:**
+
+1. **Created Feature Document** (`docs/hell_week_v2_feature.md`)
+   - Comprehensive design document with architecture diagrams
+   - Card state machine design (BLOB → SORTED → ILLUSTRATED → ANIMATED → COMMITTED)
+   - Thread pool architecture for parallel execution
+   - Quest-based task system design
+   - UI/UX mockups for Card Details view
+
+2. **Updated Hell Week Icon**
+   - Changed from `rocket` to `satellite-3` in Layout.tsx and Pipeline.tsx
+   - Better thematic fit for the "Hell Week" training concept
+
+3. **Implemented Model Provenance Schema** (`electron/vertexai.ts`)
+   - Added `ModelProvenance` interface tracking: commonName, provider, modelAuthor, modelName, timestamp, requestId
+   - Added `MODEL_AUTHORS` mapping for model attribution
+   - Added `createModelProvenance()` helper function
+
+4. **Implemented Thor Model Toggle** (`electron/pipeline.ts`)
+   - Added `PipelineSettings` interface with `thorModel` toggle
+   - Default set to `fast-llm` (Gemini 2.5 Flash) per user request
+   - Added `getPipelineSettings()` and `savePipelineSettings()` functions
+   - Updated Leo step to record provenance
+   - Updated Thor step to use configurable model and record provenance per card
+   - Provenance now saved to hypercore with each card
+
+5. **Added IPC Handlers** (`electron/pipeline.ts`, `electron/preload.ts`)
+   - `pipeline:get-settings` - Get current pipeline settings
+   - `pipeline:save-settings` - Save pipeline settings
+   - `pipeline:set-thor-model` - Toggle Thor model (fast-llm/smart-llm)
+
+6. **Updated Pipeline UI** (`src/pages/Pipeline.tsx`)
+   - Added Thor model toggle buttons (⚡ Fast / 🧠 Smart)
+   - Toggle disabled during active pipeline execution
+   - Made cards clickable with "Ready to Peruse" indicator
+   - Added hover effects and click-to-view functionality
+
+7. **Created Card Details Component** (`src/components/CardDetails.tsx`)
+   - Full RPG/Loot card aesthetic with holographic border effect
+   - Animated background particles
+   - Quality bar with rarity stars (Common → Legendary)
+   - Card image display (or "Awaiting Visual" spinner)
+   - Evolution state indicator (5-stage progress bar)
+   - Stats display with animated bars (Power, Wisdom, Speed, Magic)
+   - Skills list with Active/Passive type badges
+   - Lore/Flavor text section
+   - Lineage & Heritage section showing Leo and Thor provenance
+   - Truth Analysis section (Facts and Desires)
+   - Pipeline status footer always visible
+
+**Files Created:**
+- `docs/hell_week_v2_feature.md` - Feature design document
+- `src/components/CardDetails.tsx` - Card details modal component
+
+**Files Modified:**
+- `electron/vertexai.ts` - Added ModelProvenance types and helpers
+- `electron/pipeline.ts` - Added settings, toggle, provenance tracking
+- `electron/preload.ts` - Added pipeline settings bindings
+- `src/components/Layout.tsx` - Changed Hell Week icon
+- `src/pages/Pipeline.tsx` - Added toggle UI, card click handling, modal
+
+**Remaining Work (documented in feature doc):**
+- ROCK 3: Card-Centric Architecture (Hypercore per card)
+- ROCK 5: Quest System
+- ROCK 6: Parallel Execution (3 Threads)
+- ROCK 7: Incremental Persistence
+- ROCK 8: Full Integration Testing
+
+**Tags:** #hell-week #pipeline #cards #provenance #ui #rpg-aesthetic
+**Est. Avg. Human Dev Time:** 4 hours
+
+## Entry 12 - Card Inspector Redesign + Hell Week Integration
+**Prompt:** "Redesign card inspector to combine with card peruser - display all Hell Week card data"
+
+**Summary of actions:**
+- Created detailed redesign plan document (docs/card_inspector_redesign_plan.md)
+- Added Hell Week card helper functions:
+  - isHellWeekCard() - detects if card has Hell Week data
+  - getHellWeekRarity() - returns rarity tier (Common -> Legendary)
+  - generateHellWeekStats() - generates pseudo-random stats from card name
+  - handleHellWeekVideoGenerate() - triggers video loop generation
+- Added lightbox state and video generation state
+- Enhanced Card Inspector header with:
+  - Holographic gradient glow for Hell Week cards
+  - Quality bar with rarity stars
+  - Lightbox zoom button
+- Added Hell Week-specific sections:
+  - Stats section with animated color-coded bars (Power, Wisdom, Speed, Magic)
+  - Evolution State with 5-stage progress indicator + Video Generation button
+  - Skills section with Passive/Active type badges
+  - Lore section with italicized flavor text
+  - Truth Analysis with Facts and Desires columns
+  - Provenance section showing Leo/Thor/Image model tracking
+- Added full-screen Lightbox modal for image enlargement
+- Preserved all existing Card Inspector functionality
+
+**Files Modified:**
+- src/pages/CardLibrary.tsx - Added ~350 lines of Hell Week card sections
+- docs/card_inspector_redesign_plan.md - Created design plan
+
+**Tags:** #hell-week #card-inspector #ui #rpg-aesthetic #lightbox
+**Est. Avg. Human Dev Time:** 3 hours
+
+## Entry 13 - Card Sets Feature + Pipeline UI Redesign
+**Prompt:** Multiple requests: Redesign Pipeline UI for Thor-to-Conviction transition, implement Card Sets grouping feature
+
+**Summary of actions:**
+
+### Pipeline UI Redesign
+- Added visual phase progress bar in header (LEO → THOR → MEDIA → MINT)
+- Updated THOR_MEDIA_PENDING with clearer "Card Forging Complete" banner and "Generate Card Artwork" button
+- Updated THOR_REVIEW with "Artwork Generation Complete" banner and "Mint Cards to Vault" button
+- Added skip options (pipelineSkipMedia, pipelineSkipFailed)
+- Fixed "View in Library" button navigation (was pointing to wrong route)
+- Added set name display on completion screen
+
+### Card Sets Feature (Full Implementation)
+**Design Document:** docs/card_sets_feature_design.md
+
+**Backend:**
+- Created CardSet and MergedSet TypeScript interfaces (src/types/cardSet.ts)
+- Added IPC handlers in main.ts:
+  - card-sets:list - Get all card sets
+  - card-sets:get - Get specific set by ID
+  - card-sets:create - Create new set
+  - card-sets:create-merged - Create merged set from multiple sets
+  - card-sets:get-card-ids - Resolve set to card IDs (handles merged sets recursively)
+- Added preload bindings for all card sets APIs
+
+**Pipeline Integration:**
+- Updated Leo prompt to generate suggested_set_name and suggested_set_description
+- Added set name fields to LeoContext interface
+- Conviction phase now creates CardSet record with all minted card IDs
+- Each card-index entry now includes setId reference
+- Pipeline state includes createdSetId and createdSetName
+- "View Set in Library" button navigates with ?setId= filter param
+
+**Card Library UI:**
+- Added useSearchParams for reading URL query params
+- Added state for cardSets, activeSetId, activeSetCardIds
+- Added useEffects to load card sets and handle URL params
+- Added set filter to filteredCards useMemo (includes child cards)
+- Added "Active Set Filter Indicator" bar showing current set with clear button
+- Added "Card Sets Selector" row showing recent sets as clickable chips
+
+**Files Created:**
+- docs/card_sets_feature_design.md - Comprehensive design document
+- src/types/cardSet.ts - TypeScript interfaces
+
+**Files Modified:**
+- electron/main.ts - Added Card Sets IPC handlers
+- electron/preload.ts - Added Card Sets API bindings
+- electron/pipeline.ts - Updated Leo prompt, Conviction phase, state
+- electron/cardManager.ts - Added set name fields to LeoContext
+- src/pages/Pipeline.tsx - Phase progress bar, clearer buttons, set info
+- src/pages/CardLibrary.tsx - Set filtering and UI
+
+**Tags:** #card-sets #pipeline-ui #filtering #grouping #hell-week
+**Est. Avg. Human Dev Time:** 5 hours
+
+## Entry 14 - Card Inspector Image Gen Fix + Loop Video Error Handling
+**Prompt:** Fix Card Inspector "Create Image" button (quota error) and fix loop video broadcast errors
+
+**Summary of actions:**
+
+### Card Inspector Image Generation Fix
+- **Issue:** Card Inspector was hitting Imagen 4 quota limits (429 errors)
+- **Root Cause:** `common-image` shorthand was changed to map to `imagen-4.0-generate-001` instead of `gemini-2.0-flash-exp`
+- **Fix:** Updated `MODEL_SHORTHAND_MAP` in `electron/vertexai.ts`:
+  - `common-image` → `gemini-2.0-flash-exp` (no quota limits)
+  - Added `gemini-image` alias for Gemini-based image generation
+- **Result:** Card Inspector uses Gemini Flash (fast, no quota), Hell Week uses Imagen 4 (high quality)
+
+### Loop Video Broadcast Error Fix
+- **Issue:** Console spam with "Render frame was disposed" errors when navigating away during video generation
+- **Root Cause:** `broadcastLoopProgress` trying to send to disposed window
+- **Fix:** Added safety checks to `broadcastLoopProgress` function:
+  - `!mainWin.isDestroyed()` check
+  - `!mainWin.webContents.isDestroyed()` check
+  - Try-catch wrapper for edge cases
+
+**Files Modified:**
+- electron/vertexai.ts - Fixed model mapping for common-image
+- electron/main.ts - Added safety checks to broadcastLoopProgress
+
+**Tags:** #bugfix #image-gen #loop-video #error-handling
+**Est. Avg. Human Dev Time:** 20 minutes
