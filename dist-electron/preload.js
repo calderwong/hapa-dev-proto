@@ -106,6 +106,8 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     pipelineGetFailedCount: () => electron_1.ipcRenderer.invoke('pipeline:get-failed-count'),
     // Recovery for orphaned cards
     pipelineRecoverCards: () => electron_1.ipcRenderer.invoke('pipeline:recover-cards'),
+    // Repair Hell Week card parents
+    repairHellWeekParents: () => electron_1.ipcRenderer.invoke('repair-hell-week-parents'),
     // Card Sets
     cardSetsCreate: (cardSet) => electron_1.ipcRenderer.invoke('card-sets:create', cardSet),
     cardSetsList: () => electron_1.ipcRenderer.invoke('card-sets:list'),
@@ -117,5 +119,10 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     saveVertexAISettings: (settings) => electron_1.ipcRenderer.invoke('save-vertex-ai-settings', settings),
     testVertexAIConnection: () => electron_1.ipcRenderer.invoke('test-vertex-ai-connection'),
     getVertexAIModels: () => electron_1.ipcRenderer.invoke('get-vertex-ai-models'),
+    // Persistence Layer (SQLite Projection Engine)
+    persistenceSearchCards: (query) => electron_1.ipcRenderer.invoke('persistence:search-cards', query),
+    persistenceGetRagContext: (query) => electron_1.ipcRenderer.invoke('persistence:get-rag-context', query),
+    persistenceGetNeighbors: (query) => electron_1.ipcRenderer.invoke('persistence:get-neighbors', query),
+    persistenceGetStats: () => electron_1.ipcRenderer.invoke('persistence:get-stats'),
 });
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? window.electronAPI : 'window not defined');

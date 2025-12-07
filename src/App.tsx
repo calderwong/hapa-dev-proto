@@ -22,6 +22,7 @@ import Wiki from './pages/Wiki';
 import Profile from './pages/Profile';
 import Pets from './pages/Pets';
 import Pipeline from './pages/Pipeline';
+import Mermaid from './pages/Mermaid';
 
 function App() {
   useEffect(() => {
@@ -63,6 +64,7 @@ function App() {
           <Route path="profile" element={<Profile />} />
           <Route path="pets" element={<Pets />} />
           <Route path="pipeline" element={<Pipeline />} />
+          <Route path="mermaid" element={<Mermaid />} />
         </Route>
       </Routes>
     </Router>

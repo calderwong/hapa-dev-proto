@@ -13,6 +13,7 @@ import {
   createModelProvenance,
   MODEL_SHORTHAND_MAP
 } from './vertexai';
+import { emitCardEvents } from './persistence';
 import { 
   cardManager, 
   HellWeekCard, 
@@ -856,21 +857,23 @@ class PipelineManager {
           this.updateState({ progress, hellWeekCards: [...this.state.hellWeekCards] });
       }
 
-      // 4. Create Card Set ID
-      const setId = `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // 4. Create Set Card ID and metadata
+      const setCardId = `set-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const setName = this.state.leoContext?.suggested_set_name || 
                       this.state.leoOutput?.suggested_set_name ||
                       `Set from ${path.basename(this.currentFilePath)}`;
       const setDescription = this.state.leoContext?.suggested_set_description ||
                              this.state.leoOutput?.suggested_set_description ||
                              `Cards generated from ${path.basename(this.currentFilePath)}`;
+      const nowIso = new Date().toISOString();
       
-      this.log(`Creating Card Set: "${setName}" (${setId})`);
+      this.log(`Creating Set Card: "${setName}" (${setCardId})`);
 
       // 5. Write card-index entries to card-library for Card Library display
       this.log('Indexing cards in Card Library...');
       const cardLibraryCoreName = 'card-library';
       const cardIds: string[] = [];
+      const containedCards: Array<{ cardId: string; cardName?: string; addedAt: string; addedBy: 'pipeline'; order: number }> = [];
       
       // Ensure card-library core exists
       try {
@@ -882,36 +885,143 @@ class PipelineManager {
         }
       }
       
+      // SetMembership reference for all cards in this set
+      const setMembership = {
+        setCardId: setCardId,
+        setName: setName,
+        joinedAt: nowIso,
+        addedBy: 'pipeline' as const,
+      };
+      
       for (let i = 0; i < totalCards; i++) {
         const card = this.state.cards[i];
         const hellWeekCard = this.state.hellWeekCards[i];
         const cardId = hellWeekCard?.cardId || `card-${Date.now()}-${i}`;
         cardIds.push(cardId);
         
+        // Build containedCards entry for the Set Card
+        containedCards.push({
+          cardId: cardId,
+          cardName: card.card_data.name,
+          addedAt: nowIso,
+          addedBy: 'pipeline',
+          order: i,
+        });
+        
+        // Create card-index entry with self-contained relationships
         const cardIndexEntry = {
           type: 'card-index',
           cardId: cardId,
+          cardType: 'standard',  // NEW: Card type
           name: card.card_data.name,
-          createdAt: new Date().toISOString(),
+          createdAt: nowIso,
           coreName: collectionName,
           coreKey: coreInfo.key,
           coreDiscoveryKey: coreInfo.discoveryKey,
           thumbnail: card.media_prompts?.generated_image_local,
           mediaKind: 'image',
           mediaLocalPath: card.media_prompts?.generated_image_local,
+          tier: card.card_data.tier || 1,
+          // Self-contained relationships (NEW)
+          memberOfSets: [setMembership],  // CRITICAL: Card knows its sets
+          parentCardId: setCardId,  // FIX: Set Card is the parent
+          // Hell Week card data (skills, lore, stats)
+          cardData: {
+            name: card.card_data.name,
+            lore: card.card_data.lore,
+            skills: card.card_data.skills || [],
+            stats: card.card_data.stats || {},
+            abilities: card.card_data.abilities || [],
+            flavor_text: card.card_data.flavor_text,
+            type: card.card_data.type,
+            element: card.card_data.element,
+            rarity: card.card_data.rarity,
+          },
+          // Media prompts for regeneration
+          mediaPrompts: {
+            base_image: card.media_prompts?.base_image,
+            generated_image_local: card.media_prompts?.generated_image_local,
+          },
           // Additional metadata
           runId: this.state.runId,
           sourceFile: path.basename(this.currentFilePath),
-          lore: card.card_data.lore?.substring(0, 200), // Preview
-          // Card Set reference
-          setId: setId,
+          lore: card.card_data.lore?.substring(0, 200),
+          // Legacy field (deprecated but kept for compatibility)
+          setId: setCardId,
         };
         
         await appendToCore(cardLibraryCoreName, JSON.stringify(cardIndexEntry));
       }
       this.log(`Added ${totalCards} cards to Card Library index.`);
       
-      // 6. Create the Card Set record
+      // Emit to persistence layer (batch for efficiency)
+      const persistenceEvents = this.state.cards.map(card => ({
+        type: 'CARD_CREATED' as const,
+        data: {
+          id: card.id,
+          type: 'standard',
+          mediaKind: 'image',
+          name: card.card_data.name,
+          tier: 1,
+          hellweekRunId: this.state.runId,
+          parentId: setCardId,
+          lore: card.card_data.lore,
+          createdAt: nowIso,
+        }
+      }));
+      emitCardEvents(persistenceEvents);
+      
+      // 6. Create the Set Card (as a card-index entry, not separate metadata)
+      // Set Cards are REAL cards that appear in the Card Library
+      const setCardThumbnail = this.state.cards[0]?.media_prompts?.generated_image_local || undefined;
+      
+      const setCardIndexEntry = {
+        type: 'card-index',
+        cardId: setCardId,
+        cardType: 'set',  // This is a Set Card
+        name: setName,
+        description: setDescription,
+        createdAt: nowIso,
+        coreName: collectionName,
+        coreKey: coreInfo.key,
+        coreDiscoveryKey: coreInfo.discoveryKey,
+        thumbnail: setCardThumbnail,
+        mediaKind: 'image',
+        mediaLocalPath: setCardThumbnail,
+        tier: 1,  // Set tier (can be calculated from contained cards)
+        // Self-contained relationships
+        memberOfSets: [],  // Sets can be in other sets
+        // Set-specific data
+        containedCards: containedCards,  // CRITICAL: Set knows its cards
+        containedCardCount: totalCards,
+        skills: [
+          { id: 'contain', name: 'Contain', type: 'passive', description: 'Holds and organizes cards. Contained cards gain +10% XP when used.', icon: '📦' },
+          { id: 'consume', name: 'Consume', type: 'active', description: 'Add a card to this set.', icon: '🔮' },
+        ],
+        // Source
+        runId: this.state.runId,
+        artifactName: path.basename(this.currentFilePath),
+        leoContext: this.state.leoOutput,
+      };
+      
+      await appendToCore(cardLibraryCoreName, JSON.stringify(setCardIndexEntry));
+      this.log(`Created Set Card: "${setName}" with ${totalCards} contained cards`);
+      
+      // Emit set card to persistence layer
+      emitCardEvents([{
+        type: 'CARD_CREATED',
+        data: {
+          id: setCardId,
+          type: 'set',
+          mediaKind: 'image',
+          name: setName,
+          tier: 1,
+          hellweekRunId: this.state.runId,
+          createdAt: nowIso,
+        }
+      }]);
+      
+      // 7. Also write to legacy card-sets core for backwards compatibility
       const cardSetsCoreName = 'card-sets';
       try {
         await createCore(cardSetsCoreName);
@@ -919,26 +1029,25 @@ class PipelineManager {
         // Core might already exist
       }
       
-      const cardSet = {
+      const legacyCardSet = {
         type: 'card-set',
-        setId: setId,
+        setId: setCardId,
         name: setName,
         description: setDescription,
         artifactName: path.basename(this.currentFilePath),
         runId: this.state.runId,
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso,
         leoContext: this.state.leoOutput,
         cardIds: cardIds,
         cardCount: totalCards,
         imageCount: this.state.cards.filter((c: any) => c.media_prompts?.generated_image_local).length,
-        videoCount: 0, // Videos generated separately
-        thumbnail: this.state.cards[0]?.media_prompts?.generated_image_local || undefined,
+        videoCount: 0,
+        thumbnail: setCardThumbnail,
       };
       
-      await appendToCore(cardSetsCoreName, JSON.stringify(cardSet));
-      this.log(`Created Card Set: "${setName}" with ${totalCards} cards`);
+      await appendToCore(cardSetsCoreName, JSON.stringify(legacyCardSet));
 
-      // 7. Finalize
+      // 8. Finalize
       const runStats = cardManager.getRunStats(this.state.runId);
       this.log(`All cards minted successfully. Stats: ${JSON.stringify(runStats)}`);
       this.updateState({ 
@@ -948,7 +1057,7 @@ class PipelineManager {
           collectionKey: coreInfo.key,
           hellWeekCards: [...this.state.hellWeekCards],
           // Card Set info for navigation
-          createdSetId: setId,
+          createdSetId: setCardId,
           createdSetName: setName,
       });
   }

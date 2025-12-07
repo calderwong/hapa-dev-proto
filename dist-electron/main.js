@@ -48,6 +48,7 @@ const generative_ai_1 = require("@google/generative-ai");
 const p2p_1 = require("./p2p");
 const pipeline_1 = require("./pipeline");
 const vertexai_1 = require("./vertexai");
+const persistence_1 = require("./persistence");
 const store = new electron_store_1.default();
 const GEMINI_REQUEST_LOG_KEY = 'geminiRequestLog';
 const GEMINI_REQUEST_LOG_MAX_ENTRIES = 200;
@@ -1803,16 +1804,20 @@ Create a vivid image prompt that visually represents this content:`;
                 }
             }
             else if ((0, vertexai_1.isVertexAIConfigured)()) {
-                // Vertex AI Image Generation
-                console.log('[ImageGen] Using Vertex AI for image generation');
+                // Vertex AI Image Generation using Imagen 4 (same as Hell Week pipeline)
+                console.log('[ImageGen] Using Vertex AI Imagen for image generation');
                 try {
                     const vertexClient = (0, vertexai_1.getVertexAIClient)();
-                    const result = await vertexClient.generateImageGemini(craftedPrompt, 'common-image');
+                    // Use generateImageImagen with 'pro-image' (Imagen 4) - same as Hell Week pipeline
+                    const result = await vertexClient.generateImageImagen(craftedPrompt, 'pro-image', {
+                        aspectRatio: '1:1',
+                        sampleCount: 1,
+                    });
                     imageBase64 = result.base64;
                     mimeType = result.mimeType;
                 }
                 catch (e) {
-                    console.error('[ImageGen] Vertex AI Image Generation failed:', e);
+                    console.error('[ImageGen] Vertex AI Imagen Generation failed:', e);
                     throw new Error(`Vertex AI image generation failed: ${e.message}`);
                 }
             }
@@ -1955,11 +1960,16 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 throw new Error('Failed to craft loop video prompt');
             }
             console.log('[LoopVideo] Crafted loop prompt:', loopPrompt.substring(0, 150));
-            // Broadcast progress to renderer
+            // Broadcast progress to renderer (safely handles disposed windows)
             const broadcastLoopProgress = (data) => {
-                const [mainWin] = electron_1.BrowserWindow.getAllWindows();
-                if (mainWin) {
-                    mainWin.webContents.send('loop-video-progress', data);
+                try {
+                    const [mainWin] = electron_1.BrowserWindow.getAllWindows();
+                    if (mainWin && !mainWin.isDestroyed() && mainWin.webContents && !mainWin.webContents.isDestroyed()) {
+                        mainWin.webContents.send('loop-video-progress', data);
+                    }
+                }
+                catch (e) {
+                    // Silently ignore - window may have been closed during video generation
                 }
             };
             broadcastLoopProgress({
@@ -2165,50 +2175,97 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             };
             await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
             console.log('[LoopVideo] Added video card to library index:', videoCardId);
+            // Emit to persistence layer
+            (0, persistence_1.emitCardEvent)('CARD_CREATED', {
+                id: videoCardId,
+                type: 'standard',
+                mediaKind: 'video',
+                name: videoCardRecord.name,
+                parentId: parentCardId,
+                createdAt: videoCardRecord.createdAt,
+            });
             // Update parent card to include this video in its children array
-            // Read current parent card data and append updated record
+            // For Hell Week cards, update the card-library index entry
+            // For regular cards, also update the card's hypercore
+            const childEntry = {
+                type: 'loop-video',
+                cardId: videoCardId,
+                videoPath: videoPath,
+                createdAt: new Date().toISOString(),
+            };
             try {
-                const parentRecords = await (0, p2p_1.readCore)(parentCardId);
-                let parentCardData = null;
-                // Find the latest card record from parent
-                for (let i = parentRecords.length - 1; i >= 0; i--) {
-                    const raw = parentRecords[i];
+                // CRITICAL: Update card-library index to add children array
+                // This works for ALL card types (Hell Week, regular, etc.)
+                const libraryRecords = await (0, p2p_1.readCore)(CARD_LIBRARY_CORE_NAME);
+                let parentIndexEntry = null;
+                // Find the parent card's index entry
+                for (let i = libraryRecords.length - 1; i >= 0; i--) {
+                    const raw = libraryRecords[i];
                     if (!raw || typeof raw !== 'string')
                         continue;
                     try {
                         const parsed = JSON.parse(raw);
-                        // Check for Hell Week card format (card-state with card property)
-                        if (parsed.type === 'card-state' && parsed.card) {
-                            parentCardData = parsed.card;
-                            break;
-                        }
-                        // Or regular card format
-                        if (parsed.cardId || parsed.type === 'card') {
-                            parentCardData = parsed;
+                        if (parsed.type === 'card-index' && parsed.cardId === parentCardId) {
+                            parentIndexEntry = parsed;
                             break;
                         }
                     }
                     catch { /* ignore */ }
                 }
-                if (parentCardData) {
-                    // Initialize children array if not exists
-                    if (!parentCardData.children) {
-                        parentCardData.children = [];
-                    }
-                    // Add the new video child reference
-                    parentCardData.children.push({
-                        type: 'loop-video',
-                        cardId: videoCardId,
-                        videoPath: videoPath,
-                        createdAt: new Date().toISOString(),
-                    });
-                    // Append updated record to parent's hypercore
-                    await (0, p2p_1.appendToCore)(parentCardId, JSON.stringify({
-                        type: 'card-state',
-                        card: parentCardData,
+                if (parentIndexEntry) {
+                    // Update the index entry with children
+                    const updatedEntry = {
+                        ...parentIndexEntry,
+                        cardRecord: {
+                            ...(parentIndexEntry.cardRecord || {}),
+                            children: [
+                                ...((parentIndexEntry.cardRecord?.children) || []),
+                                childEntry,
+                            ],
+                        },
                         updatedAt: new Date().toISOString(),
-                    }));
-                    console.log('[LoopVideo] Updated parent card children:', parentCardId);
+                    };
+                    // Append updated entry to card-library
+                    await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(updatedEntry));
+                    console.log('[LoopVideo] Updated card-library index with children:', parentCardId);
+                }
+                // Also try to update the card's own hypercore (for non-Hell Week cards)
+                try {
+                    const parentRecords = await (0, p2p_1.readCore)(parentCardId);
+                    let parentCardData = null;
+                    for (let i = parentRecords.length - 1; i >= 0; i--) {
+                        const raw = parentRecords[i];
+                        if (!raw || typeof raw !== 'string')
+                            continue;
+                        try {
+                            const parsed = JSON.parse(raw);
+                            if (parsed.type === 'card-state' && parsed.card) {
+                                parentCardData = parsed.card;
+                                break;
+                            }
+                            if (parsed.cardId || parsed.type === 'card') {
+                                parentCardData = parsed;
+                                break;
+                            }
+                        }
+                        catch { /* ignore */ }
+                    }
+                    if (parentCardData) {
+                        if (!parentCardData.children) {
+                            parentCardData.children = [];
+                        }
+                        parentCardData.children.push(childEntry);
+                        await (0, p2p_1.appendToCore)(parentCardId, JSON.stringify({
+                            type: 'card-state',
+                            card: parentCardData,
+                            updatedAt: new Date().toISOString(),
+                        }));
+                        console.log('[LoopVideo] Updated parent hypercore children:', parentCardId);
+                    }
+                }
+                catch (coreErr) {
+                    // This is fine - Hell Week cards may not have individual hypercores
+                    console.log('[LoopVideo] No individual hypercore for card (likely Hell Week):', parentCardId);
                 }
             }
             catch (parentErr) {
@@ -3354,6 +3411,13 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             coreDiscoveryKey: coreInfo?.discoveryKey,
         };
         await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+        // Emit to persistence layer
+        (0, persistence_1.emitCardEvent)('CARD_CREATED', {
+            id: cardCoreName,
+            type: 'standard',
+            mediaKind: mediaType,
+            createdAt,
+        });
         return {
             contentId,
             cardId: cardCoreName,
@@ -4563,12 +4627,85 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             return [];
         }
     });
+    // ============================================================================
+    // PERSISTENCE LAYER IPC HANDLERS
+    // ============================================================================
+    // Search cards with full-text and filters
+    electron_1.ipcMain.handle('persistence:search-cards', async (_event, query) => {
+        const adapter = (0, persistence_1.getPersistence)();
+        if (!adapter || !adapter.isReady()) {
+            console.warn('[Persistence] Not ready for search');
+            return [];
+        }
+        try {
+            return await adapter.searchCards(query);
+        }
+        catch (err) {
+            console.error('[Persistence] Search error:', err.message);
+            return [];
+        }
+    });
+    // Get RAG context for agents
+    electron_1.ipcMain.handle('persistence:get-rag-context', async (_event, query) => {
+        const adapter = (0, persistence_1.getPersistence)();
+        if (!adapter || !adapter.isReady()) {
+            return [];
+        }
+        try {
+            return await adapter.getRagContext(query);
+        }
+        catch (err) {
+            console.error('[Persistence] RAG error:', err.message);
+            return [];
+        }
+    });
+    // Get graph neighbors
+    electron_1.ipcMain.handle('persistence:get-neighbors', async (_event, query) => {
+        const adapter = (0, persistence_1.getPersistence)();
+        if (!adapter || !adapter.isReady()) {
+            return [];
+        }
+        try {
+            return await adapter.getGraphNeighbors(query);
+        }
+        catch (err) {
+            console.error('[Persistence] Graph error:', err.message);
+            return [];
+        }
+    });
+    // Get persistence stats
+    electron_1.ipcMain.handle('persistence:get-stats', async () => {
+        const adapter = (0, persistence_1.getPersistence)();
+        if (!adapter || !adapter.isReady()) {
+            return {
+                cardCount: 0,
+                wikiNodeCount: 0,
+                wikiEdgeCount: 0,
+                embeddingCount: 0,
+                dbSizeBytes: 0,
+                projectionVersion: 0,
+                lastUpdated: new Date().toISOString(),
+            };
+        }
+        try {
+            return await adapter.getStats();
+        }
+        catch (err) {
+            console.error('[Persistence] Stats error:', err.message);
+            return null;
+        }
+    });
     // Profile & System Stats IPC
     electron_1.ipcMain.handle('get-profile', async () => {
-        return store.get('userProfile', { displayName: 'Anon Node', bio: '' });
+        const profile = store.get('userProfile', { displayName: 'Anon Node', bio: '' });
+        console.log('[Profile IPC] get-profile returning:', JSON.stringify(profile));
+        return profile;
     });
     electron_1.ipcMain.handle('save-profile', async (_event, profile) => {
+        console.log('[Profile IPC] save-profile called with:', JSON.stringify(profile));
         store.set('userProfile', profile);
+        const saved = store.get('userProfile');
+        console.log('[Profile IPC] After save, stored value:', JSON.stringify(saved));
         return true;
     });
     electron_1.ipcMain.handle('save-profile-image', async (_event, payload) => {
@@ -4597,16 +4734,16 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         const coreInfo = await (0, p2p_1.createCore)(cardId); // Create or load existing core
         const cardRecord = {
             type: 'card',
-            cardType: 'agent-profile', // Special type
+            cardType: 'operator-profile', // Special type
             kind: 'image',
             id: cardId,
             createdAt: now,
             updatedAt: now,
-            title: 'Agent Profile Picture',
+            title: 'Operator Profile Picture',
             mediaType: 'image',
             source: 'user-upload',
             provider: 'local',
-            tags: ['agent-profile'],
+            tags: ['operator-profile'],
             image: {
                 localPath: targetPath,
                 mimeType,
@@ -4631,9 +4768,17 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 coreName: cardId,
                 coreKey: coreInfo.key,
                 coreDiscoveryKey: coreInfo.discoveryKey,
-                tags: ['agent-profile'],
+                tags: ['operator-profile'],
             };
             await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+            // Emit to persistence layer
+            (0, persistence_1.emitCardEvent)('CARD_CREATED', {
+                id: cardId,
+                type: 'operator-profile',
+                mediaKind: 'image',
+                name: 'Operator Profile Picture',
+                createdAt: now,
+            });
         }
         // 6. Update Profile
         const imageUrl = `file://${targetPath.replace(/\\/g, '/')}`;
@@ -4696,8 +4841,91 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             p2pPublicKey: p2pStats.publicKey,
         };
     });
+    // Repair/Migration: Fix Hell Week cards to have Set Card as parent
+    electron_1.ipcMain.handle('repair-hell-week-parents', async () => {
+        console.log('[Repair] Starting Hell Week parent repair...');
+        const repaired = [];
+        const errors = [];
+        try {
+            // Read all cards from card-library
+            const libraryRecords = await (0, p2p_1.readCore)(CARD_LIBRARY_CORE_NAME);
+            // Build a map of setId -> setCardId from cards that have both
+            const setIdToSetCardId = new Map();
+            const cardsBySetId = new Map();
+            // First pass: find Set Cards and build mapping
+            for (const raw of libraryRecords) {
+                if (!raw || typeof raw !== 'string')
+                    continue;
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed.type !== 'card-index')
+                        continue;
+                    // If this is a Set Card, map its ID
+                    if (parsed.cardType === 'set') {
+                        // Set Cards use their own cardId as the setId
+                        setIdToSetCardId.set(parsed.cardId, parsed.cardId);
+                    }
+                    // Collect cards by setId for legacy mapping
+                    if (parsed.setId) {
+                        if (!cardsBySetId.has(parsed.setId)) {
+                            cardsBySetId.set(parsed.setId, []);
+                        }
+                        cardsBySetId.get(parsed.setId).push(parsed);
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            // Second pass: fix cards that have setId but no parentCardId
+            for (const raw of libraryRecords) {
+                if (!raw || typeof raw !== 'string')
+                    continue;
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed.type !== 'card-index')
+                        continue;
+                    if (parsed.cardType === 'set')
+                        continue; // Skip Set Cards
+                    // Check if card needs repair
+                    const needsParent = parsed.setId && !parsed.parentCardId;
+                    const needsMemberOfSets = parsed.setId && (!parsed.memberOfSets || parsed.memberOfSets.length === 0);
+                    if (needsParent || needsMemberOfSets) {
+                        const setCardId = parsed.setId; // For Hell Week, setId IS the Set Card ID
+                        // Create repaired entry
+                        const repairedEntry = {
+                            ...parsed,
+                            cardType: parsed.cardType || 'standard',
+                            parentCardId: setCardId,
+                            memberOfSets: parsed.memberOfSets || [{
+                                    setCardId: setCardId,
+                                    joinedAt: parsed.createdAt || new Date().toISOString(),
+                                    addedBy: 'repair',
+                                }],
+                            updatedAt: new Date().toISOString(),
+                        };
+                        // Append repaired entry
+                        await (0, p2p_1.appendToCore)(CARD_LIBRARY_CORE_NAME, JSON.stringify(repairedEntry));
+                        repaired.push(parsed.cardId);
+                        console.log('[Repair] Fixed card:', parsed.cardId, '-> parent:', setCardId);
+                    }
+                }
+                catch (err) {
+                    errors.push(`${raw.substring(0, 50)}: ${err.message}`);
+                }
+            }
+            console.log('[Repair] Completed. Repaired:', repaired.length, 'Errors:', errors.length);
+            return { repaired: repaired.length, errors, repairedIds: repaired };
+        }
+        catch (err) {
+            console.error('[Repair] Failed:', err);
+            return { repaired: 0, errors: [err.message], repairedIds: [] };
+        }
+    });
     // Initialize P2P and optionally auto-start local llama.cpp server, then open the window
     (0, p2p_1.initP2P)();
+    // Initialize persistence layer (SQLite projection engine)
+    (0, persistence_1.initPersistence)().catch(err => {
+        console.error('[Persistence] Init error:', err);
+    });
     try {
         const llamaSettings = getLlamaSettingsInternal();
         if (llamaSettings.autoStart) {

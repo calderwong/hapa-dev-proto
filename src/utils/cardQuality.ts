@@ -3,7 +3,7 @@
  * Inspired by: Diablo loot, Path of Exile, Borderlands, Destiny
  */
 
-export type CardType = 'image' | 'video' | 'audio' | 'text' | 'extracted' | 'sprite' | 'pet';
+export type CardType = 'image' | 'video' | 'audio' | 'text' | 'extracted' | 'sprite' | 'pet' | 'set';
 export type CardQualityTier = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
 
 export interface CardQualityResult {
@@ -19,6 +19,7 @@ export interface CardQualityResult {
 
 export interface CardForQuality {
   name?: string;
+  cardType?: 'standard' | 'set' | 'merged-set';  // NEW: Card schema type
   mediaKind?: 'image' | 'video' | 'audio' | 'pet';
   subType?: string;
   derivedGif?: any;
@@ -172,6 +173,9 @@ export function calculateCardQuality(card: CardForQuality): CardQualityResult {
  * Get the card type based on media and subType
  */
 export function getCardType(card: CardForQuality): CardType {
+  // Check for Set Cards first
+  if (card.cardType === 'set' || card.cardType === 'merged-set') return 'set';
+  
   if (card.subType === 'sprite-sheet') return 'sprite';
   if (card.subType === 'first-frame' || card.subType === 'last-frame' || card.subType === 'audio-extract') {
     return 'extracted';
@@ -217,6 +221,7 @@ export function getAllTiers(): { value: CardQualityTier; label: string; color: s
  */
 export function getAllCardTypes(): { value: CardType; label: string; icon: string }[] {
   return [
+    { value: 'set', label: 'Set', icon: 'folder' },
     { value: 'image', label: 'Image', icon: 'image' },
     { value: 'video', label: 'Video', icon: 'videocam' },
     { value: 'audio', label: 'Audio', icon: 'audiotrack' },

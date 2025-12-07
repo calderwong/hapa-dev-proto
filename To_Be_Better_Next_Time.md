@@ -58,3 +58,31 @@ User saves message → createMessageCard() → card-library core
 - Card display: `CardLibrary.tsx` (library view)
 - Types: `types.d.ts` (Attachment, Message interfaces)
 
+
+## Retrospective 2: Icon Validation Incident
+**Date:** 2025-12-06
+**Milestone:** Modern Mermaid Integration
+**Key Lesson:** Primary source validation vs. Assumption
+
+### What Happened
+- Needed an icon for the new "Diagrams" nav item.
+- Searched web, found "Astro UXDS extends Material Design".
+- Assumed any Material icon (`schema`, `account-tree`) would work.
+- They didn't render. Wasted turns fixing it.
+- Finally found `timeline` worked by trial/checking the official list.
+
+### The Root Cause
+- **Assumption:** "Extends Material Design" = "Includes ALL Material Design icons".
+- **Source Bias:** Trusted a web search summary over checking the actual component library documentation.
+- **Optimization Failure:** Tried to save time by skipping validation, ended up spending more time fixing errors.
+
+### The Fix
+- Established **Validation Protocol** (`docs/VALIDATION_PROTOCOL.md`).
+- Core rule: **Verify from primary source** (official docs/repo) before implementing.
+- Updated memory to specifically check the Astro UXDS Icon Library.
+
+### Improvement for Next Time
+- When using a component library (Astro, Lucide, etc.), **keep the official icon/component list open** in a browser tab.
+- **Never guess** an ID or prop name.
+- If a search result says "X supports Y", verify it by finding Y in X's documentation.
+

@@ -171,6 +171,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pipelineGetFailedCount: () => ipcRenderer.invoke('pipeline:get-failed-count'),
     // Recovery for orphaned cards
     pipelineRecoverCards: () => ipcRenderer.invoke('pipeline:recover-cards'),
+    // Repair Hell Week card parents
+    repairHellWeekParents: () => ipcRenderer.invoke('repair-hell-week-parents'),
     
     // Card Sets
     cardSetsCreate: (cardSet: any) => ipcRenderer.invoke('card-sets:create', cardSet),
@@ -184,6 +186,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveVertexAISettings: (settings: any) => ipcRenderer.invoke('save-vertex-ai-settings', settings),
     testVertexAIConnection: () => ipcRenderer.invoke('test-vertex-ai-connection'),
     getVertexAIModels: () => ipcRenderer.invoke('get-vertex-ai-models'),
+    
+    // Persistence Layer (SQLite Projection Engine)
+    persistenceSearchCards: (query: any) => ipcRenderer.invoke('persistence:search-cards', query),
+    persistenceGetRagContext: (query: any) => ipcRenderer.invoke('persistence:get-rag-context', query),
+    persistenceGetNeighbors: (query: any) => ipcRenderer.invoke('persistence:get-neighbors', query),
+    persistenceGetStats: () => ipcRenderer.invoke('persistence:get-stats'),
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

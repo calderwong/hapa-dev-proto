@@ -16,6 +16,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     { path: '/wormhole', label: 'Wormhole', icon: 'cloud-download' },
 
     { path: '/wiki', label: 'Wiki', icon: 'library-books' },
+    { path: '/mermaid', label: 'Diagrams', icon: 'timeline' },
     { path: '/archives', label: 'Archives', icon: 'archive' },
     { path: '/local-llama', label: 'Local Llama', icon: 'memory' },
     { path: '/local-vision', label: 'Local Vision', icon: 'visibility' },

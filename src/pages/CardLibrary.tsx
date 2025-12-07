@@ -19,6 +19,7 @@ import {
 
 interface CardIndexEntry {
     cardId: string;
+    cardType?: 'standard' | 'set' | 'merged-set';  // NEW: Card type
     name?: string; // Added Name field
     createdAt: string;
     threadId?: string;
@@ -35,6 +36,7 @@ interface CardIndexEntry {
     mediaRemoteUrl?: string;
     mediaMimeType?: string;
     subType?: string;
+    tier?: number;
     // Message card specific fields
     messageContent?: string;
     messageRole?: 'user' | 'model';
@@ -44,6 +46,13 @@ interface CardIndexEntry {
     cardRecord?: any;
     // Parent-child relationship
     parentCardId?: string;
+    // Self-contained relationships (NEW)
+    memberOfSets?: Array<{ setCardId: string; setName?: string; joinedAt: string; addedBy: string }>;
+    // Set Card specific (NEW)
+    containedCards?: Array<{ cardId: string; cardName?: string; addedAt: string; order?: number }>;
+    containedCardCount?: number;
+    skills?: Array<{ id: string; name: string; type: string; description: string; icon?: string }>;
+    description?: string;
 }
 
 const CARD_LIBRARY_CORE_NAME = 'card-library';
@@ -312,6 +321,24 @@ const CardLibrary: React.FC = () => {
                         mediaMimeType = cardRecord.audio.mimeType;
                     }
 
+                    // Merge cardRecord from index (Hell Week data) with hypercore data
+                    const mergedCardRecord = {
+                        ...(entry.cardRecord || {}),  // Hell Week data from index
+                        ...cardRecord,  // Additional data from hypercore
+                        // Preserve Hell Week specific fields if not in hypercore
+                        name: cardRecord.name || entry.cardRecord?.name,
+                        lore: cardRecord.lore || entry.cardRecord?.lore,
+                        skills: cardRecord.skills || entry.cardRecord?.skills,
+                        stats: cardRecord.stats || entry.cardRecord?.stats,
+                        abilities: cardRecord.abilities || entry.cardRecord?.abilities,
+                        flavor_text: cardRecord.flavor_text || entry.cardRecord?.flavor_text,
+                        type: cardRecord.type || entry.cardRecord?.type,
+                        element: cardRecord.element || entry.cardRecord?.element,
+                        rarity: cardRecord.rarity || entry.cardRecord?.rarity,
+                        mediaPrompts: cardRecord.mediaPrompts || entry.cardRecord?.mediaPrompts,
+                        truthAnalysis: cardRecord.truthAnalysis || entry.cardRecord?.truthAnalysis,
+                    };
+                    
                     return {
                         ...entry,
                         mediaKind,
@@ -324,7 +351,7 @@ const CardLibrary: React.FC = () => {
                         hasVideo,
                         subType: cardRecord.subType,
                         derivedGif: cardRecord.derivedGif,
-                        cardRecord,
+                        cardRecord: mergedCardRecord,
                     };
                 } catch {
                     return entry;
@@ -372,6 +399,7 @@ const CardLibrary: React.FC = () => {
 
                     const entry: CardIndexEntry = {
                         cardId,
+                        cardType: data.cardType,  // NEW: 'standard' | 'set' | 'merged-set'
                         name: typeof data.name === 'string' ? data.name : undefined,
                         createdAt: typeof data.createdAt === 'string' ? data.createdAt : '',
                         threadId: typeof data.threadId === 'string' ? data.threadId : undefined,
@@ -384,6 +412,20 @@ const CardLibrary: React.FC = () => {
                             typeof data.coreDiscoveryKey === 'string' ? data.coreDiscoveryKey : undefined,
                         thumbnail: typeof data.thumbnail === 'string' ? data.thumbnail : undefined,
                         mediaKind: data.mediaKind,
+                        tier: data.tier,
+                        // NEW: Self-contained relationships
+                        parentCardId: data.parentCardId,
+                        memberOfSets: data.memberOfSets,
+                        // NEW: Set Card specific
+                        containedCards: data.containedCards,
+                        containedCardCount: data.containedCardCount || data.containedCards?.length,
+                        skills: data.skills,
+                        description: data.description,
+                        // Hell Week card data
+                        cardRecord: data.cardData ? {
+                            ...data.cardData,
+                            mediaPrompts: data.mediaPrompts,
+                        } : undefined,
                         raw: data,
                     };
 
@@ -1276,7 +1318,8 @@ const CardLibrary: React.FC = () => {
     // Check if card has Hell Week data (from pipeline)
     const isHellWeekCard = (card: CardIndexEntry): boolean => {
         const rec = card.cardRecord || {};
-        return !!(rec.cardData || rec.truthAnalysis || rec.mediaPrompts || rec.state);
+        // Check for Hell Week fields (lore, skills, stats are at top level after merge)
+        return !!(rec.lore || rec.skills || rec.stats || rec.truthAnalysis || rec.mediaPrompts || rec.state);
     };
     
     // Get rarity based on card type (matches CardDetails.tsx)
@@ -1325,7 +1368,7 @@ const CardLibrary: React.FC = () => {
                 imageId: selected.cardId, // Use cardId as imageId for Hell Week cards
                 imagePath: imagePath,
                 imageNumber: 1,
-                cardName: rec.cardData?.name || selected.name,
+                cardName: rec.name || selected.name,
             });
             setHwVideoGenStatus('complete');
             setTimeout(() => setHwVideoGenStatus('idle'), 5000);
@@ -2210,12 +2253,24 @@ const CardLibrary: React.FC = () => {
                             if (!window.electronAPI?.pipelineRecoverCards) return;
                             try {
                                 setLoading(true);
+                                // Run orphaned card recovery
                                 const result = await window.electronAPI.pipelineRecoverCards();
                                 console.log('[Recovery]', result);
-                                if (result.recovered > 0) {
+                                
+                                // Also run parent repair for Hell Week cards
+                                let repairResult = { repaired: 0, errors: [] };
+                                if (window.electronAPI?.repairHellWeekParents) {
+                                    repairResult = await window.electronAPI.repairHellWeekParents();
+                                    console.log('[Repair]', repairResult);
+                                }
+                                
+                                if (result.recovered > 0 || repairResult.repaired > 0) {
                                     await loadCards();
                                 }
-                                alert(`Recovered ${result.recovered} cards. ${result.errors?.length || 0} errors.`);
+                                
+                                // Show result message
+                                const msg = `Recovered ${result.recovered} cards. Fixed ${repairResult.repaired} parent relationships.`;
+                                console.log(msg);
                             } catch (err) {
                                 console.error('Recovery failed:', err);
                             } finally {
@@ -2226,7 +2281,7 @@ const CardLibrary: React.FC = () => {
                         icon="history"
                         secondary
                         size="small"
-                        title="Recover orphaned Hell Week cards"
+                        title="Recover orphaned cards and fix parent relationships"
                     >
                         Recover
                     </rux-button>
@@ -2466,15 +2521,47 @@ const CardLibrary: React.FC = () => {
                     <div className="card-grid pb-32">
                         {filteredCards.map((card) => {
                             const quality = calculateCardQuality(card);
+                            const isSetCard = card.cardType === 'set';
+                            const isMergedSet = card.cardType === 'merged-set';
+                            const containedCount = card.containedCardCount || card.containedCards?.length || 0;
+                            
+                            // Set Cards get special styling
+                            const setCardClasses = isSetCard 
+                                ? 'border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.3)] ring-1 ring-amber-400/30' 
+                                : isMergedSet 
+                                    ? 'border-violet-500/60 shadow-[0_0_20px_rgba(139,92,246,0.3)] ring-1 ring-violet-400/30'
+                                    : '';
+                            
                             return (
                             <div
                                 key={card.cardId + card.createdAt}
                                 draggable
                                 onDragStart={(e) => handleDragStart(e, card)}
                                 onClick={() => handleCardClick(card)}
-                                className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${quality.borderClass} ${quality.glowClass}`}
+                                className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${isSetCard || isMergedSet ? setCardClasses : `${quality.borderClass} ${quality.glowClass}`}`}
                             >
-                                {/* Tier Badge (Quality Bar) */}
+                                {/* Set Card Badge */}
+                                {isSetCard && (
+                                    <div 
+                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-amber-400/30 bg-gradient-to-r from-amber-900/80 via-amber-800/80 to-amber-900/80 text-amber-300"
+                                        data-tooltip={`Set Card • ${containedCount} cards`}
+                                        data-tooltip-pos="bottom"
+                                    >
+                                        <span>📦</span> SET CARD
+                                    </div>
+                                )}
+                                {/* Merged Set Badge */}
+                                {isMergedSet && (
+                                    <div 
+                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-violet-400/30 bg-gradient-to-r from-violet-900/80 via-violet-800/80 to-violet-900/80 text-violet-300"
+                                        data-tooltip="Merged Set"
+                                        data-tooltip-pos="bottom"
+                                    >
+                                        <span>🔮</span> MERGED SET
+                                    </div>
+                                )}
+                                {/* Standard Card Tier Badge (Quality Bar) */}
+                                {!isSetCard && !isMergedSet && (
                                 <div 
                                     className={`absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-white/10 ${quality.badgeClass}`} 
                                     data-tooltip={`${quality.tierLabel} • Score: ${quality.score}/13`}
@@ -2483,8 +2570,19 @@ const CardLibrary: React.FC = () => {
                                 >
                                     {quality.tierLabel}
                                 </div>
-                                {/* Child Count Badge */}
-                                {(card.cardRecord?.childCardIds?.length > 0) && (
+                                )}
+                                {/* Contained Cards Count (Set Cards) */}
+                                {isSetCard && containedCount > 0 && (
+                                    <div 
+                                        className="absolute top-7 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold"
+                                        data-tooltip={`Contains ${containedCount} card${containedCount > 1 ? 's' : ''}`}
+                                    >
+                                        <rux-icon icon="folder" size="extra-small"></rux-icon>
+                                        {containedCount}
+                                    </div>
+                                )}
+                                {/* Child Count Badge (Standard Cards) */}
+                                {!isSetCard && (card.cardRecord?.childCardIds?.length > 0) && (
                                     <div 
                                         className="absolute top-7 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-[9px] font-bold"
                                         data-tooltip={`${card.cardRecord.childCardIds.length} extracted card${card.cardRecord.childCardIds.length > 1 ? 's' : ''}`}
@@ -2601,7 +2699,7 @@ const CardLibrary: React.FC = () => {
                             {(() => {
                                 const rec = selected.cardRecord || {};
                                 const isHW = isHellWeekCard(selected);
-                                const rarity = isHW ? getHellWeekRarity(rec.cardData?.stats?.type) : null;
+                                const rarity = isHW ? getHellWeekRarity(rec.stats?.type) : null;
                                 
                                 return (
                                     <div className="relative border-b border-gray-800 bg-gray-900/50">
@@ -2731,7 +2829,7 @@ const CardLibrary: React.FC = () => {
                                             {/* Stats Section */}
                                             {(() => {
                                                 const rec = selected.cardRecord || {};
-                                                const stats = generateHellWeekStats(rec.cardData?.name || selected.name);
+                                                const stats = generateHellWeekStats(rec.name || selected.name);
                                                 return (
                                                     <>
                                                         <div className="h-px bg-gray-800"></div>
@@ -2835,7 +2933,7 @@ const CardLibrary: React.FC = () => {
                                             {/* Skills Section */}
                                             {(() => {
                                                 const rec = selected.cardRecord || {};
-                                                const skills = rec.cardData?.skills || [];
+                                                const skills = rec.skills || [];
                                                 if (skills.length === 0) return null;
                                                 
                                                 return (
@@ -2869,7 +2967,7 @@ const CardLibrary: React.FC = () => {
                                             {/* Lore Section */}
                                             {(() => {
                                                 const rec = selected.cardRecord || {};
-                                                const lore = rec.cardData?.lore;
+                                                const lore = rec.lore;
                                                 if (!lore) return null;
                                                 
                                                 return (
@@ -2882,6 +2980,98 @@ const CardLibrary: React.FC = () => {
                                                             </div>
                                                             <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 rounded-lg p-4 border border-gray-700/50">
                                                                 <p className="text-sm text-gray-300 leading-relaxed italic">"{lore}"</p>
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                );
+                                            })()}
+
+                                            {/* Flavor Text Section */}
+                                            {(() => {
+                                                const rec = selected.cardRecord || {};
+                                                const flavorText = rec.flavor_text;
+                                                if (!flavorText) return null;
+                                                
+                                                return (
+                                                    <>
+                                                        <div className="h-px bg-gray-800"></div>
+                                                        <div className="space-y-3">
+                                                            <div className="flex items-center gap-2 text-violet-400">
+                                                                <rux-icon icon="format-quote" size="small"></rux-icon>
+                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Flavor Text</h3>
+                                                            </div>
+                                                            <div className="bg-violet-900/10 rounded-lg p-4 border border-violet-500/20">
+                                                                <p className="text-sm text-gray-400 leading-relaxed italic font-light">"{flavorText}"</p>
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                );
+                                            })()}
+
+                                            {/* Card Classification (Type, Element, Rarity) */}
+                                            {(() => {
+                                                const rec = selected.cardRecord || {};
+                                                const type = rec.type;
+                                                const element = rec.element;
+                                                const rarity = rec.rarity;
+                                                if (!type && !element && !rarity) return null;
+                                                
+                                                return (
+                                                    <>
+                                                        <div className="h-px bg-gray-800"></div>
+                                                        <div className="space-y-3">
+                                                            <div className="flex items-center gap-2 text-teal-400">
+                                                                <rux-icon icon="label" size="small"></rux-icon>
+                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Classification</h3>
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {type && (
+                                                                    <span className="px-3 py-1.5 bg-gray-800/50 rounded-lg border border-gray-700/50 text-xs font-mono">
+                                                                        <span className="text-gray-500">Type: </span>
+                                                                        <span className="text-white">{type}</span>
+                                                                    </span>
+                                                                )}
+                                                                {element && (
+                                                                    <span className="px-3 py-1.5 bg-cyan-900/20 rounded-lg border border-cyan-500/30 text-xs font-mono">
+                                                                        <span className="text-cyan-500">Element: </span>
+                                                                        <span className="text-cyan-300">{element}</span>
+                                                                    </span>
+                                                                )}
+                                                                {rarity && (
+                                                                    <span className="px-3 py-1.5 bg-amber-900/20 rounded-lg border border-amber-500/30 text-xs font-mono">
+                                                                        <span className="text-amber-500">Rarity: </span>
+                                                                        <span className="text-amber-300">{rarity}</span>
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                );
+                                            })()}
+
+                                            {/* Abilities Section */}
+                                            {(() => {
+                                                const rec = selected.cardRecord || {};
+                                                const abilities = rec.abilities || [];
+                                                if (abilities.length === 0) return null;
+                                                
+                                                return (
+                                                    <>
+                                                        <div className="h-px bg-gray-800"></div>
+                                                        <div className="space-y-3">
+                                                            <div className="flex items-center gap-2 text-rose-400">
+                                                                <rux-icon icon="flash-on" size="small"></rux-icon>
+                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Abilities</h3>
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                {abilities.map((ability: any, i: number) => (
+                                                                    <div key={i} className="bg-rose-900/10 rounded-lg p-3 border border-rose-500/20">
+                                                                        <div className="text-sm font-bold text-rose-300 mb-1">{ability.name || ability}</div>
+                                                                        {ability.description && (
+                                                                            <p className="text-xs text-gray-400">{ability.description}</p>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
                                                             </div>
                                                         </div>
                                                     </>

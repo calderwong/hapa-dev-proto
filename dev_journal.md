@@ -1687,3 +1687,460 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 
 **Tags:** #bugfix #image-gen #loop-video #error-handling
 **Est. Avg. Human Dev Time:** 20 minutes
+
+## Entry 15 - Set Cards Architecture Planning
+**Prompt:** Upgrade Sets from loose abstraction to actual cards with media, skills, and self-contained data model
+
+**Summary of actions:**
+
+### Analysis of Current Architecture
+- **Problem:** Card-to-set relationships managed by centralized index
+- **Issue 1:** If card-sets-index is lost, set metadata is lost
+- **Issue 2:** Cards only store singular `setId` - can't belong to multiple sets
+- **Issue 3:** Sets are NOT cards - no media, XP, skills, can't display in library
+- **Rebuild-ability:** Requires both indexes intact (fragile)
+
+### Target Architecture: Self-Contained Model
+**Key Principle:** Each hypercore should know its full state for rebuild-ability
+
+**New Data Model:**
+- All cards get `memberOfSets[]` array (not singular setId)
+- Set Cards get `containedCards[]` array
+- Dual-write protocol: both sides updated when adding/removing
+
+**Set Card Type:**
+- `cardType: "set"` - distinguishes from standard cards
+- Has media (cover image), tier, XP, level like other cards
+- **Skills:**
+  - `Contain` (passive) - holds and organizes cards, +10% XP bonus
+  - `Consume` (active) - add card to set via drag or button
+
+### Rebuild Test
+If we lose all indexes but have individual hypercores:
+1. Read all card hypercores
+2. Cards with `cardType: "set"` → reconstruct sets
+3. Cards with `memberOfSets[]` → validate/repair memberships
+4. Full graph reconstructable from primitives
+
+**Planning Doc Created:** `docs/set_cards_architecture_plan.md`
+
+**Tags:** #architecture #card-sets #self-contained #rebuild-ability #planning
+**Est. Avg. Human Dev Time:** 1 hour (planning only)
+
+## Entry 16 - Set Cards Implementation (Phases 1-3)
+**Prompt:** Implement Set Cards as real cards with self-contained relationships
+
+**Summary of actions:**
+
+### Phase 1: Types & Interfaces (`src/types/cardSet.ts`)
+- Added `CardType`, `SkillType`, `MediaKind` enums
+- Created `SetMembership` (cards → sets) and `ContainedCard` (sets → cards)
+- Created `Skill` and `SkillEffect` interfaces with defaults for Contain/Consume
+- Created `BaseCard`, `StandardCard`, `SetCard`, `MergedSetCard` interfaces
+- Created `CardIndexEntry` with all new fields
+- Added factory functions: `createSetCard()`, `migrateCardSetToSetCard()`
+
+### Phase 2: Pipeline Update (`electron/pipeline.ts`)
+- Standard cards now include `cardType: 'standard'` and `memberOfSets[]`
+- Set Cards created as real card-index entries with:
+  - `cardType: 'set'`
+  - `containedCards[]` with all member references
+  - `skills[]` (Contain, Consume)
+  - `containedCardCount`
+- Dual-write: Both card-library (new) and card-sets (legacy)
+
+### Phase 3: Frontend Display (`src/pages/CardLibrary.tsx`, `src/utils/cardQuality.ts`)
+- Updated `CardIndexEntry` interface with new fields
+- Set Cards render with distinct amber glow and border
+- "📦 SET CARD" badge on quality bar
+- Contained cards count badge (folder icon)
+- Added 'set' to `CardType` for type filtering
+- Updated `getCardType()` to detect Set Cards
+
+**Files Modified:**
+- src/types/cardSet.ts - Complete rewrite with self-contained model
+- electron/pipeline.ts - Updated Conviction phase for Set Cards
+- src/pages/CardLibrary.tsx - Set Card visual rendering
+- src/utils/cardQuality.ts - Added 'set' card type
+- docs/set_cards_architecture_plan.md - Updated with progress
+
+**Tags:** #card-sets #self-contained #frontend #backend #implementation
+**Est. Avg. Human Dev Time:** 3 hours
+
+## Entry 17 - Card Inspector Bug Fixes
+**Prompt:** Fix 4 issues: Create Image fails, Create Loop Video fails, missing parent, missing Hell Week data
+
+**Summary of actions:**
+
+### Issue 1: "Create Image" Button Fails - FIXED
+**Root Cause:** Card Inspector was calling `generateImageGemini()` with Gemini Flash model, but Gemini Flash CANNOT generate images - it can only analyze them.
+**Fix:** Changed to `generateImageImagen()` with `pro-image` (Imagen 4) - same as Hell Week pipeline.
+
+### Issue 2: "Create Loop Video" Button - INVESTIGATING
+Frontend code looks correct. May need further investigation into path resolution.
+
+### Issue 3: Hell Week Cards Missing Parent - FIXED
+**Root Cause:** Pipeline didn't set `parentCardId` on standard cards.
+**Fix:** Added `parentCardId: setCardId` to card index entries in pipeline.
+
+### Issue 4: Hell Week Data Not Displayed - FIXED
+**Root Cause:** Two problems:
+1. Pipeline wasn't including `cardData` (skills, lore, stats) in card index
+2. Frontend wasn't extracting new fields from card index
+
+**Fixes:**
+1. Pipeline now includes full `cardData` and `mediaPrompts`
+2. Frontend `loadCards()` extracts all new fields (cardType, parentCardId, etc.)
+3. Frontend `enrichWithCardRecords()` merges index data with hypercore data
+
+**Files Modified:**
+- electron/main.ts - Use Imagen 4 for image generation
+- electron/pipeline.ts - Add parentCardId, cardData, mediaPrompts to card index
+- src/pages/CardLibrary.tsx - Extract and merge new fields
+
+**Planning Doc:** `docs/card_inspector_fixes.md`
+
+**Tags:** #bugfix #card-inspector #image-generation #hell-week
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 18 - Loop Video Storage Fix & Retroactive Parent Repair
+**Prompt:** Fix hero image not showing video behind it; fix "No Parent" for Hell Week cards retroactively
+
+**Summary of actions:**
+
+### Issue 1: Loop Video Not Showing Behind Hero Image - FIXED
+**Root Cause:** Loop video children were written to a hypercore named after the card's ID, but Hell Week cards are read from the `card-library` index, not individual hypercores.
+
+**Fix:** Updated `create-loop-video-for-image` handler to write children to the `card-library` index entry in addition to the individual hypercore. This ensures Hell Week cards (which don't have individual hypercores) properly display their loop videos.
+
+### Issue 2: Retroactive Parent Fix - ADDED
+**Feature:** Added `repair-hell-week-parents` IPC handler that:
+1. Scans all cards in card-library
+2. Finds cards with `setId` but no `parentCardId`
+3. Sets `parentCardId = setId` and adds `memberOfSets[]`
+4. Appends corrected entries to card-library
+
+**Usage:** Click "Recover" button in Card Library (now runs both orphan recovery AND parent repair).
+
+**Files Modified:**
+- electron/main.ts - Loop video writes to card-library index; Added repair IPC handler
+- electron/preload.ts - Exposed `repairHellWeekParents`
+- src/pages/CardLibrary.tsx - Recover button now runs repair
+
+**Tags:** #bugfix #loop-video #hell-week #parent-repair #retroactive
+**Est. Avg. Human Dev Time:** 1 hour
+
+## Entry 19 - System Reference Document
+**Prompt:** Create comprehensive snapshot of implemented requirements, system design, and priority assessment
+
+**Summary of actions:**
+Created `docs/HAPA_AG_SYSTEM_REFERENCE.md` - a comprehensive reference document containing:
+
+### Section 1: Executive Summary
+- What is Hapa AG, core value proposition, tech stack overview
+
+### Section 2: Implemented Features (12 major areas)
+- Multi-provider Chat, Image Gen (Imagen), Video Gen (Veo)
+- Card Library, Hell Week Pipeline, Wormhole Processing
+- Video Extraction, Loop Video Creation, Pet System
+- Profile & Identity, Local AI, P2P Hypercore
+
+### Section 3: System Architecture
+- Process model (Main vs Renderer)
+- Data flow diagrams
+- IPC communication patterns
+
+### Section 4: Data Models & Storage
+- CardIndexEntry interface
+- Set Membership, Skills, Storage locations
+
+### Section 5: Key Components Deep Dive
+- Hell Week Pipeline state machine
+- Vertex AI Client
+- Card Quality System
+
+### Section 6: Current State Assessment
+- What's working well (stable features)
+- Recent fixes (Dec 6, 2025)
+- Known issues / tech debt
+
+### Section 7: Priority Roadmap
+- P0: Stability, Data Integrity, Offline, Performance
+- P1: Evolution, Skills, Search, Export
+- P2: 3D Vault, P2P Trading, Crafting
+- P3: Mobile, Plugins, Theming
+
+### Section 8: Quick Reference
+- Key files, IPC channels, dev commands, hypercores
+
+**Files Created:**
+- `docs/HAPA_AG_SYSTEM_REFERENCE.md`
+
+**Tags:** #documentation #reference #architecture #onboarding
+**Est. Avg. Human Dev Time:** 2 hours
+
+## Entry 20 - Card Inspector Hell Week Data Fix
+**Prompt:** Missing Lore data in card inspector for Hell Week cards
+
+**Summary of actions:**
+
+### Root Cause Analysis
+The Card Inspector was looking for Hell Week fields at wrong paths:
+- **Expected:** `rec.cardData?.lore`, `rec.cardData?.skills`, etc.
+- **Actual:** Data is at `rec.lore`, `rec.skills`, etc. (not nested)
+
+This happened because:
+1. Pipeline stores: `cardData: { lore, skills, stats, ... }`
+2. loadCards extracts: `cardRecord = data.cardData` (unwraps the nesting)
+3. Merge logic preserves flat structure
+4. Display code was looking for nested `.cardData?.X` ❌
+
+### Fixes Applied
+
+**1. Fixed incorrect path references (6 locations):**
+- `rec.cardData?.lore` → `rec.lore`
+- `rec.cardData?.skills` → `rec.skills`
+- `rec.cardData?.stats?.type` → `rec.stats?.type`
+- `rec.cardData?.name` → `rec.name`
+- `isHellWeekCard()` check updated
+
+**2. Enhanced merge logic to include all Hell Week fields:**
+- `name`, `lore`, `skills`, `stats`, `abilities`
+- `flavor_text`, `type`, `element`, `rarity`
+- `mediaPrompts`, `truthAnalysis`
+
+**3. Added new display sections:**
+- **Flavor Text** - Italic quote with violet accent
+- **Classification** - Type, Element, Rarity badges
+- **Abilities** - List with rose accent
+
+**Files Modified:**
+- `src/pages/CardLibrary.tsx`
+  - Fixed 6 path references from `rec.cardData?.X` to `rec.X`
+  - Enhanced merge logic with additional fields
+  - Added Flavor Text, Classification, Abilities sections
+
+**Tags:** #bugfix #card-inspector #hell-week #lore #display
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 21 - Persistence Layer Foundation (SQLite Projection Engine)
+**Prompt:** Review memory-notes-12-6-2025.md and implement the proposed persistence layer
+
+**Summary of actions:**
+
+### Context
+The app uses Hypercore as source of truth, but needs a fast local query layer for:
+- Full-text search
+- Semantic/vector search (future)
+- Graph traversals (wiki relationships)
+- RAG context for agents
+
+### Solution: SQLite Projection Layer
+Implemented a rebuildable SQLite cache that mirrors Hypercore data.
+
+### Files Created
+
+**1. `src/persistence/types.ts`** - Shared types
+- Search/filter interfaces
+- Result types (CardSearchResult, RagChunk, GraphNeighbor)
+- Event types for projection pipeline
+- Card/Wiki payloads
+
+**2. `src/persistence/PersistenceAdapter.ts`** - Interface
+- Lifecycle: initialize, close, isReady
+- Events: applyEvent, applyEvents
+- Queries: searchCards, getRagContext, getGraphNeighbors
+- Maintenance: getProjectionVersion, clearAndRebuild, getStats
+
+**3. `electron/persistence-types.ts`** - Electron-side types copy
+
+**4. `electron/SqliteAdapter.ts`** - Full implementation
+- Schema: cards, card_fts (FTS5), wiki_nodes, wiki_edges, embeddings, projection_meta
+- Event handlers: CARD_CREATED, CARD_UPDATED, WIKI_NODE_CREATED, WIKI_EDGE_CREATED
+- Search: FTS with filters, filter-only queries
+- RAG: FTS-based context retrieval (vector search deferred)
+- Graph: BFS neighbor traversal
+- Maintenance: version checking, stats, rebuild support
+
+**5. `src/persistence/index.ts`** - Exports
+
+**6. `docs/PERSISTENCE_LAYER_IMPLEMENTATION_PLAN.md`** - Implementation plan
+
+### Architecture
+```
+Hypercore (source of truth)
+    │ append events
+    ▼
+ProjectionWorker
+    │ upserts
+    ▼
+SQLite DB (cards, FTS, wiki, embeddings)
+    │
+    ▼
+PersistenceAdapter interface
+    │
+┌───┴───┐
+UI      Agents
+```
+
+### Wiring (Steps 3 & 4 - COMPLETE)
+
+**In `electron/main.ts`:**
+- Added `SqliteAdapter` import
+- Added `persistenceAdapter` global instance
+- Added `initPersistence()` function - called after `initP2P()`
+- Added `emitCardEvent()` helper - fires projection events
+- Added `getPersistence()` accessor
+- Hooked `emitCardEvent` into:
+  - Wormhole card creation
+  - Loop video card creation
+- Added IPC handlers:
+  - `persistence:search-cards`
+  - `persistence:get-rag-context`
+  - `persistence:get-neighbors`
+  - `persistence:get-stats`
+
+**In `electron/preload.ts`:**
+- Added `persistenceSearchCards(query)`
+- Added `persistenceGetRagContext(query)`
+- Added `persistenceGetNeighbors(query)`
+- Added `persistenceGetStats()`
+
+### Usage from Renderer
+```typescript
+// Search cards with full-text
+const results = await window.electronAPI.persistenceSearchCards({
+  text: 'hypercore wormhole',
+  filters: { cardType: 'standard', minTier: 2 },
+  limit: 20,
+});
+
+// Get stats
+const stats = await window.electronAPI.persistenceGetStats();
+console.log('Cards indexed:', stats.cardCount);
+```
+
+**Tags:** #architecture #persistence #sqlite #search #rag #foundation
+**Est. Avg. Human Dev Time:** 2.5 hours
+
+## Entry 22 - Persistence Layer: Additional Event Hooks
+**Prompt:** Continue implementation of persistence layer
+
+**Summary of actions:**
+
+### Created Shared Persistence Module
+Created `electron/persistence.ts` as a singleton module that can be imported by any electron-side module (main.ts, pipeline.ts, etc.) without circular dependencies.
+
+**Exports:**
+- `initPersistence()` - Initialize once
+- `getPersistence()` - Get adapter instance
+- `isPersistenceReady()` - Check ready state
+- `emitCardEvent()` - Emit single card event
+- `emitCardEvents()` - Emit batch of events (efficient for pipelines)
+
+### Added Event Hooks
+
+**Hell Week Pipeline (`electron/pipeline.ts`):**
+- Batch emit all cards after Conviction phase
+- Emit set card after creation
+- Uses `emitCardEvents()` for efficiency
+
+**Agent Profile (`electron/main.ts`):**
+- Emit when profile image card is created
+
+### Files Modified
+- `electron/main.ts` - Use shared persistence module
+- `electron/pipeline.ts` - Add batch event emission
+- `electron/persistence.ts` - NEW: Shared singleton module
+- `docs/PERSISTENCE_LAYER_IMPLEMENTATION_PLAN.md` - Updated status
+
+### Current Hook Coverage
+| Source | Hooked |
+|--------|--------|
+| Wormhole cards | ✅ |
+| Loop videos | ✅ |
+| Hell Week cards | ✅ |
+| Hell Week sets | ✅ |
+| Agent profiles | ✅ |
+| Manual uploads | ⬜ |
+| Message saves | ⬜ |
+
+**Tags:** #persistence #sqlite #pipeline #hooks
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 23 - Modern Mermaid Integration
+**Prompt:** Integrate gotoailab/modern_mermaid as a new sub-app
+
+**Summary of actions:**
+
+### Review
+Analyzed Modern Mermaid repo - a Mermaid.js diagram editor with live preview, themes, and export. Compatible tech stack (React, TS, Vite, Tailwind).
+
+### Implementation
+Created `src/pages/Mermaid.tsx` with:
+- Split-pane editor (code left, preview right)
+- Live preview with 300ms debounce
+- 8 sample diagram templates (flowchart, sequence, class, state, ER, Gantt, mindmap, pie)
+- 5 Mermaid themes (default, dark, forest, neutral, base)
+- PNG export at 3x resolution
+- Copy to clipboard
+- Fullscreen mode
+- Syntax error display
+- Status bar with stats
+- Link to Mermaid docs
+
+### Routing
+- Added route `/mermaid` in `src/App.tsx`
+- Added nav item "Diagrams" with `schema` icon after "Wiki" in `src/components/Layout.tsx`
+
+### Dependencies Added
+```bash
+npm install mermaid html-to-image lucide-react
+```
+
+### Files Changed
+- `src/pages/Mermaid.tsx` - NEW
+- `src/App.tsx` - Added import and route
+- `src/components/Layout.tsx` - Added nav item
+- `docs/MODERN_MERMAID_INTEGRATION_PLAN.md` - NEW
+
+### Future Enhancements
+- Save diagrams to Hypercore
+- Create diagram cards
+- AI-assisted diagram generation
+- Wiki page diagram embeds
+
+**Tags:** #feature #mermaid #diagrams #integration
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 24 - Validation Protocol & Icon Fix
+**Prompt:** Fix missing Diagrams icon; establish validation protocol for future work
+
+**Summary of actions:**
+
+### The Problem
+Used web search to find Astro UXDS icons. Search results said "extends Material Design icons." Assumed `schema`, `account-tree`, `insights` would work. None did.
+
+### Root Cause
+Relied on secondary sources (web search) instead of primary source (Astro UXDS Icon Library page). Web search rankings are profit-optimized, not truth-optimized.
+
+### Resolution
+- Found `timeline` works by trial
+- Created `docs/VALIDATION_PROTOCOL.md` - permanent reference on source validation
+- Created memory entries for future sessions
+
+### Key Lesson
+The cost of NOT validating fully >> cost of taking time to verify. Multiple correction cycles waste more time than upfront validation from the primary source.
+
+### Validation Hierarchy Established
+1. Official documentation from creators (HIGH)
+2. Source code / repository (HIGH)
+3. Working examples in codebase (MEDIUM-HIGH)
+4. Web search / Stack Overflow (LOW - requires verification)
+
+### Files Changed
+- `src/components/Layout.tsx` - Fixed icon to `timeline`
+- `docs/VALIDATION_PROTOCOL.md` - NEW
+
+**Tags:** #protocol #validation #epistemology #partnership #lesson-learned
+**Est. Avg. Human Dev Time:** 0.5 hours

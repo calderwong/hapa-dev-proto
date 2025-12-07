@@ -10,6 +10,7 @@ const Profile: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const [imageLoading, setImageLoading] = useState(false);
+    const [hasChanges, setHasChanges] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -23,7 +24,10 @@ const Profile: React.FC = () => {
                 window.electronAPI.getProfile!(),
                 window.electronAPI.getSystemStats!()
             ]);
-            setProfile(p || { displayName: '', bio: '' });
+            console.log('[Profile] Loaded profile:', p);
+            const loadedProfile = p || { displayName: '', bio: '' };
+            setProfile(loadedProfile);
+            setHasChanges(false);
             setStats(s);
         } catch (err) {
             console.error('Failed to load profile data', err);
@@ -32,17 +36,36 @@ const Profile: React.FC = () => {
         }
     };
 
-    const handleSave = async () => {
+    // Simple direct save - pass profile explicitly to avoid closure issues
+    const handleSave = async (profileToSave?: UserProfile) => {
         if (!window.electronAPI) return;
+        const dataToSave = profileToSave || profile;
         setSaving(true);
         try {
-            await window.electronAPI.saveProfile!(profile);
-            // Optional: Show toast
+            console.log('[Profile] Saving profile:', dataToSave);
+            await window.electronAPI.saveProfile!(dataToSave);
+            console.log('[Profile] Profile saved successfully');
+            setHasChanges(false);
+            window.dispatchEvent(new Event('user-profile-update'));
         } catch (err) {
             console.error('Failed to save profile', err);
         } finally {
             setSaving(false);
         }
+    };
+    
+    // Update display name
+    const handleNameChange = (e: any) => {
+        const newProfile = { ...profile, displayName: e.target.value };
+        setProfile(newProfile);
+        setHasChanges(true);
+    };
+    
+    // Update bio
+    const handleBioChange = (e: any) => {
+        const newProfile = { ...profile, bio: e.target.value };
+        setProfile(newProfile);
+        setHasChanges(true);
     };
 
     const formatBytes = (bytes: number) => {
@@ -54,7 +77,7 @@ const Profile: React.FC = () => {
     };
 
     return (
-        <PageContainer title="Agent Profile" icon="account-circle">
+        <PageContainer title="Operator Profile" icon="account-circle">
             <div className="max-w-6xl mx-auto space-y-6">
 
                 {/* Header / Identity Section */}
@@ -155,14 +178,14 @@ const Profile: React.FC = () => {
                                     <div className="flex-grow space-y-4">
                                         <rux-input
                                             label="Display Name"
-                                            placeholder="Enter your agent name"
+                                            placeholder="Enter your operator name"
                                             value={profile.displayName}
-                                            onRuxinput={(e: any) => setProfile({ ...profile, displayName: e.target.value })}
+                                            onRuxinput={handleNameChange}
                                             className="w-full"
                                         ></rux-input>
 
                                         <div className="space-y-1">
-                                            <label className="text-sm text-gray-400 font-medium ml-1">Agent ID (Public Key)</label>
+                                            <label className="text-sm text-gray-400 font-medium ml-1">Operator ID (Public Key)</label>
                                             <div className="flex items-center gap-2 bg-gray-900/50 p-2 rounded border border-gray-700 font-mono text-xs text-emerald-400 break-all">
                                                 <rux-icon icon="vpn-key" size="extra-small"></rux-icon>
                                                 {stats?.p2pPublicKey || 'Loading key...'}
@@ -175,14 +198,17 @@ const Profile: React.FC = () => {
                                     label="Neural Persona (Context)"
                                     placeholder="Define who you are. This context may be used by AI agents to personalize responses."
                                     value={profile.bio || ''}
-                                    onRuxinput={(e: any) => setProfile({ ...profile, bio: e.target.value })}
+                                    onRuxinput={handleBioChange}
                                     rows={4}
                                     className="w-full"
                                 ></rux-textarea>
 
-                                <div className="flex justify-end">
-                                    <rux-button onClick={handleSave} disabled={saving}>
-                                        {saving ? 'Saving...' : 'Save Profile'}
+                                <div className="flex justify-end items-center gap-3">
+                                    {hasChanges && (
+                                        <span className="text-xs text-yellow-400">Unsaved changes</span>
+                                    )}
+                                    <rux-button onClick={() => handleSave()} disabled={saving}>
+                                        {saving ? 'Saving...' : hasChanges ? 'Save Profile' : 'Saved ✓'}
                                     </rux-button>
                                 </div>
                             </div>
