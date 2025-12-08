@@ -260,14 +260,11 @@ export class SqliteAdapter implements PersistenceAdapter {
       metadataJson
     );
 
-    // Upsert into FTS
+    // FTS tables don't support UPSERT - delete then insert
+    this.db.prepare(`DELETE FROM card_fts WHERE id = ?`).run(payload.id);
     this.db.prepare(`
       INSERT INTO card_fts (id, name, content, lore)
       VALUES (?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        content = excluded.content,
-        lore = excluded.lore
     `).run(
       payload.id,
       payload.name || '',

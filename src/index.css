@@ -502,3 +502,1040 @@ button:focus-visible {
 .mini-preview-active {
   box-shadow: 0 0 0 2px rgb(168, 85, 247);
 }
+
+/* ===== RPG Skill Card Animations ===== */
+
+/* Scanning Line Effect - horizontal sweep */
+@keyframes scan {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+}
+
+/* Skill Ready Pulse */
+@keyframes skill-ready {
+  0%, 100% {
+    box-shadow: 0 0 4px currentColor, 0 0 8px currentColor;
+    opacity: 0.7;
+  }
+  50% {
+    box-shadow: 0 0 8px currentColor, 0 0 16px currentColor;
+    opacity: 1;
+  }
+}
+
+.animate-skill-ready {
+  animation: skill-ready 2s ease-in-out infinite;
+}
+
+/* Power Bar Fill Animation */
+@keyframes power-fill {
+  0% {
+    width: 0%;
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Skill Card Hover Glow */
+@keyframes skill-glow {
+  0%, 100% {
+    filter: brightness(1) drop-shadow(0 0 2px currentColor);
+  }
+  50% {
+    filter: brightness(1.1) drop-shadow(0 0 8px currentColor);
+  }
+}
+
+.animate-skill-glow:hover {
+  animation: skill-glow 1.5s ease-in-out infinite;
+}
+
+/* Active Skill Burst Effect */
+@keyframes active-burst {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-active-burst {
+  animation: active-burst 0.3s ease-out forwards;
+}
+
+/* Passive Skill Aura */
+@keyframes passive-aura {
+  0%, 100% {
+    box-shadow: inset 0 0 10px rgba(16, 185, 129, 0.2), 0 0 15px rgba(16, 185, 129, 0.3);
+  }
+  50% {
+    box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.3), 0 0 25px rgba(16, 185, 129, 0.4);
+  }
+}
+
+.animate-passive-aura {
+  animation: passive-aura 3s ease-in-out infinite;
+}
+
+/* Energy Bar Shimmer */
+@keyframes energy-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.energy-bar-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  background-size: 200% 100%;
+  animation: energy-shimmer 2s linear infinite;
+}
+
+/* Scanline Background for Inspector */
+.scanline-bg {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 255, 255, 0.03) 2px,
+    rgba(0, 255, 255, 0.03) 4px
+  );
+}
+
+/* Holographic Corner Accent */
+.holo-corner::before,
+.holo-corner::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid transparent;
+  border-image: linear-gradient(135deg, rgba(0, 255, 255, 0.5), transparent) 1;
+}
+
+.holo-corner::before {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+}
+
+.holo-corner::after {
+  bottom: 0;
+  right: 0;
+  border-width: 0 2px 2px 0;
+}
+
+/* ===== Card Hand Animations ===== */
+
+/* Hand card hover lift */
+@keyframes card-lift {
+  0% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  }
+  100% {
+    transform: translateY(-10px) scale(1.05);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Hand expand animation */
+@keyframes hand-expand {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-hand-expand {
+  animation: hand-expand 0.3s ease-out forwards;
+}
+
+/* Card fan effect on hover */
+@keyframes card-fan {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(var(--fan-angle, 0deg));
+  }
+}
+
+/* Drag ghost trail */
+@keyframes drag-trail {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+/* Card drop bounce */
+@keyframes card-drop {
+  0% {
+    transform: scale(1.1);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(0.95);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-card-drop {
+  animation: card-drop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Lineage badge glow based on count */
+@keyframes lineage-pulse {
+  0%, 100% {
+    box-shadow: 0 0 4px currentColor;
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 12px currentColor;
+    filter: brightness(1.2);
+  }
+}
+
+.lineage-badge-active {
+  animation: lineage-pulse 2s ease-in-out infinite;
+}
+
+/* Card drag tilt effect (applied via JS transform) */
+.card-dragging {
+  cursor: grabbing !important;
+  z-index: 1000 !important;
+  transition: box-shadow 0.2s ease;
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(34, 211, 238, 0.2);
+}
+
+/* In-hand indicator pulse */
+@keyframes in-hand-pulse {
+  0%, 100% {
+    background-color: rgba(34, 211, 238, 0.3);
+    border-color: rgba(34, 211, 238, 0.5);
+  }
+  50% {
+    background-color: rgba(34, 211, 238, 0.5);
+    border-color: rgba(34, 211, 238, 0.8);
+  }
+}
+
+.in-hand-indicator {
+  animation: in-hand-pulse 2s ease-in-out infinite;
+}
+
+/* Hand card pulse for state indication */
+@keyframes hand-card-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px currentColor;
+  }
+  50% {
+    box-shadow: 0 0 16px currentColor, 0 0 24px currentColor;
+  }
+}
+
+.animate-hand-card-pulse {
+  animation: hand-card-pulse 1.5s ease-in-out infinite;
+}
+
+/* Hand card lift on hover */
+@keyframes hand-card-lift {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    transform: translateY(-8px) scale(1.1);
+  }
+}
+
+/* Soft glow effect for tactile feel */
+.hand-card-glow {
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.hand-card-glow:hover {
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 0 20px var(--glow-color, rgba(34, 211, 238, 0.3)),
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* ============================================
+   RARITY GLOW ANIMATIONS
+   ============================================ */
+
+/* Common - subtle gray shimmer */
+.rarity-common {
+  --rarity-color: rgba(156, 163, 175, 0.4);
+}
+
+/* Uncommon - green glow - only on hover */
+.rarity-uncommon:hover {
+  --rarity-color: rgba(34, 197, 94, 0.5);
+  animation: rarity-pulse-subtle 3s ease-in-out infinite;
+}
+
+/* Rare - blue pulse - only on hover */
+.rarity-rare:hover {
+  --rarity-color: rgba(59, 130, 246, 0.6);
+  animation: rarity-pulse 2.5s ease-in-out infinite;
+}
+
+/* Epic - purple intense pulse - only on hover */
+.rarity-epic:hover {
+  --rarity-color: rgba(168, 85, 247, 0.7);
+  animation: rarity-pulse 2s ease-in-out infinite;
+}
+
+/* Legendary - gold with shimmer - only on hover */
+.rarity-legendary:hover {
+  --rarity-color: rgba(251, 191, 36, 0.8);
+  animation: rarity-legendary 2s ease-in-out infinite;
+}
+
+/* Mythic - rainbow edge trace - only on hover (expensive!) */
+.rarity-mythic:hover {
+  --rarity-color: rgba(236, 72, 153, 0.9);
+  animation: rarity-mythic 3s linear infinite;
+}
+
+@keyframes rarity-pulse-subtle {
+  0%, 100% { box-shadow: 0 0 5px var(--rarity-color); }
+  50% { box-shadow: 0 0 10px var(--rarity-color); }
+}
+
+@keyframes rarity-pulse {
+  0%, 100% { 
+    box-shadow: 0 0 8px var(--rarity-color);
+    filter: brightness(1);
+  }
+  50% { 
+    box-shadow: 0 0 20px var(--rarity-color), 0 0 30px var(--rarity-color);
+    filter: brightness(1.05);
+  }
+}
+
+@keyframes rarity-legendary {
+  0%, 100% { 
+    box-shadow: 0 0 15px rgba(251, 191, 36, 0.6), 0 0 30px rgba(251, 191, 36, 0.3);
+    filter: brightness(1);
+  }
+  50% { 
+    box-shadow: 0 0 25px rgba(251, 191, 36, 0.8), 0 0 50px rgba(251, 191, 36, 0.4);
+    filter: brightness(1.1) saturate(1.2);
+  }
+}
+
+@keyframes rarity-mythic {
+  0% { 
+    box-shadow: 0 0 20px rgba(236, 72, 153, 0.8), 0 0 40px rgba(168, 85, 247, 0.4);
+    filter: hue-rotate(0deg);
+  }
+  33% {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.8), 0 0 40px rgba(59, 130, 246, 0.4);
+    filter: hue-rotate(30deg);
+  }
+  66% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.8), 0 0 40px rgba(34, 211, 238, 0.4);
+    filter: hue-rotate(60deg);
+  }
+  100% { 
+    box-shadow: 0 0 20px rgba(236, 72, 153, 0.8), 0 0 40px rgba(168, 85, 247, 0.4);
+    filter: hue-rotate(0deg);
+  }
+}
+
+/* ============================================
+   CARD DRAG EFFECTS
+   ============================================ */
+
+.card-dragging {
+  opacity: 0.8;
+  transform: rotate(-3deg) scale(1.05);
+  box-shadow: 
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(34, 211, 238, 0.4);
+  z-index: 1000;
+  cursor: grabbing !important;
+}
+
+/* Ghost trail during drag */
+.card-drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  opacity: 0.3;
+  transform: scale(0.9);
+  filter: blur(2px);
+  animation: ghost-fade 0.5s ease-out forwards;
+}
+
+@keyframes ghost-fade {
+  0% { opacity: 0.3; transform: scale(0.9); }
+  100% { opacity: 0; transform: scale(0.7); }
+}
+
+/* ============================================
+   CARD SELECTION RING
+   ============================================ */
+
+.card-selected {
+  animation: selected-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes selected-pulse {
+  0%, 100% {
+    box-shadow: 
+      0 0 0 2px rgba(34, 211, 238, 0.8),
+      0 0 20px rgba(34, 211, 238, 0.4);
+  }
+  50% {
+    box-shadow: 
+      0 0 0 4px rgba(34, 211, 238, 0.6),
+      0 0 30px rgba(34, 211, 238, 0.6);
+  }
+}
+
+/* ============================================
+   NEON TEXT EFFECTS
+   ============================================ */
+
+.neon-text-cyan {
+  color: #22d3ee;
+  text-shadow: 
+    0 0 5px rgba(34, 211, 238, 0.5),
+    0 0 10px rgba(34, 211, 238, 0.3);
+}
+
+.neon-text-gold {
+  color: #fbbf24;
+  text-shadow: 
+    0 0 5px rgba(251, 191, 36, 0.5),
+    0 0 10px rgba(251, 191, 36, 0.3);
+}
+
+.neon-text-purple {
+  color: #a855f7;
+  text-shadow: 
+    0 0 5px rgba(168, 85, 247, 0.5),
+    0 0 10px rgba(168, 85, 247, 0.3);
+}
+
+/* ============================================
+   HAND CARD STATE ANIMATIONS
+   ============================================ */
+
+.hand-card-state-thor {
+  --glow-color: rgba(239, 68, 68, 0.6);
+  animation: state-pulse-intense 0.8s ease-in-out infinite alternate;
+}
+
+.hand-card-state-leo {
+  --glow-color: rgba(96, 165, 250, 0.6);
+  animation: state-shimmer 2s ease-in-out infinite;
+}
+
+.hand-card-state-conviction {
+  --glow-color: rgba(52, 211, 153, 0.6);
+}
+
+.hand-card-state-run {
+  --glow-color: rgba(168, 85, 247, 0.6);
+  animation: state-pulse-intense 1s ease-in-out infinite alternate;
+}
+
+.hand-card-state-processing {
+  --glow-color: rgba(250, 204, 21, 0.6);
+  animation: state-scan 1.5s linear infinite;
+}
+
+@keyframes state-pulse-intense {
+  0% { 
+    box-shadow: 0 0 10px var(--glow-color);
+    border-color: var(--glow-color);
+  }
+  100% { 
+    box-shadow: 0 0 25px var(--glow-color), 0 0 40px var(--glow-color);
+    border-color: var(--glow-color);
+    filter: brightness(1.1);
+  }
+}
+
+@keyframes state-shimmer {
+  0%, 100% { 
+    filter: brightness(1) saturate(1);
+    box-shadow: 0 0 15px var(--glow-color);
+  }
+  50% { 
+    filter: brightness(1.1) saturate(1.2);
+    box-shadow: 0 0 20px var(--glow-color), 0 0 30px var(--glow-color);
+  }
+}
+
+@keyframes state-scan {
+  0% { 
+    background: linear-gradient(180deg, transparent 0%, var(--glow-color) 0%, transparent 0%);
+  }
+  100% { 
+    background: linear-gradient(180deg, transparent 100%, var(--glow-color) 100%, transparent 100%);
+  }
+}
+
+/* ============================================
+   CARD REVEAL ANIMATIONS
+   ============================================ */
+
+.card-reveal-flash {
+  animation: reveal-flash 0.3s ease-out;
+}
+
+@keyframes reveal-flash {
+  0% { 
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, transparent 70%);
+  }
+  100% { 
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+.card-reveal-bounce {
+  animation: reveal-bounce 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes reveal-bounce {
+  0% { 
+    opacity: 0;
+    transform: scale(0.3) rotate(10deg);
+  }
+  60% {
+    transform: scale(1.1) rotate(-3deg);
+  }
+  100% { 
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* ============================================
+   LOADING SKELETON FOR CARDS
+   ============================================ */
+
+.card-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(30, 41, 59, 0.5) 0%,
+    rgba(51, 65, 85, 0.5) 50%,
+    rgba(30, 41, 59, 0.5) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Staggered skeleton delays */
+.card-skeleton:nth-child(1) { animation-delay: 0ms; }
+.card-skeleton:nth-child(2) { animation-delay: 50ms; }
+.card-skeleton:nth-child(3) { animation-delay: 100ms; }
+.card-skeleton:nth-child(4) { animation-delay: 150ms; }
+.card-skeleton:nth-child(5) { animation-delay: 200ms; }
+.card-skeleton:nth-child(6) { animation-delay: 250ms; }
+.card-skeleton:nth-child(7) { animation-delay: 300ms; }
+.card-skeleton:nth-child(8) { animation-delay: 350ms; }
+.card-skeleton:nth-child(9) { animation-delay: 400ms; }
+.card-skeleton:nth-child(10) { animation-delay: 450ms; }
+.card-skeleton:nth-child(11) { animation-delay: 500ms; }
+.card-skeleton:nth-child(12) { animation-delay: 550ms; }
+
+/* ============================================
+   TOOLTIP ENHANCEMENTS
+   ============================================ */
+
+.tooltip-glow {
+  box-shadow: 
+    0 4px 20px rgba(0, 0, 0, 0.5),
+    0 0 10px rgba(34, 211, 238, 0.2);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+}
+
+/* ============================================
+   PROGRESSIVE REVEAL ANIMATIONS
+   One card at a time - different per rarity
+   ============================================ */
+
+/* Common (Tier 0) - Simple fade */
+.reveal-fade {
+  animation: reveal-fade-in 200ms ease-out forwards;
+}
+
+@keyframes reveal-fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Uncommon (Tier 1) - Slide up + fade */
+.reveal-slide-up {
+  animation: reveal-slide-up-anim 300ms ease-out forwards;
+}
+
+@keyframes reveal-slide-up-anim {
+  0% { 
+    opacity: 0; 
+    transform: translateY(20px);
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0);
+  }
+}
+
+/* Rare (Tier 2) - Scale pop with bounce */
+.reveal-scale-pop {
+  animation: reveal-scale-pop-anim 350ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes reveal-scale-pop-anim {
+  0% { 
+    opacity: 0; 
+    transform: scale(0.5);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% { 
+    opacity: 1; 
+    transform: scale(1);
+  }
+}
+
+/* Epic (Tier 3) - Glitch flicker */
+.reveal-glitch {
+  animation: reveal-glitch-anim 450ms ease-out forwards;
+}
+
+@keyframes reveal-glitch-anim {
+  0% { 
+    opacity: 0;
+    transform: scale(0.9) translateX(-5px);
+    filter: blur(4px) hue-rotate(90deg);
+  }
+  25% {
+    opacity: 0.7;
+    transform: scale(1.02) translateX(3px);
+    filter: blur(2px) hue-rotate(-30deg);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(0.98) translateX(-2px);
+    filter: blur(1px) hue-rotate(15deg);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1.01) translateX(1px);
+    filter: blur(0) hue-rotate(0deg);
+  }
+  100% { 
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: none;
+  }
+}
+
+/* Legendary (Tier 4) - Golden burst */
+.reveal-golden-burst {
+  animation: reveal-golden-burst-anim 550ms ease-out forwards;
+}
+
+@keyframes reveal-golden-burst-anim {
+  0% { 
+    opacity: 0;
+    transform: scale(0.3) rotate(-10deg);
+    box-shadow: 0 0 0 rgba(251, 191, 36, 0);
+    filter: brightness(2) saturate(0);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.15) rotate(3deg);
+    box-shadow: 0 0 60px rgba(251, 191, 36, 0.8), 0 0 100px rgba(251, 191, 36, 0.4);
+    filter: brightness(1.5) saturate(1.5);
+  }
+  70% {
+    transform: scale(0.95) rotate(-1deg);
+    box-shadow: 0 0 30px rgba(251, 191, 36, 0.5);
+    filter: brightness(1.1) saturate(1.1);
+  }
+  100% { 
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+    box-shadow: 0 0 15px rgba(251, 191, 36, 0.3);
+    filter: brightness(1) saturate(1);
+  }
+}
+
+/* Mythic (Tier 5) - Rainbow spiral */
+.reveal-rainbow-spiral {
+  animation: reveal-rainbow-spiral-anim 700ms ease-out forwards;
+}
+
+@keyframes reveal-rainbow-spiral-anim {
+  0% { 
+    opacity: 0;
+    transform: scale(0.1) rotate(-180deg);
+    filter: hue-rotate(0deg) brightness(3);
+    box-shadow: 
+      0 0 30px rgba(236, 72, 153, 0.8),
+      0 0 60px rgba(168, 85, 247, 0.6);
+  }
+  30% {
+    opacity: 0.8;
+    transform: scale(1.3) rotate(-60deg);
+    filter: hue-rotate(120deg) brightness(1.8);
+    box-shadow: 
+      0 0 50px rgba(59, 130, 246, 0.8),
+      0 0 80px rgba(34, 211, 238, 0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.9) rotate(15deg);
+    filter: hue-rotate(240deg) brightness(1.3);
+    box-shadow: 
+      0 0 40px rgba(34, 197, 94, 0.8),
+      0 0 70px rgba(251, 191, 36, 0.6);
+  }
+  80% {
+    transform: scale(1.05) rotate(-5deg);
+    filter: hue-rotate(300deg) brightness(1.1);
+  }
+  100% { 
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+    filter: hue-rotate(360deg) brightness(1);
+    box-shadow: 
+      0 0 20px rgba(168, 85, 247, 0.4),
+      0 0 40px rgba(236, 72, 153, 0.2);
+  }
+}
+
+/* State classes for progressive loading */
+.card-state-skeleton {
+  opacity: 0.5;
+}
+
+.card-state-fetching {
+  opacity: 0.7;
+  animation: skeleton-shimmer 1s ease-in-out infinite;
+}
+
+.card-state-revealing {
+  opacity: 1; /* Animation class will be added dynamically based on tier */
+}
+
+.card-state-ready {
+  opacity: 1;
+}
+
+/* ============================================
+   TACTILE DRAG EFFECTS
+   Make card dragging feel special and fun
+   ============================================ */
+
+/* Card being dragged - lift and tilt */
+.card-dragging-active {
+  opacity: 0.95 !important;
+  transform: rotate(-5deg) scale(1.1) !important;
+  box-shadow: 
+    0 25px 60px rgba(0, 0, 0, 0.5),
+    0 0 40px rgba(34, 211, 238, 0.4),
+    0 0 0 2px rgba(34, 211, 238, 0.6) !important;
+  z-index: 9999 !important;
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out !important;
+}
+
+/* Card pickup animation */
+@keyframes card-pickup {
+  0% { 
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    transform: scale(1.15) rotate(-3deg);
+  }
+  100% {
+    transform: scale(1.1) rotate(-5deg);
+  }
+}
+
+.card-pickup {
+  animation: card-pickup 0.2s ease-out forwards;
+}
+
+/* Card drop into hand - celebratory bounce */
+@keyframes card-drop-hand {
+  0% { 
+    transform: scale(0.3) rotate(15deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2) rotate(-5deg);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(0.9) rotate(2deg);
+  }
+  100% { 
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.card-drop-hand {
+  animation: card-drop-hand 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Flying card trail effect */
+@keyframes flying-card-trail {
+  0% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+
+.flying-card-clone {
+  pointer-events: none;
+  z-index: 10000;
+  box-shadow: 
+    0 15px 40px rgba(0, 0, 0, 0.4),
+    0 0 30px rgba(34, 211, 238, 0.5);
+  border: 2px solid rgba(34, 211, 238, 0.8);
+  border-radius: 8px;
+}
+
+/* Drag over target glow pulse */
+@keyframes drop-zone-pulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(34, 211, 238, 0.6), 0 0 60px rgba(34, 211, 238, 0.3);
+  }
+}
+
+.drop-zone-active {
+  animation: drop-zone-pulse 1s ease-in-out infinite;
+}
+
+/* Card shake on invalid drop */
+@keyframes card-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px) rotate(-1deg); }
+  40% { transform: translateX(4px) rotate(1deg); }
+  60% { transform: translateX(-3px) rotate(-0.5deg); }
+  80% { transform: translateX(3px) rotate(0.5deg); }
+}
+
+.card-shake {
+  animation: card-shake 0.4s ease-out;
+}
+
+/* Hand card magnetic attraction when dragging nearby */
+@keyframes hand-attract {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.05);
+  }
+}
+
+.hand-card-attract {
+  animation: hand-attract 0.8s ease-in-out infinite;
+}
+
+/* Card returning to library animation (invalid drop) */
+@keyframes card-return-to-library {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.8) rotate(5deg);
+    opacity: 0.6;
+    filter: blur(2px) brightness(1.5);
+  }
+  100% {
+    transform: scale(0) rotate(15deg) translateY(-20px);
+    opacity: 0;
+    filter: blur(8px) brightness(2);
+  }
+}
+
+.card-return-to-library {
+  animation: card-return-to-library 0.3s ease-out forwards;
+  pointer-events: none;
+}
+
+/* ============================================
+   GLOBAL BUTTON STYLING - NEON TERMINAL AESTHETIC
+   Force dark backgrounds with neon borders on ALL buttons
+   ============================================ */
+
+/* Reset all button elements to dark theme */
+button {
+  background-color: transparent;
+  border: none;
+}
+
+/* RUX-BUTTON Astro Component Overrides */
+rux-button {
+  --rux-button-background-color: rgba(17, 24, 39, 0.95) !important;
+  --rux-button-border-color: rgba(34, 211, 238, 0.5) !important;
+  --rux-button-text-color: rgb(34, 211, 238) !important;
+  --rux-button-hover-background-color: rgba(17, 24, 39, 1) !important;
+  --rux-button-hover-border-color: rgba(34, 211, 238, 0.8) !important;
+}
+
+rux-button::part(container) {
+  background: rgba(17, 24, 39, 0.95) !important;
+  border: 1px solid rgba(34, 211, 238, 0.5) !important;
+  color: rgb(34, 211, 238) !important;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.2);
+  transition: all 0.2s ease-out;
+}
+
+rux-button::part(container):hover {
+  background: rgba(17, 24, 39, 1) !important;
+  border-color: rgba(34, 211, 238, 0.8) !important;
+  box-shadow: 0 0 15px rgba(34, 211, 238, 0.4);
+}
+
+rux-button[secondary]::part(container) {
+  background: rgba(17, 24, 39, 0.8) !important;
+  border: 1px solid rgba(107, 114, 128, 0.5) !important;
+  color: rgb(156, 163, 175) !important;
+}
+
+rux-button[secondary]::part(container):hover {
+  border-color: rgba(34, 211, 238, 0.6) !important;
+  color: rgb(34, 211, 238) !important;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.25);
+}
+
+/* RUX-ICON standalone styling */
+rux-icon {
+  color: inherit;
+}
+
+/* RUX-DIALOG / RUX-MODAL close button */
+rux-dialog::part(close-button),
+rux-dialog::part(header-close) {
+  background: rgba(17, 24, 39, 0.95) !important;
+  border: 1px solid rgba(239, 68, 68, 0.5) !important;
+  color: rgb(239, 68, 68) !important;
+}
+
+rux-dialog::part(close-button):hover,
+rux-dialog::part(header-close):hover {
+  border-color: rgba(239, 68, 68, 0.8) !important;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.3) !important;
+}
+
+/* Generic neon button utility class */
+.neon-btn {
+  background: rgba(17, 24, 39, 0.95);
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  color: rgb(34, 211, 238);
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.75rem;
+  transition: all 0.2s ease-out;
+  cursor: pointer;
+}
+
+.neon-btn:hover {
+  border-color: rgba(34, 211, 238, 0.8);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.3);
+}
+
+.neon-btn-danger {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: rgb(239, 68, 68);
+}
+
+.neon-btn-danger:hover {
+  border-color: rgba(239, 68, 68, 0.8);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+}
+
+/* Anime.js Draggable styles */
+.anime-draggable {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.anime-dragging {
+  z-index: 10000 !important;
+  cursor: grabbing !important;
+}
+
+/* Hand card that uses Anime.js draggable */
+.hand-card-draggable {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

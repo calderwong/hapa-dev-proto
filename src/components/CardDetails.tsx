@@ -90,22 +90,38 @@ const CardDetails: React.FC<CardDetailsProps> = ({
 }) => {
   const [showLightbox, setShowLightbox] = React.useState(false);
   const [videoGenStatus, setVideoGenStatus] = React.useState<'idle' | 'generating' | 'complete' | 'error'>('idle');
+  const [generatedVideoPath, setGeneratedVideoPath] = React.useState<string | null>(null);
+  const [showReveal, setShowReveal] = React.useState(false);
   
   const rarity = getRarity(card.card_data.stats?.type || 'Concept');
   const hasImage = !!card.media_prompts?.generated_image_local;
   
   // Handle video generation for this card
   const handleGenerateVideo = async () => {
-    if (!hasImage || !window.electronAPI?.generateLoopVideo) return;
+    if (!hasImage || !window.electronAPI?.createLoopVideoForImage) return;
     
     setVideoGenStatus('generating');
     try {
-      await window.electronAPI.generateLoopVideo({
+      const result = await window.electronAPI.createLoopVideoForImage({
+        parentCardId: card.chunk_id,
+        imageId: `${card.chunk_id}_img_0`,
         imagePath: card.media_prompts.generated_image_local,
+        originalPrompt: card.media_prompts.base_image || card.media_prompts.video_loop || '',
         cardName: card.card_data.name,
-        prompt: card.media_prompts?.video_loop || `Subtle animation of ${card.card_data.name}`,
+        imageOrder: 0
       });
+      
       setVideoGenStatus('complete');
+      
+      if (result && result.videoPath) {
+        setGeneratedVideoPath(`file://${result.videoPath}`);
+        setShowReveal(true);
+        // Play reveal sound (placeholder)
+        // new Audio('path/to/reveal.mp3').play().catch(() => {});
+        
+        // Hide reveal after animation
+        setTimeout(() => setShowReveal(false), 3000);
+      }
     } catch (err) {
       console.error('Video generation failed:', err);
       setVideoGenStatus('error');
@@ -192,13 +208,45 @@ const CardDetails: React.FC<CardDetailsProps> = ({
                       alt={card.card_data.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
-                    {/* Hover overlay */}
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1 rounded-full text-xs text-white flex items-center gap-1">
-                        <rux-icon icon="zoom-in" size="extra-small"></rux-icon>
-                        Click to enlarge
+                    
+                    {/* Video Loop Overlay */}
+                    {generatedVideoPath && (
+                      <video 
+                        src={generatedVideoPath}
+                        className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10"
+                        muted 
+                        loop 
+                        playsInline
+                        onMouseEnter={(e) => e.currentTarget.play()}
+                        onMouseLeave={(e) => e.currentTarget.pause()}
+                      />
+                    )}
+
+                    {/* Hover overlay (hidden if video is playing/present to allow clear view) */}
+                    {!generatedVideoPath && (
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1 rounded-full text-xs text-white flex items-center gap-1">
+                          <rux-icon icon="zoom-in" size="extra-small"></rux-icon>
+                          Click to enlarge
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Gacha Reveal Animation */}
+                    {showReveal && (
+                      <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+                         {/* Flash Effect */}
+                         <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                         
+                         {/* Unlock Text */}
+                         <div className="relative text-center animate-bounce">
+                           <rux-icon icon="movie" size="large" className="text-emerald-400 mb-2 drop-shadow-[0_0_15px_rgba(52,211,153,0.8)]"></rux-icon>
+                           <h3 className="text-xl font-bold text-white uppercase tracking-widest drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">
+                             VIDEO UNLOCKED!
+                           </h3>
+                         </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center gap-4 p-4">

@@ -192,6 +192,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     persistenceGetRagContext: (query: any) => ipcRenderer.invoke('persistence:get-rag-context', query),
     persistenceGetNeighbors: (query: any) => ipcRenderer.invoke('persistence:get-neighbors', query),
     persistenceGetStats: () => ipcRenderer.invoke('persistence:get-stats'),
+    
+    // Thor's Hamma
+    processThorUrl: (url: string, handCards: any[]) => ipcRenderer.invoke('thor:process-url', { url, handCards }),
+    onThorUpdate: (callback: (data: { type: string; payload: any }) => void) => {
+        const listener = (_event: any, data: { type: string; payload: any }) => callback(data);
+        ipcRenderer.on('thor-update', listener);
+        return () => ipcRenderer.removeListener('thor-update', listener);
+    },
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

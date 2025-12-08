@@ -1,9 +1,14 @@
 // @ts-nocheck
-import React, { useEffect, useState, useMemo, lazy, Suspense } from 'react';
+import React, { useEffect, useState, useMemo, lazy, Suspense, useRef, useCallback } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 import CardWorkspace from '../components/CardWorkspace';
 import { HoverVideoThumbnail, getCardVideoPath, getCardImagePath } from '../components/HoverVideoThumbnail';
+import { animateCardPulse } from '../hooks/useAnime';
+import VirtualCardGrid from '../components/cards/VirtualCardGrid';
+
+// Feature flag for progressive loading (set to true to use new system)
+const USE_PROGRESSIVE_LOADING = true;
 
 // Lazy load 3D viewer for performance
 const Card3DViewer = lazy(() => import('../components/Card3DViewer/Card3DViewer').then(m => ({ default: m.Card3DViewer })));
@@ -16,6 +21,9 @@ import {
     type CardQualityTier,
     type CardType 
 } from '../utils/cardQuality';
+import { calculateAllLineage, type LineageInfo } from '../utils/cardLineage';
+import { LineageBadgePair } from '../components/cards/LineageBadge';
+import { useHand } from '../contexts/HandContext';
 
 interface CardIndexEntry {
     cardId: string;
@@ -64,10 +72,110 @@ interface ModelInfo {
 }
 
 const toFileUrl = (path?: string) => {
-    if (!path) return '';
+    if (!path) return path;
     if (path.startsWith('file://')) return path;
     const normalized = path.replace(/\\/g, '/');
     return `file:///${normalized}`;
+};
+
+// Card Content Component - renders the inside of a card (used by VirtualCardGrid)
+interface CardContentProps {
+    card: CardIndexEntry;
+    quality: ReturnType<typeof calculateCardQuality>;
+    isSetCard: boolean;
+    isMergedSet: boolean;
+    containedCount: number;
+    renderThumbnail: (card: CardIndexEntry, large?: boolean) => React.ReactNode;
+    lineageMap: Map<string, any>;
+}
+
+const CardContent: React.FC<CardContentProps> = ({ 
+    card, quality, isSetCard, isMergedSet, containedCount, renderThumbnail, lineageMap 
+}) => {
+    const lineage = lineageMap?.get(card.cardId);
+    const hasAncestor = lineage?.ancestors && lineage.ancestors.length > 0;
+    const hasDescendant = lineage?.descendants && lineage.descendants.length > 0;
+    
+    // Count affixes
+    const children = card.cardRecord?.children || card.raw?.children || [];
+    const hasLoopVideo = children.some((c: any) => c.type === 'loop-video');
+    const transcriptCount = children.filter((c: any) => c.type === 'transcript').length;
+    const summaryCount = children.filter((c: any) => c.type === 'summary').length;
+    const keyTermCount = children.filter((c: any) => c.type === 'key-terms').length;
+    const wikiCount = children.filter((c: any) => c.type === 'wiki-entry').length;
+
+    return (
+        <>
+            {/* Set Card Badge */}
+            {isSetCard && (
+                <div className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-amber-400/30 bg-gradient-to-r from-amber-900/80 via-amber-800/80 to-amber-900/80 text-amber-300">
+                    <span>📦</span> SET CARD
+                </div>
+            )}
+            {/* Merged Set Badge */}
+            {isMergedSet && (
+                <div className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-violet-400/30 bg-gradient-to-r from-violet-900/80 via-violet-800/80 to-violet-900/80 text-violet-300">
+                    <span>🔮</span> MERGED SET
+                </div>
+            )}
+            {/* Standard Tier Badge */}
+            {!isSetCard && !isMergedSet && (
+                <div className={`absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-white/10 ${quality.badgeClass}`}>
+                    {quality.tierLabel}
+                </div>
+            )}
+            
+            {/* Thumbnail */}
+            <div className="relative w-full aspect-[4/3] bg-black/40 overflow-hidden">
+                {renderThumbnail(card)}
+            </div>
+            
+            {/* Card Info Footer */}
+            <div className="p-2 flex flex-col gap-1 flex-1 bg-gradient-to-t from-black/60 to-transparent">
+                <div className="text-[10px] text-gray-300 font-medium line-clamp-2 leading-tight">
+                    {card.name || card.cardId?.substring(0, 12) + '...'}
+                </div>
+                <div className="flex items-center gap-1 flex-wrap mt-auto">
+                    {/* Lineage badges */}
+                    {(hasAncestor || hasDescendant) && (
+                        <LineageBadgePair 
+                            cardId={card.cardId}
+                            lineageMap={lineageMap}
+                            size="xs"
+                        />
+                    )}
+                    {/* Affix indicators */}
+                    {hasLoopVideo && (
+                        <div className="flex items-center gap-1 text-pink-400">
+                            <rux-icon icon="animation" size="extra-small"></rux-icon>
+                        </div>
+                    )}
+                    {transcriptCount > 0 && (
+                        <div className="flex items-center gap-1 text-yellow-400">
+                            <rux-icon icon="mic" size="extra-small"></rux-icon>
+                        </div>
+                    )}
+                    {summaryCount > 0 && (
+                        <div className="flex items-center gap-1 text-cyan-400">
+                            <rux-icon icon="subject" size="extra-small"></rux-icon>
+                        </div>
+                    )}
+                    {card.mediaKind && (
+                        <rux-icon 
+                            icon={
+                                card.mediaKind === 'video' ? 'videocam' : 
+                                card.mediaKind === 'audio' ? 'audiotrack' : 
+                                card.mediaKind === 'message' ? 'chat' : 
+                                card.mediaKind === 'pet' ? 'pets' : 'image'
+                            } 
+                            size="extra-small" 
+                            className={card.mediaKind === 'message' ? 'text-purple-500' : 'text-gray-600'}
+                        ></rux-icon>
+                    )}
+                </div>
+            </div>
+        </> 
+    );
 };
 
 const CardLibrary: React.FC = () => {
@@ -124,8 +232,19 @@ const CardLibrary: React.FC = () => {
     // Lightbox State (for full-screen image view)
     const [showLightbox, setShowLightbox] = useState(false);
     
+    // Grid ref (used for legacy rendering or measurements)
+    const cardGridRef = useRef<HTMLDivElement>(null);
+    
     // Video Generation State for Hell Week cards
     const [hwVideoGenStatus, setHwVideoGenStatus] = useState<'idle' | 'generating' | 'complete' | 'error'>('idle');
+    const [inspectorVideoPath, setInspectorVideoPath] = useState<string | null>(null);
+    const [inspectorShowReveal, setInspectorShowReveal] = useState(false);
+
+    // Reset inspector state when selected card changes
+    useEffect(() => {
+        setInspectorVideoPath(null);
+        setInspectorShowReveal(false);
+    }, [selected?.cardId]);
 
     // Check Local Vision status
     useEffect(() => {
@@ -598,7 +717,11 @@ const CardLibrary: React.FC = () => {
         fetchContent();
     }, [activeWorkspaceCard]);
 
-    const handleCardClick = (card: CardIndexEntry) => {
+    const handleCardClick = (card: CardIndexEntry, e?: React.MouseEvent<HTMLDivElement>) => {
+        // Pulse animation on click
+        if (e?.currentTarget) {
+            animateCardPulse(e.currentTarget as HTMLElement);
+        }
         setSelected(card);
         setEditingName(card.name || '');
         setIsEditingName(false);
@@ -756,8 +879,9 @@ const CardLibrary: React.FC = () => {
 
     const renderThumbnail = (card: CardIndexEntry, large = false) => {
         // Note: We removed pointer-events-none for thumbnails with videos so hover works
+        // Large mode uses h-full to fill the inspector container (aspect-[3/4])
         const baseClassName = large
-            ? "w-full h-64 object-cover rounded-lg border border-gray-700 bg-black/40 shadow-lg"
+            ? "w-full h-full object-cover"
             : "w-full h-40 object-cover rounded-t-lg bg-black/40 group-hover:opacity-90 transition-opacity";
         
         // Only add pointer-events-none for non-video thumbnails (to prevent drag interference)
@@ -787,10 +911,10 @@ const CardLibrary: React.FC = () => {
             // Large view - AUTO-PLAY looping video if child video exists
             if (videoSrc) {
                 return (
-                    <div className={`${className} relative`}>
+                    <div className="w-full h-full relative">
                         <video 
                             src={videoSrc} 
-                            className="w-full h-full object-cover"
+                            className="absolute inset-0 w-full h-full object-cover"
                             autoPlay
                             loop
                             muted={globalMuted}
@@ -798,15 +922,16 @@ const CardLibrary: React.FC = () => {
                             preload="metadata"
                         />
                         {/* LOOP badge */}
-                        <div className="absolute top-2 right-2 bg-purple-500 text-white text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1">
+                        <div className="absolute top-2 right-2 bg-purple-500 text-white text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 z-10">
                             <rux-icon icon="loop" size="extra-small"></rux-icon>
                             LOOP
                         </div>
                         {/* Mute toggle */}
                         <button
                             onClick={(e) => { e.stopPropagation(); setGlobalMuted(!globalMuted); }}
-                            className="absolute bottom-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full transition-colors"
+                            className="absolute bottom-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full transition-colors z-10"
                             title={globalMuted ? 'Unmute' : 'Mute'}
+                            aria-label={globalMuted ? 'Unmute' : 'Mute'}
                         >
                             <rux-icon 
                                 icon={globalMuted ? 'volume-off' : 'volume-up'} 
@@ -820,9 +945,9 @@ const CardLibrary: React.FC = () => {
             
             // No video yet - show image with hover effect for lightbox
             return (
-                <div className={`${className} relative cursor-pointer group/hwimg`} onClick={() => setShowLightbox(true)}>
-                    <img src={imageSrc} alt={card.name} className="w-full h-full object-cover" loading="lazy" />
-                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/hwimg:opacity-100 transition-opacity flex items-center justify-center">
+                <div className="w-full h-full relative cursor-pointer group/hwimg" onClick={() => setShowLightbox(true)}>
+                    <img src={imageSrc} alt={card.name} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/hwimg:opacity-100 transition-opacity flex items-center justify-center z-10">
                         <rux-icon icon="zoom-in" size="normal" className="text-white"></rux-icon>
                     </div>
                 </div>
@@ -854,10 +979,10 @@ const CardLibrary: React.FC = () => {
                 if (videoSrc) {
                     // Has loop video - auto-play it
                     return (
-                        <div className={`${className} relative`}>
+                        <div className="w-full h-full relative">
                             <video 
                                 src={videoSrc} 
-                                className="w-full h-full object-cover"
+                                className="absolute inset-0 w-full h-full object-cover"
                                 autoPlay
                                 loop
                                 muted={globalMuted}
@@ -865,15 +990,16 @@ const CardLibrary: React.FC = () => {
                                 preload="metadata"
                             />
                             {/* LOOP badge */}
-                            <div className="absolute top-2 right-2 bg-purple-500 text-white text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1">
+                            <div className="absolute top-2 right-2 bg-purple-500 text-white text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 z-10">
                                 <rux-icon icon="loop" size="extra-small"></rux-icon>
                                 LOOP
                             </div>
                             {/* Mute toggle */}
                             <button
                                 onClick={(e) => { e.stopPropagation(); setGlobalMuted(!globalMuted); }}
-                                className="absolute bottom-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full transition-colors"
+                                className="absolute bottom-2 right-2 p-2 bg-black/70 hover:bg-black/90 rounded-full transition-colors z-10"
                                 title={globalMuted ? 'Unmute' : 'Mute'}
+                                aria-label={globalMuted ? 'Unmute' : 'Mute'}
                             >
                                 <rux-icon 
                                     icon={globalMuted ? 'volume-off' : 'volume-up'} 
@@ -890,8 +1016,8 @@ const CardLibrary: React.FC = () => {
                 const isGenerating = loopStatus?.status === 'generating';
                 
                 return (
-                    <div className={`${className} relative group/imagethumb`}>
-                        <img src={imageSrc} alt={card.cardId} className="w-full h-full object-cover" loading="lazy" />
+                    <div className="w-full h-full relative group/imagethumb">
+                        <img src={imageSrc} alt={card.cardId} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
                         {/* Create Loop Video overlay button */}
                         {!isGenerating && (
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/imagethumb:opacity-100 transition-opacity flex items-center justify-center">
@@ -964,10 +1090,10 @@ const CardLibrary: React.FC = () => {
                 
                 // For detail view (large) - full video player
                 return (
-                    <div className={`${className} relative`}>
+                    <div className="w-full h-full relative">
                         <video 
                             src={videoSrc} 
-                            className="w-full h-full object-cover"
+                            className="absolute inset-0 w-full h-full object-cover"
                             autoPlay={large}
                             loop={large}
                             muted={globalMuted}
@@ -979,8 +1105,9 @@ const CardLibrary: React.FC = () => {
                         {large && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); setGlobalMuted(!globalMuted); }}
-                                className="absolute bottom-4 right-4 p-2 bg-black/70 hover:bg-black/90 rounded-full transition-colors"
+                                className="absolute bottom-4 right-4 p-2 bg-black/70 hover:bg-black/90 rounded-full transition-colors z-10"
                                 title={globalMuted ? 'Unmute' : 'Mute'}
+                                aria-label={globalMuted ? 'Unmute' : 'Mute'}
                             >
                                 <rux-icon 
                                     icon={globalMuted ? 'volume-off' : 'volume-up'} 
@@ -996,7 +1123,7 @@ const CardLibrary: React.FC = () => {
 
         if (card.mediaKind === 'audio') {
             return (
-                <div className={`${className} flex flex-col items-center justify-center bg-gray-900 text-gray-300`}>
+                <div className={large ? "w-full h-full flex flex-col items-center justify-center bg-gray-900 text-gray-300" : `${className} flex flex-col items-center justify-center bg-gray-900 text-gray-300`}>
                     <rux-icon icon="audiotrack" size={large ? "large" : "normal"}></rux-icon>
                     <span className="mt-2 text-xs font-mono">{card.mediaMimeType || 'AUDIO'}</span>
                 </div>
@@ -1008,11 +1135,11 @@ const CardLibrary: React.FC = () => {
             // If message has thumbnail from attachment, show it
             if (card.thumbnail || card.mediaRemoteUrl) {
                 return (
-                    <div className={`${className} relative`}>
+                    <div className={large ? "w-full h-full relative" : `${className} relative`}>
                         <img 
                             src={card.thumbnail || card.mediaRemoteUrl} 
                             alt={card.cardId} 
-                            className="w-full h-full object-cover" 
+                            className={large ? "absolute inset-0 w-full h-full object-cover" : "w-full h-full object-cover"} 
                         />
                         {/* Message badge overlay */}
                         <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 bg-black/70 rounded text-xs">
@@ -1100,6 +1227,23 @@ const CardLibrary: React.FC = () => {
             </div>
         );
     };
+
+    // Calculate lineage (ancestors/descendants) for all cards
+    const lineageMap = useMemo(() => {
+        if (cards.length === 0) return new Map<string, LineageInfo>();
+        
+        // Build lineage entries from cards
+        const lineageEntries = cards.map(c => ({
+            cardId: c.cardId,
+            parentCardId: c.cardRecord?.parentCardId || c.parentCardId || null,
+            children: c.cardRecord?.children || [],
+        }));
+        
+        return calculateAllLineage(lineageEntries);
+    }, [cards]);
+
+    // Get the Hand context for drag-to-hand functionality
+    const { addCard: addToHand, hasCard: isInHand } = useHand();
 
     // Enhanced filtering and sorting with quality system
     const filteredCards = useMemo(() => {
@@ -1360,17 +1504,36 @@ const CardLibrary: React.FC = () => {
         const imagePath = rec.mediaPrompts?.generated_image_local || selected.mediaLocalPath || selected.thumbnail;
         if (!imagePath || !window.electronAPI?.createLoopVideoForImage) return;
         
+        // Clean path for backend (remove file protocol, fix slashes for Windows)
+        let cleanPath = imagePath;
+        if (cleanPath.startsWith('file://')) {
+            cleanPath = cleanPath.replace('file:///', '').replace('file://', '');
+        }
+        // Normalize slashes for consistency if needed, though Electron usually handles / okay
+        // But some parts of this app enforce backslashes. Let's be safe.
+        cleanPath = cleanPath.replace(/\//g, '\\');
+        // If it starts with a backslash on Windows but no drive letter, it might be an issue, 
+        // but typically 'C:/...' becomes 'C:\...' which is fine.
+
         setHwVideoGenStatus('generating');
         try {
             // Use the existing createLoopVideoForImage API
-            await window.electronAPI.createLoopVideoForImage({
+            const result = await window.electronAPI.createLoopVideoForImage({
                 parentCardId: selected.cardId,
                 imageId: selected.cardId, // Use cardId as imageId for Hell Week cards
-                imagePath: imagePath,
-                imageNumber: 1,
+                imagePath: cleanPath,
+                imageOrder: 0,
+                originalPrompt: rec.mediaPrompts?.base_image || `Image of ${rec.name || selected.name}`,
                 cardName: rec.name || selected.name,
             });
             setHwVideoGenStatus('complete');
+
+            if (result && result.videoPath) {
+                setInspectorVideoPath(`file://${result.videoPath}`);
+                setInspectorShowReveal(true);
+                setTimeout(() => setInspectorShowReveal(false), 3000);
+            }
+
             setTimeout(() => setHwVideoGenStatus('idle'), 5000);
         } catch (err) {
             console.error('Video generation failed:', err);
@@ -2082,9 +2245,11 @@ const CardLibrary: React.FC = () => {
             name: card.name,
             mediaKind: card.mediaKind,
             mediaLocalPath: card.mediaLocalPath,
-            thumbnail: card.thumbnail,
+            thumbnail: card.thumbnail || getCardThumbnail(card),
             image: card.cardRecord?.image,
             coreName: card.coreName,
+            createdAt: card.createdAt,
+            tier: card.tier || calculateCardQuality(card).tierNumber,
             // Pass full cardRecord to ensure PetPortal can reconstruct the pet config
             cardRecord: card.cardRecord,
             type: 'card-transfer'
@@ -2499,9 +2664,30 @@ const CardLibrary: React.FC = () => {
                 )}
 
                 {loading && cards.length === 0 && (
-                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
-                        <rux-progress type="circular"></rux-progress>
-                        <div className="font-mono text-sm animate-pulse text-purple-400">INITIALIZING MEMORY MATRIX...</div>
+                    <div className="flex-1 overflow-hidden pb-10">
+                        {/* Loading status */}
+                        <div className="flex items-center justify-center gap-3 py-4">
+                            <rux-progress type="circular" className="w-4 h-4"></rux-progress>
+                            <span className="font-mono text-sm text-cyan-400 animate-pulse">INITIALIZING MEMORY MATRIX...</span>
+                        </div>
+                        {/* Skeleton Grid */}
+                        <div className="card-grid">
+                            {Array.from({ length: 12 }).map((_, i) => (
+                                <div 
+                                    key={i}
+                                    className="card-skeleton rounded-lg aspect-[3/4]"
+                                >
+                                    {/* Card shape placeholder */}
+                                    <div className="h-full flex flex-col">
+                                        <div className="flex-1 bg-gray-800/50"></div>
+                                        <div className="p-2 space-y-2">
+                                            <div className="h-2 bg-gray-700/50 rounded w-3/4"></div>
+                                            <div className="h-2 bg-gray-700/50 rounded w-1/2"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 )}
 
@@ -2517,7 +2703,37 @@ const CardLibrary: React.FC = () => {
                     </div>
                 )}
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar pb-10 relative">
+                {/* Progressive Loading Grid (new) */}
+                {USE_PROGRESSIVE_LOADING && filteredCards.length > 0 && (
+                    <VirtualCardGrid
+                        cards={filteredCards}
+                        onCardClick={(card, e) => handleCardClick(card, e)}
+                        onCardDragStart={(e, card) => handleDragStart(e, card)}
+                        selectedCardId={selected?.cardId}
+                        className="flex-1 pb-10"
+                        renderCard={(card) => {
+                            const quality = calculateCardQuality(card);
+                            const isSetCard = card.cardType === 'set';
+                            const isMergedSet = card.cardType === 'merged-set';
+                            const containedCount = card.containedCardCount || card.containedCards?.length || 0;
+                            return (
+                                <CardContent 
+                                    card={card} 
+                                    quality={quality} 
+                                    isSetCard={isSetCard} 
+                                    isMergedSet={isMergedSet}
+                                    containedCount={containedCount}
+                                    renderThumbnail={renderThumbnail}
+                                    lineageMap={lineageMap}
+                                />
+                            );
+                        }}
+                    />
+                )}
+
+                {/* Legacy Grid (fallback when progressive loading disabled) */}
+                {!USE_PROGRESSIVE_LOADING && (
+                <div className="flex-1 overflow-y-auto custom-scrollbar pb-10 relative" ref={cardGridRef}>
                     <div className="card-grid pb-32">
                         {filteredCards.map((card) => {
                             const quality = calculateCardQuality(card);
@@ -2537,8 +2753,8 @@ const CardLibrary: React.FC = () => {
                                 key={card.cardId + card.createdAt}
                                 draggable
                                 onDragStart={(e) => handleDragStart(e, card)}
-                                onClick={() => handleCardClick(card)}
-                                className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${isSetCard || isMergedSet ? setCardClasses : `${quality.borderClass} ${quality.glowClass}`}`}
+                                onClick={(e) => handleCardClick(card, e)}
+                                className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${selected?.cardId === card.cardId ? 'card-selected' : ''} ${isSetCard || isMergedSet ? setCardClasses : `${quality.borderClass} ${quality.glowClass}`}`}
                             >
                                 {/* Set Card Badge */}
                                 {isSetCard && (
@@ -2581,23 +2797,20 @@ const CardLibrary: React.FC = () => {
                                         {containedCount}
                                     </div>
                                 )}
-                                {/* Child Count Badge (Standard Cards) */}
-                                {!isSetCard && (card.cardRecord?.childCardIds?.length > 0) && (
+                                {/* Lineage Badges - Ancestor (⬆) and Descendant (⬇) counts */}
+                                {!isSetCard && !isMergedSet && (() => {
+                                    const lineage = lineageMap.get(card.cardId);
+                                    if (!lineage) return null;
+                                    return <LineageBadgePair lineage={lineage} layout="corners" size="small" />;
+                                })()}
+                                
+                                {/* In-Hand Indicator */}
+                                {isInHand(card.cardId) && (
                                     <div 
-                                        className="absolute top-7 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 text-[9px] font-bold"
-                                        data-tooltip={`${card.cardRecord.childCardIds.length} extracted card${card.cardRecord.childCardIds.length > 1 ? 's' : ''}`}
+                                        className="absolute bottom-2 left-2 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-500/30 border border-cyan-500/50 text-cyan-400"
+                                        data-tooltip="In your Hand"
                                     >
-                                        <rux-icon icon="account-tree" size="extra-small"></rux-icon>
-                                        {card.cardRecord.childCardIds.length}
-                                    </div>
-                                )}
-                                {/* Has Parent Indicator */}
-                                {card.cardRecord?.parentCardId && (
-                                    <div 
-                                        className="absolute bottom-2 left-2 z-10 flex items-center gap-0.5 text-purple-400"
-                                        data-tooltip="Extracted from parent"
-                                    >
-                                        <rux-icon icon="link" size="extra-small"></rux-icon>
+                                        <rux-icon icon="style" size="extra-small"></rux-icon>
                                     </div>
                                 )}
                                 {renderThumbnail(card)}
@@ -2672,9 +2885,10 @@ const CardLibrary: React.FC = () => {
                         })}
                     </div>
                 </div>
+                )}
 
                 {/* Drop Zone */}
-                <div
+                {/* <div
                     className={`absolute bottom-8 right-8 w-64 h-48 rounded-2xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-2 backdrop-blur-md z-40 ${isOverDropZone
                         ? 'border-cyan-400 bg-cyan-900/40 shadow-[0_0_30px_rgba(34,211,238,0.4)] scale-105 drop-zone-active'
                         : draggedCard
@@ -2689,312 +2903,432 @@ const CardLibrary: React.FC = () => {
                     <span className={`font-mono text-xs font-bold tracking-widest uppercase ${isOverDropZone ? "text-cyan-300" : "text-gray-500"}`}>
                         {isOverDropZone ? "DROP TO OPEN" : "DROP ZONE"}
                     </span>
-                </div>
+                </div> */}
 
-                {/* Detail Overlay (Old Inspector - kept for click interaction if desired, or we can remove/unify) */}
+                {/* Redesigned Card Inspector - The Neural Artifact Inspector */}
                 {selected && !activeWorkspaceCard && (
-                    <div className="absolute inset-0 z-50 glass-overlay flex justify-end animate-in slide-in-from-right duration-300">
-                        <div className="w-full max-w-3xl h-full bg-gray-900 border-l border-gray-700 flex flex-col shadow-2xl">
-                            {/* Overlay Header - with Quality Bar for Hell Week cards */}
-                            {(() => {
-                                const rec = selected.cardRecord || {};
-                                const isHW = isHellWeekCard(selected);
-                                const rarity = isHW ? getHellWeekRarity(rec.stats?.type) : null;
-                                
-                                return (
-                                    <div className="relative border-b border-gray-800 bg-gray-900/50">
-                                        {/* Holographic glow for Hell Week cards */}
-                                        {isHW && (
-                                            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 opacity-60" />
-                                        )}
-                                        
-                                        {/* Quality Bar for Hell Week Cards */}
-                                        {isHW && rarity && (
-                                            <div className="absolute top-0 left-1/2 -translate-x-1/2 px-6 py-1 rounded-b-lg bg-gradient-to-r from-gray-800 via-gray-700 to-gray-800 border-x border-b border-gray-600 z-10">
-                                                <span className={`text-xs font-bold tracking-widest ${rarity.color}`}>
-                                                    {'★'.repeat(rarity.stars)}{'☆'.repeat(5 - rarity.stars)} {rarity.name}
-                                                </span>
-                                            </div>
-                                        )}
-                                        
-                                        <div className="p-6 flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <rux-icon icon={isHW ? "auto-awesome" : "assignment"} size="small" className={isHW ? "text-cyan-400" : "text-purple-400"}></rux-icon>
-                                                <span className="text-sm font-mono text-gray-400 uppercase tracking-widest">Card Inspector</span>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                {/* Lightbox button */}
-                                                {(selected.thumbnail || selected.mediaLocalPath || rec.mediaPrompts?.generated_image_local) && (
-                                                    <button
-                                                        type="button"
-                                                        aria-label="View full size image"
-                                                        title="View full size"
-                                                        onClick={() => setShowLightbox(true)}
-                                                        className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-cyan-400 hover:bg-gray-700/50 rounded transition-colors"
-                                                    >
-                                                        <rux-icon icon="zoom-in" size="small"></rux-icon>
-                                                    </button>
-                                                )}
-                                                <button
-                                                    type="button"
-                                                    aria-label="Close card inspector"
-                                                    onClick={() => { setSelected(null); setShowLightbox(false); }}
-                                                    className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700/50 rounded transition-colors text-xl font-light"
-                                                >
-                                                    ✕
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })()}
+                    <div className="absolute inset-0 z-50 flex justify-end animate-in slide-in-from-right duration-300 backdrop-blur-sm bg-black/20">
+                        <style>{`
+                            .scanline-bg {
+                                background: linear-gradient(to bottom, rgba(15, 23, 42, 0) 50%, rgba(0, 240, 255, 0.02) 50%);
+                                background-size: 100% 4px;
+                            }
+                            .scanline-sweep {
+                                position: absolute;
+                                top: 0; left: 0; right: 0; height: 100%;
+                                background: linear-gradient(to bottom, transparent, rgba(0, 240, 255, 0.1) 50%, transparent);
+                                animation: sweep 3s linear infinite;
+                                pointer-events: none;
+                            }
+                            @keyframes sweep {
+                                0% { transform: translateY(-100%); }
+                                100% { transform: translateY(100%); }
+                            }
+                            .holo-corner {
+                                position: absolute;
+                                width: 10px; height: 10px;
+                                border-color: rgba(0, 240, 255, 0.5);
+                                border-style: solid;
+                                pointer-events: none;
+                                transition: all 0.3s ease;
+                            }
+                            .group:hover .holo-corner {
+                                width: 20px; height: 20px;
+                                border-color: rgba(0, 240, 255, 1);
+                                box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+                            }
+                            .holo-tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+                            .holo-tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+                            .holo-bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+                            .holo-br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+                            
 
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
-                                <div className="flex flex-col gap-8">
-                                    {/* Top Section: Preview & Basic Info */}
-                                    <div className="flex flex-col md:flex-row gap-8">
-                                        <div className="w-full md:w-1/2">
+                            .tech-text {
+                                font-family: 'Courier New', monospace;
+                                letter-spacing: 0.05em;
+                            }
+                        `}</style>
+                        
+                        <div className="w-full max-w-5xl h-full bg-[#050510] border-l border-cyan-900/50 flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.8)] relative overflow-hidden">
+                            {/* Background Elements */}
+                            <div className="absolute inset-0 scanline-bg pointer-events-none opacity-50"></div>
+                            
+
+                            {/* Header */}
+                            <div className="h-16 bg-gray-900/20 border-b border-cyan-900/30 p-4 flex items-center justify-between">
+                                <span className="text-cyan-400 font-bold tracking-widest">ARTIFACT ANALYSIS</span>
+                                <button
+                                    onClick={() => { setSelected(null); setShowLightbox(false); }}
+                                    className="p-2 text-cyan-600 hover:text-white"
+                                    title="Close Inspector"
+                                    aria-label="Close Inspector"
+                                >
+                                    <rux-icon icon="close" size="small"></rux-icon>
+                                </button>
+                            </div>
+
+                            {/* Content Grid */}
+                            <div className="flex-1 grid grid-cols-12 overflow-hidden">
+                                {/* Left Column: Visuals & Pipeline */}
+                                <div className="col-span-5 bg-gray-900/30 border-r border-cyan-900/30 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar relative">
+                                    {/* Holo Projector */}
+                                    <div className="relative group aspect-[3/4] bg-black/50 border border-cyan-900/50 rounded-lg overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+                                        <div className="absolute inset-0 z-0">
                                             {renderThumbnail(selected, true)}
                                         </div>
-                                        <div className="w-full md:w-1/2 flex flex-col gap-4">
-                                            <div className="flex flex-col gap-2">
-                                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Card Name</label>
-                                                <div className="flex gap-2">
-                                                    {isEditingName ? (
-                                                        <div className="flex-1 flex gap-2">
-                                                            <rux-input
-                                                                value={editingName}
-                                                                onInput={(e: any) => setEditingName(e.target.value)}
-                                                                className="flex-1"
-                                                                size="small"
-                                                            ></rux-input>
-                                                            <rux-button size="small" icon="save" onClick={handleSaveName}></rux-button>
-                                                            <rux-button size="small" icon="close" secondary onClick={() => setIsEditingName(false)}></rux-button>
+                                        
+                                        {/* Overlays */}
+                                        <div className="absolute inset-0 scanline-sweep opacity-30"></div>
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div>
+                                        
+                                        {/* Holo Corners */}
+                                        <div className="holo-corner holo-tl"></div>
+                                        <div className="holo-corner holo-tr"></div>
+                                        <div className="holo-corner holo-bl"></div>
+                                        <div className="holo-corner holo-br"></div>
+
+                                        {/* Video Overlay */}
+                                        {inspectorVideoPath && (
+                                            <video 
+                                                src={inspectorVideoPath}
+                                                className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10"
+                                                muted 
+                                                loop 
+                                                playsInline
+                                                onMouseEnter={(e) => e.currentTarget.play()}
+                                                onMouseLeave={(e) => e.currentTarget.pause()}
+                                            />
+                                        )}
+
+                                        {/* Reveal Animation */}
+                                        {inspectorShowReveal && (
+                                            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                                                <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
+                                                <rux-icon icon="movie" size="large" className="text-cyan-400 mb-2 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)] animate-bounce"></rux-icon>
+                                                <div className="text-xl font-bold text-white tracking-widest drop-shadow-lg animate-pulse">VIDEO UNLOCKED</div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Evolution Pipeline */}
+                                    {(() => {
+                                        const rec = selected.cardRecord || {};
+                                        const hasImage = !!rec.mediaPrompts?.generated_image_local;
+                                        const state = rec.state || 'blob';
+                                        
+                                        return (
+                                            <div className="p-4 bg-gray-900/50 border border-cyan-900/30 rounded-lg">
+                                                <div className="text-[10px] text-cyan-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                                    <rux-icon icon="linear-scale" size="extra-small"></rux-icon>
+                                                    Evolution Pipeline
+                                                </div>
+                                                
+                                                <div className="flex items-center justify-between relative">
+                                                    {/* Connecting Line */}
+                                                    <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-gray-800 -z-10"></div>
+                                                    <div className={`absolute top-1/2 left-0 h-0.5 bg-cyan-500 transition-all duration-500 -z-10`} style={{ width: hasImage ? '100%' : '50%' }}></div>
+
+                                                    {/* Nodes */}
+                                                    {[
+                                                        { label: 'BLOB', active: true },
+                                                        { label: 'SORT', active: state !== 'blob' },
+                                                        { label: 'VISUAL', active: hasImage },
+                                                        { label: 'LOOP', active: !!inspectorVideoPath || (rec.children || []).some((c: any) => c.type === 'loop-video') }
+                                                    ].map((step, i) => (
+                                                        <div key={i} className="flex flex-col items-center gap-2 group/node">
+                                                            <div className={`w-3 h-3 rounded-full border-2 transition-all duration-300 ${
+                                                                step.active ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)]' : 'bg-gray-900 border-gray-700'
+                                                            }`}></div>
+                                                            <span className={`text-[9px] font-mono transition-colors ${step.active ? 'text-cyan-300' : 'text-gray-600'}`}>{step.label}</span>
                                                         </div>
-                                                    ) : (
-                                                        <div className="flex-1 flex items-center justify-between group/name">
-                                                            <h1 className="text-2xl font-bold text-white truncate" title={selected.name}>
-                                                                {selected.name || 'Untitled Card'}
-                                                            </h1>
-                                                            <button
-                                                                type="button"
-                                                                aria-label="Edit card name"
-                                                                onClick={() => setIsEditingName(true)}
-                                                                className="opacity-0 group-hover/name:opacity-100 text-gray-500 hover:text-purple-400 transition-all"
-                                                            >
-                                                                <rux-icon icon="edit" size="small"></rux-icon>
-                                                            </button>
-                                                        </div>
-                                                    )}
+                                                    ))}
                                                 </div>
                                             </div>
+                                        );
+                                    })()}
 
-                                            <div className="grid grid-cols-2 gap-4 text-xs">
-                                                <div>
-                                                    <div className="text-gray-500 mb-1">Created</div>
-                                                    <div className="text-gray-300 font-mono">{new Date(selected.createdAt).toLocaleDateString()}</div>
-                                                </div>
-                                                <div>
-                                                    <div className="text-gray-500 mb-1">Type</div>
-                                                    <div className="text-gray-300 font-mono uppercase">{selected.mediaKind || 'UNKNOWN'}</div>
-                                                </div>
-                                                {/* Parent Card Link */}
-                                                {(selected.cardRecord?.parentCardId || selected.parentCardId) && (
-                                                    <div className="col-span-2">
-                                                        <div className="text-gray-500 mb-1">Parent Card</div>
-                                                        <button
-                                                            onClick={() => {
-                                                                const parentId = selected.cardRecord?.parentCardId || selected.parentCardId;
-                                                                const parentCard = cards.find(c => c.cardId === parentId);
-                                                                if (parentCard) setSelected(parentCard);
-                                                                else if (parentId) loadCards(parentId);
-                                                            }}
-                                                            className="text-cyan-400 hover:text-cyan-300 font-mono text-xs underline"
-                                                        >
-                                                            ← View Parent Card
-                                                        </button>
+                                    {/* Video Action */}
+                                    {(() => {
+                                        const rec = selected.cardRecord || {};
+                                        // Update: Allow loops for cards with ANY valid image source (including thumbnail)
+                                        const hasImage = !!(rec.mediaPrompts?.generated_image_local || selected.mediaLocalPath || selected.thumbnail);
+                                        if (hasImage) {
+                                            return (
+                                                <div className="flex flex-col gap-2">
+                                                <button
+                                                    onClick={handleHellWeekVideoGenerate}
+                                                    disabled={hwVideoGenStatus === 'generating'}
+                                                    className={`w-full py-4 relative overflow-hidden group border transition-all duration-300 ${
+                                                        hwVideoGenStatus === 'generating' ? 'border-purple-500/50 bg-purple-900/20' :
+                                                        hwVideoGenStatus === 'error' ? 'border-red-500/50 bg-red-900/20' :
+                                                        'border-cyan-500/50 bg-cyan-900/10 hover:bg-cyan-900/30 hover:border-cyan-400'
+                                                    }`}
+                                                >
+                                                    <div className="absolute inset-0 bg-scanline-bg opacity-20"></div>
+                                                    <div className="flex items-center justify-center gap-3 relative z-10">
+                                                        {hwVideoGenStatus === 'generating' ? (
+                                                            <>
+                                                                <rux-icon icon="autorenew" size="small" className="animate-spin text-purple-400"></rux-icon>
+                                                                <span className="text-purple-300 font-mono text-xs uppercase tracking-widest">Compiling Loop...</span>
+                                                            </>
+                                                        ) : hwVideoGenStatus === 'error' ? (
+                                                            <>
+                                                                <rux-icon icon="error" size="small" className="text-red-400"></rux-icon>
+                                                                <span className="text-red-300 font-mono text-xs uppercase tracking-widest">Generation Failed</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <rux-icon icon="movie" size="small" className="text-cyan-400 group-hover:animate-pulse"></rux-icon>
+                                                                <span className="text-cyan-300 font-mono text-xs uppercase tracking-widest">Initialize Loop Sequence</span>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </button>
+                                                {hwVideoGenStatus === 'error' && (
+                                                    <div className="text-[10px] text-red-400 font-mono px-2">
+                                                        Check console for details.
                                                     </div>
                                                 )}
-                                                <div className="col-span-2">
-                                                    <div className="text-gray-500 mb-1">ID</div>
-                                                    <div className="text-gray-300 font-mono break-all">{selected.cardId}</div>
                                                 </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+                                </div>
+
+                                {/* Right Column: Data Matrix */}
+                                <div className="col-span-7 p-8 overflow-y-auto custom-scrollbar flex flex-col gap-8">
+                                    {/* Name & ID Block */}
+                                    <div className="flex flex-col gap-2">
+                                        <div className="text-[10px] text-gray-500 font-mono uppercase tracking-widest">Subject Identifier</div>
+                                        {isEditingName ? (
+                                            <div className="flex gap-2">
+                                                <rux-input
+                                                    value={editingName}
+                                                    onInput={(e: any) => setEditingName(e.target.value)}
+                                                    className="flex-1"
+                                                ></rux-input>
+                                                <rux-button icon="save" onClick={handleSaveName}></rux-button>
                                             </div>
+                                        ) : (
+                                            <div className="group flex items-center gap-4">
+                                                <h1 className="text-3xl font-bold text-white tracking-tight drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]">{selected.name || 'UNKNOWN ENTITY'}</h1>
+                                                <button 
+                                                    onClick={() => setIsEditingName(true)} 
+                                                    className="opacity-0 group-hover:opacity-100 text-cyan-500 hover:text-cyan-300 transition-opacity"
+                                                    title="Edit Name"
+                                                    aria-label="Edit Name"
+                                                >
+                                                    <rux-icon icon="edit" size="small"></rux-icon>
+                                                </button>
+                                            </div>
+                                        )}
+                                        <div className="flex items-center gap-4 text-xs font-mono text-gray-500">
+                                            <span>ID: {selected.cardId.substring(0, 12)}...</span>
+                                            <span className="text-cyan-900">|</span>
+                                            <span>{new Date(selected.createdAt).toLocaleDateString()}</span>
+                                            <span className="text-cyan-900">|</span>
+                                            <span className="text-cyan-500">{selected.mediaKind || 'DATA'}</span>
                                         </div>
                                     </div>
 
-                                    {/* ========== HELL WEEK CARD SECTIONS ========== */}
+                                    {/* Stats Matrix (Hell Week Only) */}
                                     {isHellWeekCard(selected) && (
-                                        <>
-                                            {/* Stats Section */}
+                                        <div>
+                                            <div className="bg-gray-900/30 border border-cyan-900/30 p-6 relative overflow-hidden">
+                                            {/* Corner Accents */}
+                                            <div className="absolute top-0 right-0 w-4 h-4 border-t border-r border-cyan-500/30"></div>
+                                            <div className="absolute bottom-0 left-0 w-4 h-4 border-b border-l border-cyan-500/30"></div>
+                                            
+
+                                            <div className="text-[10px] text-cyan-500 font-mono uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                <rux-icon icon="bar-chart" size="extra-small"></rux-icon>
+                                                Power Matrix
+                                            </div>
+                                            
+
                                             {(() => {
                                                 const rec = selected.cardRecord || {};
                                                 const stats = generateHellWeekStats(rec.name || selected.name);
                                                 return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-cyan-400">
-                                                                <rux-icon icon="bar-chart" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Stats</h3>
+                                                    <div className="space-y-4">
+                                                        {[
+                                                            { label: 'PWR', fullLabel: 'POWER', value: stats.power, color: 'text-red-400' },
+                                                            { label: 'WIS', fullLabel: 'WISDOM', value: stats.wisdom, color: 'text-blue-400' },
+                                                            { label: 'SPD', fullLabel: 'SPEED', value: stats.speed, color: 'text-green-400' },
+                                                            { label: 'MAG', fullLabel: 'MAGIC', value: stats.magic, color: 'text-purple-400' },
+                                                        ].map(stat => (
+                                                            <div key={stat.label} className="group/stat">
+                                                                <div className="flex justify-between text-[10px] font-mono mb-1 text-gray-500">
+                                                                    <span>{stat.fullLabel}</span>
+                                                                    <span className={stat.color}>{stat.value}/100</span>
+                                                                </div>
+                                                                <div className="h-2 bg-gray-800/50 flex gap-0.5 overflow-hidden">
+                                                                    {[...Array(20)].map((_, i) => (
+                                                                        <div 
+                                                                            key={i} 
+                                                                            className={`flex-1 transition-all duration-300 ${
+                                                                                (i / 20) * 100 < stat.value 
+                                                                                    ? `${stat.color.replace('text', 'bg')} opacity-80 group-hover/stat:opacity-100 shadow-[0_0_5px_currentColor]` 
+                                                                                    : 'bg-transparent'
+                                                                            }`}
+                                                                        ></div>
+                                                                    ))}
+                                                                </div>
                                                             </div>
-                                                            <div className="grid gap-2 bg-gray-800/30 rounded-lg p-4 border border-gray-700/50">
-                                                                {[
-                                                                    { label: 'POWER', value: stats.power, color: 'bg-red-500' },
-                                                                    { label: 'WISDOM', value: stats.wisdom, color: 'bg-blue-500' },
-                                                                    { label: 'SPEED', value: stats.speed, color: 'bg-green-500' },
-                                                                    { label: 'MAGIC', value: stats.magic, color: 'bg-purple-500' },
-                                                                ].map(stat => (
-                                                                    <div key={stat.label} className="flex items-center gap-3 text-xs">
-                                                                        <span className="w-16 text-gray-400 font-mono">{stat.label}</span>
-                                                                        <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                                                                            <div className={`h-full ${stat.color} transition-all duration-500`} style={{ width: `${stat.value}%` }} />
-                                                                        </div>
-                                                                        <span className="w-8 text-right text-gray-300 font-mono">{stat.value}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </>
+                                                        ))}
+                                                    </div>
                                                 );
                                             })()}
+                                        </div>
 
-                                            {/* Evolution State & Video Generation */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const hasImage = !!(rec.mediaPrompts?.generated_image_local || selected.thumbnail);
-                                                const state = rec.state || 'blob';
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-emerald-400">
-                                                                <rux-icon icon="timeline" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Evolution State</h3>
-                                                            </div>
-                                                            <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50">
-                                                                <div className="flex items-center gap-2 mb-3">
-                                                                    <div className={`w-3 h-3 rounded-full ${hasImage ? 'bg-emerald-500' : 'bg-cyan-500 animate-pulse'}`} />
-                                                                    <span className="text-sm font-mono text-gray-300 uppercase">{state}</span>
-                                                                </div>
-                                                                <div className="flex gap-1">
-                                                                    <div className="flex-1 h-1.5 rounded-full bg-emerald-500" title="Blob Created" />
-                                                                    <div className={`flex-1 h-1.5 rounded-full ${state !== 'blob' ? 'bg-emerald-500' : 'bg-gray-700'}`} title="Thor Sorted" />
-                                                                    <div className={`flex-1 h-1.5 rounded-full ${hasImage ? 'bg-emerald-500' : 'bg-gray-700'}`} title="Image Generated" />
-                                                                    <div className="flex-1 h-1.5 rounded-full bg-gray-700" title="Video Generated" />
-                                                                    <div className={`flex-1 h-1.5 rounded-full ${state === 'committed' ? 'bg-emerald-500' : 'bg-gray-700'}`} title="Committed" />
-                                                                </div>
-                                                            </div>
+                                        {/* ═══════════════════════════════════════════════════════════════
+                                            SKILLS MATRIX - RPG-Style Skill Cards with Neon Effects
+                                            ═══════════════════════════════════════════════════════════════ */}
+                                        {(() => {
+                                            const rec = selected.cardRecord || {};
+                                            const cardData = rec.cardData || {};
+                                            // Check multiple possible locations for skills data
+                                            const skills = cardData.skills || rec.skills || [];
+                                            if (skills.length === 0) return null;
+
+                                            return (
+                                                <div className="bg-gray-900/40 border border-cyan-900/30 p-5 relative overflow-hidden">
+                                                    {/* Animated Background Grid */}
+                                                    <div className="absolute inset-0 opacity-5">
+                                                        <div className="absolute inset-0" style={{
+                                                            backgroundImage: `linear-gradient(rgba(0,255,255,0.1) 1px, transparent 1px),
+                                                                             linear-gradient(90deg, rgba(0,255,255,0.1) 1px, transparent 1px)`,
+                                                            backgroundSize: '20px 20px',
+                                                            animation: 'pulse 4s ease-in-out infinite'
+                                                        }}></div>
+                                                    </div>
+                                                    
+                                                    {/* Corner Decorations */}
+                                                    <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-cyan-500/50"></div>
+                                                    <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-cyan-500/50"></div>
+                                                    <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-cyan-500/50"></div>
+                                                    <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-cyan-500/50"></div>
+
+                                                    {/* Section Header */}
+                                                    <div className="relative flex items-center gap-3 mb-5">
+                                                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
+                                                            <rux-icon icon="flash-on" size="small" className="text-white"></rux-icon>
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-sm font-bold text-white uppercase tracking-wider">Combat Skills</h3>
+                                                            <p className="text-[10px] text-gray-500 font-mono">{skills.length} ABILITIES UNLOCKED</p>
+                                                        </div>
+                                                        <div className="ml-auto flex gap-2">
+                                                            <span className="px-2 py-0.5 text-[9px] font-bold bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/30">
+                                                                {skills.filter((s: any) => s.type === 'Passive').length} PASSIVE
+                                                            </span>
+                                                            <span className="px-2 py-0.5 text-[9px] font-bold bg-orange-500/20 text-orange-400 rounded border border-orange-500/30">
+                                                                {skills.filter((s: any) => s.type === 'Active').length} ACTIVE
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Skills Grid */}
+                                                    <div className="relative space-y-3">
+                                                        {skills.map((skill: any, idx: number) => {
+                                                            const isActive = skill.type === 'Active';
+                                                            const skillColor = isActive 
+                                                                ? { border: 'border-orange-500/40', bg: 'bg-orange-500', text: 'text-orange-400', glow: 'shadow-orange-500/30', accent: 'from-orange-600 to-amber-500' }
+                                                                : { border: 'border-emerald-500/40', bg: 'bg-emerald-500', text: 'text-emerald-400', glow: 'shadow-emerald-500/30', accent: 'from-emerald-600 to-teal-500' };
                                                             
-                                                            {/* Video Generation Button */}
-                                                            {hasImage && (
-                                                                <button
-                                                                    onClick={handleHellWeekVideoGenerate}
-                                                                    disabled={hwVideoGenStatus === 'generating'}
-                                                                    className={`w-full py-3 px-4 rounded-lg border flex items-center justify-center gap-2 text-sm font-mono transition-all ${
-                                                                        hwVideoGenStatus === 'generating' 
-                                                                            ? 'bg-purple-900/30 border-purple-500/50 text-purple-300 cursor-wait'
-                                                                            : hwVideoGenStatus === 'complete'
-                                                                                ? 'bg-emerald-900/30 border-emerald-500/50 text-emerald-300'
-                                                                                : hwVideoGenStatus === 'error'
-                                                                                    ? 'bg-red-900/30 border-red-500/50 text-red-300'
-                                                                                    : 'bg-purple-900/20 border-purple-500/30 text-purple-300 hover:bg-purple-900/40 hover:border-purple-500/50'
-                                                                    }`}
+                                                            return (
+                                                                <div 
+                                                                    key={idx}
+                                                                    className={`group relative bg-gray-900/60 rounded-lg border ${skillColor.border} overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:${skillColor.glow} hover:shadow-lg cursor-pointer`}
                                                                 >
-                                                                    {hwVideoGenStatus === 'generating' ? (
-                                                                        <>
-                                                                            <div className="w-4 h-4 border-2 border-purple-400/30 border-t-purple-400 rounded-full animate-spin" />
-                                                                            Generating Video Loop...
-                                                                        </>
-                                                                    ) : hwVideoGenStatus === 'complete' ? (
-                                                                        <>
-                                                                            <rux-icon icon="check-circle" size="small"></rux-icon>
-                                                                            Video Generated!
-                                                                        </>
-                                                                    ) : hwVideoGenStatus === 'error' ? (
-                                                                        <>
-                                                                            <rux-icon icon="error" size="small"></rux-icon>
-                                                                            Failed - Try Again
-                                                                        </>
-                                                                    ) : (
-                                                                        <>
-                                                                            <rux-icon icon="movie" size="small"></rux-icon>
-                                                                            Generate Video Loop
-                                                                        </>
-                                                                    )}
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
-
-                                            {/* Skills Section */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const skills = rec.skills || [];
-                                                if (skills.length === 0) return null;
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-amber-400">
-                                                                <rux-icon icon="whatshot" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Skills</h3>
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                {skills.map((skill: any, i: number) => (
-                                                                    <div key={i} className="bg-gray-800/30 rounded-lg p-3 border border-gray-700/50">
-                                                                        <div className="flex items-center gap-2 mb-1">
-                                                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                                                                                skill.type === 'Passive' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
-                                                                            }`}>
-                                                                                {skill.type || 'Passive'}
-                                                                            </span>
-                                                                            <span className="text-sm font-bold text-white">{skill.name}</span>
-                                                                        </div>
-                                                                        <p className="text-xs text-gray-400 leading-relaxed">{skill.description}</p>
+                                                                    {/* Skill Glow Effect on Hover */}
+                                                                    <div className={`absolute inset-0 bg-gradient-to-r ${skillColor.accent} opacity-0 group-hover:opacity-10 transition-opacity duration-300`}></div>
+                                                                    
+                                                                    {/* Scanning Line Animation */}
+                                                                    <div className="absolute inset-0 overflow-hidden opacity-0 group-hover:opacity-100">
+                                                                        <div className={`absolute top-0 left-0 w-full h-0.5 ${skillColor.bg} animate-[scan_2s_ease-in-out_infinite]`} 
+                                                                             style={{ animation: 'scan 2s ease-in-out infinite' }}></div>
                                                                     </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
 
-                                            {/* Lore Section */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const lore = rec.lore;
-                                                if (!lore) return null;
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-pink-400">
-                                                                <rux-icon icon="auto-stories" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Lore</h3>
-                                                            </div>
-                                                            <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 rounded-lg p-4 border border-gray-700/50">
-                                                                <p className="text-sm text-gray-300 leading-relaxed italic">"{lore}"</p>
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
+                                                                    <div className="relative p-4 flex gap-4">
+                                                                        {/* Skill Icon/Badge */}
+                                                                        <div className="flex-shrink-0">
+                                                                            <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${skillColor.accent} flex items-center justify-center shadow-lg ${skillColor.glow} relative overflow-hidden`}>
+                                                                                {/* Inner glow */}
+                                                                                <div className="absolute inset-0 bg-white/10 rounded-lg"></div>
+                                                                                {/* Icon */}
+                                                                                <span className="text-white text-lg font-black relative z-10">
+                                                                                    {isActive ? '⚔' : '🛡'}
+                                                                                </span>
+                                                                                {/* Level indicator */}
+                                                                                <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 bg-gray-900 rounded-full border-2 border-gray-800 flex items-center justify-center">
+                                                                                    <span className="text-[8px] font-bold text-white">{idx + 1}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
 
-                                            {/* Flavor Text Section */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const flavorText = rec.flavor_text;
-                                                if (!flavorText) return null;
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
+                                                                        {/* Skill Info */}
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="flex items-center gap-2 mb-1.5">
+                                                                                <h4 className={`font-bold text-sm ${skillColor.text} truncate`}>{skill.name}</h4>
+                                                                                <span className={`flex-shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase rounded ${
+                                                                                    isActive 
+                                                                                        ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' 
+                                                                                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                                                }`}>
+                                                                                    {skill.type || 'PASSIVE'}
+                                                                                </span>
+                                                                            </div>
+                                                                            <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">{skill.description}</p>
+                                                                            
+                                                                            {/* Skill Stats Bar */}
+                                                                            <div className="mt-2 flex items-center gap-2">
+                                                                                <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+                                                                                    <div 
+                                                                                        className={`h-full ${skillColor.bg} rounded-full transition-all duration-500 group-hover:animate-pulse`}
+                                                                                        style={{ width: `${Math.min(100, 40 + (skill.name?.length || 5) * 5)}%` }}
+                                                                                    ></div>
+                                                                                </div>
+                                                                                <span className="text-[9px] font-mono text-gray-500">
+                                                                                    PWR {Math.floor(40 + (skill.name?.length || 5) * 5)}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Activation Indicator */}
+                                                                        <div className="flex-shrink-0 flex flex-col items-center justify-center gap-1">
+                                                                            <div className={`w-2 h-2 rounded-full ${skillColor.bg} animate-pulse shadow-lg ${skillColor.glow}`}></div>
+                                                                            <span className="text-[8px] font-mono text-gray-600 uppercase">ready</span>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Bottom Energy Bar */}
+                                                                    <div className="h-0.5 w-full bg-gray-800">
+                                                                        <div className={`h-full ${skillColor.bg} opacity-50 group-hover:opacity-100 transition-opacity`} style={{ width: '100%' }}></div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+
+                                                    {/* Footer Stats */}
+                                                    <div className="relative mt-4 pt-3 border-t border-gray-800/50 flex justify-between text-[9px] font-mono text-gray-600">
+                                                        <span>SKILL TREE v2.1</span>
+                                                        <span>TOTAL PWR: {skills.reduce((acc: number, s: any) => acc + Math.floor(40 + (s.name?.length || 5) * 5), 0)}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Flavor Text */}
+                                        {(() => {
+                                            const rec = selected.cardRecord || {};
+                                            const flavorText = rec.flavorText || rec.lore;
+                                            
+                                            return (
+                                                <>
+                                                    <div className="h-px bg-gray-800"></div>
                                                         <div className="space-y-3">
                                                             <div className="flex items-center gap-2 text-violet-400">
                                                                 <rux-icon icon="format-quote" size="small"></rux-icon>
@@ -3161,7 +3495,7 @@ const CardLibrary: React.FC = () => {
                                                     </>
                                                 );
                                             })()}
-                                        </>
+                                        </div>
                                     )}
 
                                     {/* Loop Video Generation Details - Show for loop video cards */}

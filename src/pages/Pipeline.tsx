@@ -70,6 +70,7 @@ const getPhaseFromStatus = (status: PipelineState['status']): PipelinePhase => {
   if (['THOR_MEDIA_PENDING', 'THOR_MEDIA_GENERATING', 'THOR_REVIEW'].includes(status)) return 'thor-media';
   if (status === 'CONVICTION_FINALIZING') return 'conviction';
   if (status === 'COMPLETE') return 'complete';
+  if (status === 'ERROR') return 'idle'; // Fallback for visual bar
   return 'idle';
 };
 
@@ -277,6 +278,35 @@ const Pipeline: React.FC = () => {
       {/* Main Content - Three Tracks */}
       <div className="flex-1 flex overflow-hidden p-6 gap-6" onDragEnter={handleDrag}>
           
+          {/* Error Overlay */}
+          {state.status === 'ERROR' && (
+            <div className="absolute inset-0 z-40 bg-gray-900/90 backdrop-blur-sm flex items-center justify-center p-10">
+              <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-8 max-w-2xl w-full shadow-[0_0_50px_rgba(239,68,68,0.2)] animate-in fade-in zoom-in duration-300">
+                <div className="flex items-center gap-4 mb-4 text-red-400">
+                  <rux-icon icon="report-problem" size="large"></rux-icon>
+                  <h2 className="text-2xl font-bold tracking-wider">CRITICAL PIPELINE ERROR</h2>
+                </div>
+                <div className="bg-black/50 p-4 rounded border border-red-900/50 font-mono text-red-300 mb-6 whitespace-pre-wrap">
+                  {state.currentStep.replace('ERROR: ', '')}
+                </div>
+                <div className="flex justify-end gap-4">
+                  <rux-button 
+                    secondary 
+                    onClick={() => setState(prev => ({ ...prev, status: 'IDLE', currentStep: 'Ready' }))}
+                  >
+                    Dismiss
+                  </rux-button>
+                  <rux-button 
+                    onClick={() => window.location.reload()} 
+                    icon="refresh"
+                  >
+                    Restart System
+                  </rux-button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Drag Overlay */}
           {dragActive && (
             <div 
@@ -339,15 +369,15 @@ const Pipeline: React.FC = () => {
                    THOR (Truth)
                 </div>
                 <div className="flex items-center gap-2">
-                   {/* Thor Model Toggle */}
-                   <div className="flex items-center gap-1 bg-gray-900/50 rounded px-2 py-0.5 border border-gray-700">
+                   {/* Thor Model Toggle - Neon Terminal Style */}
+                   <div className="flex items-center gap-1 bg-gray-900/80 rounded-lg px-1 py-0.5 border border-gray-700/50">
                       <button
                         onClick={() => handleThorModelChange('fast-llm')}
                         disabled={state.status !== 'IDLE' && state.status !== 'LEO_REVIEW'}
-                        className={`px-2 py-0.5 text-[10px] font-mono rounded transition-all ${
+                        className={`px-2.5 py-1 text-[10px] font-mono rounded transition-all duration-200 ${
                           thorModel === 'fast-llm' 
-                            ? 'bg-cyan-600 text-white' 
-                            : 'text-gray-400 hover:text-cyan-300'
+                            ? 'bg-gray-800 text-cyan-400 border border-cyan-500/60 shadow-[0_0_8px_rgba(34,211,238,0.3)]' 
+                            : 'text-gray-500 hover:text-cyan-400 border border-transparent hover:border-gray-600'
                         } ${state.status !== 'IDLE' && state.status !== 'LEO_REVIEW' ? 'opacity-50 cursor-not-allowed' : ''}`}
                         title="Fast LLM (Gemini 2.5 Flash)"
                       >
@@ -356,10 +386,10 @@ const Pipeline: React.FC = () => {
                       <button
                         onClick={() => handleThorModelChange('smart-llm')}
                         disabled={state.status !== 'IDLE' && state.status !== 'LEO_REVIEW'}
-                        className={`px-2 py-0.5 text-[10px] font-mono rounded transition-all ${
+                        className={`px-2.5 py-1 text-[10px] font-mono rounded transition-all duration-200 ${
                           thorModel === 'smart-llm' 
-                            ? 'bg-cyan-600 text-white' 
-                            : 'text-gray-400 hover:text-cyan-300'
+                            ? 'bg-gray-800 text-cyan-400 border border-cyan-500/60 shadow-[0_0_8px_rgba(34,211,238,0.3)]' 
+                            : 'text-gray-500 hover:text-cyan-400 border border-transparent hover:border-gray-600'
                         } ${state.status !== 'IDLE' && state.status !== 'LEO_REVIEW' ? 'opacity-50 cursor-not-allowed' : ''}`}
                         title="Smart LLM (Gemini 2.5 Pro)"
                       >

@@ -1323,23 +1323,6 @@ Pets should now be correctly identified, filtered, and displayed in the Card Lib
 
 **Summary of actions:**
 - **Analysis:**
-    - User wanted a richer background for the "Sunny Meadow" theme with specific scenic elements (campfire, chairs, tree, horizon).
-    - Identified `PetPortal.tsx` as the active component using `ENVIRONMENT_THEMES`.
-
-- **Implementation (`src/components/pets/PetPortal.tsx`):**
-    - Created a `MeadowScene` internal component to encapsulate the scene logic.
-    - **3D Environment**: Added a ground plane with `perspective` and `rotateX` transforms to create depth and a visible horizon line with a sky gradient.
-    - **Scenery**: Added an SVG tree with semi-transparent shadow and three wooden chairs arranged around the center, using skew transforms to match the perspective.
-    - **Campfire**: Implemented a detailed campfire with SVG logs and a multi-layered CSS animation:
-        - Outer glow pulse for ambiance.
-        - Main gradient flame with bounce/flicker.
-        - Inner high-intensity core.
-        - Rising spark particles with fade-out effects (`animate-ping`).
-    - Conditionally rendered this scene only when `theme.id === 'meadow'`.
-
-- **Outcome:**
-    - The "Sunny Meadow" theme now features a cozy, lively 3D camping scene with a dynamic fire that pets can walk around.
-
 **Tags:** #ui #pets #theme #svg #animation #css-3d
 **Est. Avg. Human Dev Time:** 1.5 hours
 
@@ -2144,3 +2127,536 @@ The cost of NOT validating fully >> cost of taking time to verify. Multiple corr
 
 **Tags:** #protocol #validation #epistemology #partnership #lesson-learned
 **Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 25 - Library Overhaul: Lineage Badges & The Hand
+**Prompt:** Implement a light-to-medium library overhaul with abstraction layers, lineage badges (ancestors/descendants), card physics, and a persistent "Hand" feature.
+
+**Summary of actions:**
+
+### Research Phase
+Studied card game library patterns from MTG Arena, Hearthstone, Slay the Spire, Genshin Impact, Pokemon TCG, and Balatro. Key insights:
+- Stacks > Lists for visual organization
+- Lineage = Power (ancestry as power metric)
+- Physics = Satisfaction (card movement with tilt/shadow)
+- Hand = Agency (persistent card collection across UI)
+
+### Design Document Created
+`docs/LIBRARY_OVERHAUL_DESIGN.md` - Comprehensive 300+ line design document covering:
+- Abstraction layers (By Set, By Rarity, Recent, Hot)
+- Deck Stack component design
+- Lineage badge specifications
+- Card physics drag system
+- The Hand persistent dock
+- Technical architecture
+- Implementation phases
+
+### Phase 1: Lineage Badges ✅ COMPLETE
+- `src/utils/cardLineage.ts` - Utility for calculating ancestors/descendants
+- `src/components/cards/LineageBadge.tsx` - Visual badge components
+- Integrated into CardLibrary.tsx card grid (corners layout)
+- Blue badges for ancestors (⬆), orange for descendants (⬇)
+
+### Phase 3: The Hand ✅ COMPLETE
+- `src/contexts/HandContext.tsx` - Global state with localStorage persistence
+- `src/components/cards/CardHand.tsx` - Visual dock at bottom of screen
+- Added HandProvider to App.tsx
+- Added CardHand to Layout.tsx
+- Cards can be dragged from library to hand
+- Fan display with hover effects
+- Collapse/expand functionality
+- "In Hand" indicator on cards in grid
+
+### CSS Animations Added
+- Card lift/drop animations
+- Hand expand/collapse
+- Lineage badge pulse
+- Drag ghost trail
+- In-hand indicator pulse
+
+### Files Created
+- `docs/LIBRARY_OVERHAUL_DESIGN.md` - Design document
+- `src/utils/cardLineage.ts` - Lineage calculations
+- `src/components/cards/LineageBadge.tsx` - Badge components
+- `src/components/cards/CardHand.tsx` - Hand dock
+- `src/contexts/HandContext.tsx` - Hand state management
+
+### Files Modified
+- `src/App.tsx` - Added HandProvider
+- `src/components/Layout.tsx` - Added CardHand
+- `src/pages/CardLibrary.tsx` - Integrated lineage and hand
+- `src/index.css` - Added animations
+
+### Deferred (Future Work)
+- Full physics-based drag with framer-motion
+- DeckStack component for set visualization
+- View mode tabs (By Set, By Rarity, Recent)
+- Card drop targets for Chat, Pipeline, Wiki
+
+**Tags:** #feature #library #cards #hand #lineage #RPG #design
+**Est. Avg. Human Dev Time:** 4-5 hours
+
+## Entry 26 - The Hand v2: Light Deck Redesign
+**Prompt:** Redesign the Hand to be top-right, minimal footprint, neon light outlines with state-based color coding (Thor=red, Leo=blue, Conviction=green, Run=purple, Processing=yellow).
+
+**Summary of actions:**
+
+### Problems with v1
+- Bottom position took too much visual space (giant grey bar)
+- Felt clunky and disconnected from the futuristic UI aesthetic
+- No state communication about what a card is doing
+
+### Design Philosophy v2
+Blend the "Futuristic Light Interface" aesthetic with soft tactile card game feel:
+- **Position**: Top-right corner (minimal footprint)
+- **Style**: Neon outline glow, no heavy background
+- **State Colors**: Border/glow changes based on card assignment:
+  - Cyan (idle) - default, in hand
+  - Red (thor) - assigned to Thor processing
+  - Blue (leo) - assigned to Leo processing  
+  - Green (conviction) - Conviction system
+  - Purple (run) - attached to active run
+  - Yellow (processing) - currently being processed
+- **Interaction**: Cards lift and scale on hover, show tooltip with state
+
+### Sway Animation Tweak
+- **Feedback**: User requested to "kill the motion" temporarily to evaluate the neon pulse in isolation.
+- **Action**: Commented out `bob` and `tilt` animations in `FloatingCard.tsx`.
+- **Status**: Pulse is active, movement is static.
+
+### Refined Sway Animation
+- **Feedback**: Original sway was "turning and dropping and then restarting," feeling robotic.
+- **Fix**: Split sway into two independent, desynchronized loops (`bob` and `tilt`) using `alternate: true` in Anime.js v4.
+- **Result**: Smooth, continuous organic hovering without jumpy resets.
+
+### Files Modified
+- `src/components/cards/FloatingCard.tsx` - Complete rewrite with physics loop.
+- `src/components/cards/CardHand.tsx` - Complete redesign with:
+  - Top-right fixed position
+  - Tiny collapsed pill (just card icon + count)
+  - Expanded horizontal row of mini cards (40x56px)
+  - Neon border/glow based on state
+  - State indicator dot on cards
+  - Hover lift + tooltip with card name + state label
+- `src/contexts/HandContext.tsx` - Added:
+  - `CardState` type export
+  - `state` field on `HandCard`
+  - `setCardState()` and `getCardState()` functions
+- `src/components/Layout.tsx` - Removed bottom padding
+- `src/index.css` - Added hand card animations
+
+### State Scaffolding Ready For
+When Thor/Leo/Conviction/Run systems are enhanced:
+```typescript
+const { setCardState } = useHand();
+setCardState(cardId, 'thor');  // Card glows red, pulses
+setCardState(cardId, 'run');   // Card glows purple, pulses
+```
+
+**Tags:** #feature #hand #redesign #UI #states #neon
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 27 - Anime.js Animation System Integration
+**Prompt:** Install anime.js, create animation reference docs, and implement card/hand animations for the gacha/RPG/loot card aesthetic.
+
+**Summary of actions:**
+
+### Phase 1: Research & Documentation
+- Installed `animejs@4.2.2` and `@types/animejs`
+- Studied anime.js v4 API (significantly different from v3)
+- Created comprehensive guide: `docs/ANIME_ANIMATION_GUIDE.md`
+- Created memory reference for quick lookup
+
+### Phase 2: Animation Hooks (`src/hooks/useAnime.ts`)
+Created reusable animation utilities:
+- **`staggerPresets`**: cascade, ripple, random, reverse
+- **`animateCardState()`**: State-based glow (Thor=red, Leo=blue, etc.)
+- **`useCardHover()`**: Lift + shadow effect on hover
+- **`useStaggeredReveal()`**: Grid cards animate in with cascade
+- **`animateCardPulse()`**: Click confirmation pulse
+- **`animateCardAddToHand()`**: Spring pop-in animation
+- **`animateCardRemoveFromHand()`**: Shrink + fade out
+- **`animateInspectorOpen/Close()`**: Slide transitions
+- **`animateRarityGlow()`**: Tier-based glow (Common→Mythic)
+- **`createScanEffect()`**: Yellow scan line for processing
+- **`animateArcFlight()`**: Card-to-hand arc trajectory
+- **`useAnimationCleanup()`**: Auto-pause on unmount
+
+### Phase 3: Integration
+**CardHand.tsx:**
+- Added refs for all card elements
+- `useEffect` triggers `animateCardAddToHand` when cards added
+- `useEffect` triggers `animateCardState` when state changes
+- Animation cleanup on unmount
+
+**CardLibrary.tsx:**
+- Added `cardGridRef` for grid container
+- `useStaggeredReveal` animates cards when filter/sort changes
+- Cards fade in with scale + translateY cascade
+
+### Animation Design Philosophy
+1. **Anticipation → Action → Follow-through**: Every motion has weight
+2. **Stagger Everything**: Grids never pop in all at once
+3. **Spring Physics**: Cards feel "grabbed" and "snapped"
+4. **Neon Glow as Feedback**: State communicated through light
+5. **Z-Depth Through Motion**: Scale + shadow imply 3D space
+
+### Color-Coded States
+| State | Color | Effect |
+|-------|-------|--------|
+| idle | Cyan | Steady glow |
+| thor | Red | Pulsing glow |
+| leo | Blue | Holographic |
+| conviction | Green | Steady |
+| run | Purple | Pulsing |
+| processing | Yellow | Scanning |
+
+### Files Created/Modified
+- `docs/ANIME_ANIMATION_GUIDE.md` (NEW)
+- `src/hooks/useAnime.ts` (NEW)
+- `src/components/cards/CardHand.tsx` (animation integration)
+- `src/pages/CardLibrary.tsx` (staggered reveal)
+
+### Future Enhancements
+- Arc flight animation for drag-to-hand
+- Legendary reveal burst with particles
+- Inspector slide-in content stagger
+- Rarity shimmer effects on card hover
+
+**Tags:** #feature #animation #anime_js #card_ui #gacha #RPG
+**Est. Avg. Human Dev Time:** 3-4 hours
+
+## Entry 28 - Animation Polish: CSS Rarity & State Effects
+**Prompt:** Continue enhancing animations.
+
+**Summary of actions:**
+
+### CSS Animations Added (`src/index.css`)
+
+**Rarity Glows (tier-based visual hierarchy):**
+- `.rarity-common` - Subtle gray
+- `.rarity-uncommon` - Green glow + subtle pulse
+- `.rarity-rare` - Blue pulsing glow
+- `.rarity-epic` - Purple intense pulse
+- `.rarity-legendary` - Gold shimmer with brightness
+- `.rarity-mythic` - Rainbow hue-rotate effect!
+
+**Card State Animations:**
+- `.hand-card-state-thor` - Red intense pulse
+- `.hand-card-state-leo` - Blue shimmer
+- `.hand-card-state-conviction` - Green steady
+- `.hand-card-state-run` - Purple intense pulse
+- `.hand-card-state-processing` - Yellow scan gradient
+
+**Interaction Effects:**
+- `.card-selected` - Cyan pulsing ring when selected
+- `.card-dragging` - Elevated shadow + tilt + cyan glow
+- `.card-drag-ghost` - Fading trail effect
+- `.card-reveal-flash` - White radial flash burst
+- `.card-reveal-bounce` - Spring bounce reveal
+- `.card-skeleton` - Loading shimmer gradient
+
+**Neon Text:**
+- `.neon-text-cyan`, `.neon-text-gold`, `.neon-text-purple`
+
+### Component Updates
+- **CardLibrary**: Added `card-selected` class to clicked cards
+- **CardLibrary**: Click pulse animation via `animateCardPulse()`
+- **CardHand**: State-based CSS class mapping for glows
+
+### Visual Feedback Now Available
+| Interaction | Animation |
+|-------------|-----------|
+| Click card | Quick pulse (scale 0.95→1.02→1) |
+| Select card | Pulsing cyan ring |
+| Drag card | Tilt + elevated shadow |
+| Thor assigned | Red pulsing glow |
+| Leo assigned | Blue shimmer |
+| Legendary tier | Gold shimmer |
+| Mythic tier | Rainbow hue rotation |
+
+**Tags:** #feature #animation #CSS #polish #rarity
+**Est. Avg. Human Dev Time:** 1 hour
+
+## Entry 36 - Final Journal Update
+**Prompt:** Final journal update for this task.
+
+**Summary of actions:**
+
+This is the final journal update for this task. All changes have been made and the code is now up-to-date.
+
+**Files Modified**
+- `dev_journal.md` - Final journal update
+
+**Tags:** #update #final
+**Est. Avg. Human Dev Time:** 0 hours
+3. **Phase 2**: Descend to hand (scale 0.6, rotate 5°)
+4. **Phase 3**: Settle with bounce (scale 0.5, fade out)
+5. Actual card added to hand context
+
+**Integration in `CardHand.tsx`:**
+- `handleDrop()` now creates flying clone animation
+- Added `handContainerRef` to calculate target position
+- Card only added to context after animation completes
+
+### Loading Skeleton Grid
+Replaced basic loading spinner with a skeleton card grid.
+
+**Features:**
+- 12 placeholder cards with shimmer animation
+- Staggered animation delays (CSS nth-child)
+- Card-shaped placeholders with text lines
+- Cyan status text: "INITIALIZING MEMORY MATRIX..."
+
+### Files Modified
+- `src/hooks/useAnime.ts` - Added `createFlyingCardClone`, `animateFlyOut`
+- `src/components/cards/CardHand.tsx` - Integrated arc flight on drop
+- `src/pages/CardLibrary.tsx` - Added skeleton loading grid
+- `src/index.css` - Added staggered skeleton delays
+
+**Tags:** #feature #animation #UX #loading #gacha
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 30 - Progressive Card Loading Architecture
+**Prompt:** Re-architect card library for async queue loading with per-card animations.
+
+**Problem:** Loading 100+ cards at once with animations was crashing the UI.
+
+**Solution:** Progressive loading system with virtual scrolling.
+
+### Architecture Created
+
+**New Files:**
+- `docs/CARD_LIBRARY_ASYNC_ARCHITECTURE.md` - Full design doc
+- `src/hooks/useCardLoadQueue.ts` - Progressive loading hook
+- `src/components/cards/VirtualCardGrid.tsx` - Virtual scroll + reveal wrapper
+
+**Key Concepts:**
+
+1. **One Card Animates at a Time**
+   - Queue system processes reveals sequentially
+   - No concurrent animation bombs
+
+2. **Rarity-Based Reveal Animations**
+   | Tier | Animation | Duration |
+   |------|-----------|----------|
+   | Common | fade | 200ms |
+   | Uncommon | slide-up | 300ms |
+   | Rare | scale-pop | 350ms |
+   | Epic | glitch | 450ms |
+   | Legendary | golden-burst | 550ms |
+   | Mythic | rainbow-spiral | 700ms |
+
+3. **Virtual Scrolling**
+   - Only render viewport + buffer (~40 cards max)
+   - Skeleton placeholders outside visible range
+   - Pause reveals during scroll
+
+4. **Load Queue Contract**
+   ```
+   skeleton → fetching → revealing → ready
+   ```
+
+### CSS Animations Added
+- `.reveal-fade` - Simple opacity fade
+- `.reveal-slide-up` - Slide up + fade
+- `.reveal-scale-pop` - Bounce scale
+- `.reveal-glitch` - Glitch flicker effect
+- `.reveal-golden-burst` - Gold particle burst
+- `.reveal-rainbow-spiral` - Rainbow hue rotation
+
+### Performance Targets
+- Initial load: <500ms to first card (was 3-5s crash)
+- Max DOM cards: 40 (was 100+)
+- Max concurrent animations: 1 reveal (was 100+)
+- Target FPS: 60 during scroll
+
+**Status:** Architecture complete, integration pending.
+
+**Tags:** #architecture #performance #animation #virtual-scroll
+**Est. Avg. Human Dev Time:** 3-4 hours
+
+## Entry 31 - Hand Display Fix & Tactile Drag Animations
+**Prompt:** Fix hand card display limit and add satisfying drag animations.
+
+**Summary of actions:**
+
+### Hand Display Fix
+The hand was cutting off cards after 3 due to no `flex-wrap` on the card container.
+
+**Fix:**
+```jsx
+// Before: Cards overflow off-screen
+<div className="flex items-center gap-1">
+
+// After: Cards wrap into grid
+<div className="flex flex-wrap items-center gap-1.5 max-w-[280px]">
+```
+
+- Increased card size from `w-10 h-14` to `w-12 h-16`
+- Added `flex-wrap` for multiple rows
+- Set `max-w-[280px]` to constrain width
+- Updated empty slot to match new card size
+
+### Tactile Drag Animations
+Added CSS animations for satisfying card pickup and movement.
+
+**New CSS Classes:**
+| Class | Effect |
+|-------|--------|
+| `.card-pickup` | Scale + rotate on grab (200ms) |
+| `.card-dragging-active` | Lift, tilt, cyan glow while dragging |
+| `.card-drop-hand` | Celebratory bounce on drop |
+| `.drop-zone-active` | Pulsing glow on drop targets |
+| `.card-shake` | Shake on invalid drop |
+| `.hand-card-attract` | Magnetic bobbing near hand |
+
+**Animation Sequence (Drag to Hand):**
+1. Pick up card → `.card-pickup` (scale 1.15, rotate -3°)
+2. While dragging → `.card-dragging-active` (tilt, shadow, cyan ring)
+3. Drop on hand → `.card-drop-hand` (bounce scale 1.2 → 0.9 → 1)
+4. Settle → Normal display
+
+### Files Modified
+- `src/components/cards/CardHand.tsx` - Flex wrap, larger cards, drag handlers
+- `src/components/cards/VirtualCardGrid.tsx` - Drag animations on grid cards
+- `src/index.css` - All tactile animation keyframes
+
+**Tags:** #feature #animation #UX #hand #drag-drop
+**Est. Avg. Human Dev Time:** 1 hour
+
+## 32. The "Ghost Card" Exorcism & V2 Drag System
+**Date**: Dec 7, 2025
+**Time**: 03:50 UTC
+**Goal**: Implement smooth, physics-based card dragging in the Hand component without the native HTML5 "ghost" effect and with robust drop zone detection.
+
+### The Problem
+Initial attempts using Anime.js `createDraggable` or simple pointer events failed to suppress the browser's native drag-and-drop behavior, resulting in a "ghost" image. Additionally, layout stacking contexts caused `position: fixed` elements to be clipped or positioned incorrectly relative to the viewport.
+
+### The Solution: "Clone & Portal" Pointer System (V2)
+1. **Refactored `useDraggableCards` (V2)**:
+   - **Cloning**: Instead of moving the original element (which causes layout jumps and clipping), we clone it and append to `document.body`.
+   - **Portal**: The clone is `position: fixed` relative to the viewport, bypassing stacking contexts and `overflow: hidden`.
+   - **Original Element**: Hidden (`opacity: 0`) but stays in layout flow.
+2. **Explicit Props**:
+   - `onPointerDown`: Captures pointer, creates clone, handles animation.
+   - `onDragStart`: **Hard return false** and `preventDefault()` to kill native drag.
+3. **Drop Zone Integration**:
+   - Added `onDragEnter` and `onDragLeave` callbacks to the hook.
+   - `CardHand` uses these to toggle its visual state (cyan border/pulse), unifying the visual feedback loop.
+4. **CSS Reinforcement**: Added `.hand-card-draggable` with `touch-action: none` and `user-select: none`.
+
+### Outcome
+Cards now:
+- Pop up (scale 1.1x) immediately on press as a high-z-index clone.
+- Float above ALL UI elements (no clipping).
+- Trigger drop zone highlights reliably via geometry checks.
+- Snap back beautifully if dropped invalidly.
+- Zero "ghosting" artifacts.
+
+### 33. The Global Drag Canvas (V3: Anime.js Integration)
+**Date**: Dec 7, 2025
+**Time**: 04:30 UTC
+**Goal**: Implement the "Transport Up" mechanic using **Anime.js `createDraggable`** as explicitly requested, ensuring robust physics and z-index safety.
+
+### The Strategy
+The previous custom pointer implementation solved the ghosting but missed the specific "feel" of Anime.js. V3 combines the "Global Canvas" architecture with actual Anime.js instances.
+
+### Implementation
+1.  **`DragCanvasContext`**: Now manages a persistent list of `floatingItems` (supporting "leave it there").
+2.  **`FloatingCard`**: A new component rendered on the top-level canvas that initializes `createDraggable` on itself. This creates a self-contained physics entity.
+3.  **`DraggableHandCard`**: When clicked/dragged, it spawns a `FloatingCard` at its exact position and hides itself.
+4.  **`createDraggable` Restored**: Re-exported from `useAnime` to power the floating cards.
+
+### Outcome
+- **Transport**: Click/Drag instantly lifts the card to the global layer.
+- **Physics**: Anime.js handles the drag (elasticity, momentum).
+- **Persistence**: Dropped cards stay on the canvas (until we implement specific drop logic to return them).
+- **No Ghost**: Native drag is explicitly prevented on the floating elements.
+
+### Files Created
+- `src/contexts/DragCanvasContext.tsx`
+- `src/components/DragCanvas.tsx`
+- `src/hooks/useGlobalDrag.ts`
+- `src/components/cards/DraggableHandCard.tsx`
+- `src/components/cards/FloatingCard.tsx`
+
+### Files Modified
+- `src/App.tsx` (Provider wrap)
+- `src/components/Layout.tsx` (Canvas mount)
+- `src/components/cards/CardHand.tsx` (Refactor to use new system)
+- `src/hooks/useAnime.ts` (Restore export)
+
+## 34. Disable Hand Drop Zone
+**Date**: Dec 7, 2025
+**Time**: 04:40 UTC
+**Goal**: Temporarily disable the Card Hand drop zone functionality to isolate drag behavior and prevent unwanted snapping/visuals.
+
+### Execution
+- Commented out `data-hand-container` attribute in `CardHand.tsx`.
+- This effectively disables the drop target detection for the custom drag system.
+
+## 35. Extend Anime.js Drag to Library Grid
+**Date**: Dec 7, 2025
+**Time**: 04:50 UTC
+**Goal**: Fulfill user request to apply the "Transport & Drag" (Anime.js) system to the main `CardLibrary` grid, replacing the native drag (and its annoying ghost/drop-zone side effects).
+
+### Implementation
+1.  **Created `DraggableGridCard`**: A wrapper component similar to `DraggableHandCard` but designed for the virtual grid context.
+2.  **Refactored `VirtualCardGrid`**:
+    - Removed `draggable="true"` and native `onDragStart` handlers.
+    - Wrapped card rendering with `DraggableGridCard`.
+    - Uses `useGlobalDrag` to spawn `FloatingCard` clones on the canvas.
+
+### Outcome
+- **Unified Experience**: Both Hand and Library cards now use the same high-performance Anime.js drag system.
+- **No Native Conflict**: Native drag events are suppressed, preventing the "Drop Zone" overlay from appearing.
+- **Visuals**: Grid cards are cloned to the canvas when interacted with, leaving the original in place (standard library behavior) while allowing the user to drag the copy anywhere.
+
+## 36. Final Polish of Anime.js Drag System
+**Date**: Dec 7, 2025
+**Time**: 04:55 UTC
+**Goal**: Resolve remaining visibility and interaction issues with the new drag system.
+
+### Debugging Findings
+1.  **Invisible Clones**: The `DragCanvas` component was not mounted in `Layout.tsx`, meaning the context state was updating but nothing was rendering.
+2.  **Broken Interactions**: `useGlobalDrag` was capturing `pointerdown` and preventing default, killing native `onClick` handlers.
+3.  **Disappearing Hand Cards**: Due to #2, clicking a card spawned a clone (hiding the original) but failed to trigger the selection logic, leaving the UI in a "stuck" hidden state.
+
+### Fixes
+- Mounted `<DragCanvas />` in `Layout.tsx` (z-index 99999).
+- Implemented **Pointer Capture** in `FloatingCard` for seamless drag transfer.
+- Added `onClick` support to `DragItem` / `useGlobalDrag` to restore "Click to Inspect" functionality.
+- Updated `DraggableHandCard` and `DraggableGridCard` to pass click handlers through the drag system.
+
+### Outcome
+- **Perfect Drag**: Cards pop from grid/hand and follow mouse instantly.
+- **Perfect Click**: Clicking without dragging triggers inspection/selection as expected.
+- **No Ghosts**: Native drag is dead. Long live Anime.js.
+
+**Tags:** #fix #ui #drag-drop #polish
+**Est. Avg. Human Dev Time:** 20 minutes
+
+**Tags:** #feature #refactor #drag-drop
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 37 – Thor's Hamma Terminal Logs & Bug Fixes
+**Date**: Dec 8, 2025
+**Prompt:** "Can you put the terminal updates for the entire pipeline in the terminal view in the UI? It's really engaging to see it in the terminal, but for the user there's no updates for a long time..."
+
+**Summary of actions:**
+1. **Fixed IPC Communication**: Backend was sending IPC via `webContents.send()` but frontend was listening for DOM events. Added `onThorUpdate` listener in `electron/preload.ts` to bridge IPC to renderer.
+2. **Fixed Card Fabrication**: Cards were being saved to a custom core instead of `card-library`. Updated `fabricateAssets()` to use proper `card-index` format and emit to persistence layer.
+3. **Added Emojis**: 🐱 for Thor (cat) and 🐕 for Leo (dog) in log messages, both in backend output and frontend display.
+4. **Added Completion Logs**: Leo now logs when analysis is complete, Thor logs when synthesis is complete and when each card is forged.
+5. **Fixed Syntax Error**: Repaired `main.ts` structure by adding missing `createWindow()` closure and `app.on('ready')` wrapper.
+
+**Files Modified:**
+- `electron/thors-hamma.ts` - Card library integration, emojis, completion logs
+- `electron/preload.ts` - Added `onThorUpdate` IPC listener
+- `src/pages/ThorsHamma.tsx` - Proper IPC callback usage, emoji display
+- `src/types.d.ts` - Added `onThorUpdate` type
+- `docs/THORS_HAMMA_PROGRESS.md` - Updated with fix details
+
+**Tags:** #bugfix #feature #thor #ipc
+**Est. Avg. Human Dev Time:** 1.5 hours
+

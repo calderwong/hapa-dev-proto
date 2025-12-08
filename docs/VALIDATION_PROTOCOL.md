@@ -69,6 +69,22 @@ This application is a collaboration. Both parties bring value:
 **Lesson:**
 The web search result wasn't wrong - Astro UXDS does include some Material icons. But it was incomplete. The primary source (Astro's own icon library page) has the definitive list of what's actually available.
 
+## Example: The Gemini 3 Model Name (2025-12-08)
+
+**What happened:**
+- User requested "Gemini 3" for Smart LLM
+- Assumed model ID format: `gemini-3.0-pro` (following semantic versioning pattern)
+- Vertex AI returned 404: model not found
+- Checked UI dropdown → actual name is `gemini-3-pro-preview`
+
+**What should have happened:**
+- Check the model selector dropdown in the running app first
+- Or query the Vertex AI models API to get exact model IDs
+- Never assume naming conventions are consistent
+
+**Lesson:**
+Google's model naming is inconsistent. Veo uses `veo-3.0-generate-001` (with `.0`), but Gemini uses `gemini-3-pro-preview` (no `.0`, with `-preview`). The dropdown listing actual available models was the primary source sitting right there.
+
 ---
 
 ## Reminder
@@ -80,6 +96,13 @@ When you catch yourself thinking "I'll just assume this works based on what I fo
 3. Is the cost of verification less than the cost of being wrong?
 
 If yes to all three: **Verify.**
+
+---
+
+## Related Protocols
+
+- **🧹 Housecleaning Protocol**: `docs/🧹housecleaning_protocol_ALWAYS_READ.md` - Memory management, code cultivation, continuous improvement
+- **Animation Guide**: `docs/ANIME_ANIMATION_GUIDE.md` - Anime.js patterns and best practices
 
 ---
 

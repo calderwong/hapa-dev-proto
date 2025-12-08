@@ -2,6 +2,8 @@
 import React from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import PetPortal from './pets/PetPortal';
+import CardHand from './cards/CardHand';
+import { DragCanvas } from './DragCanvas';
 
 interface NavItemConfig {
     path: string;
@@ -12,6 +14,7 @@ interface NavItemConfig {
 const NAV_ITEMS: NavItemConfig[] = [
     { path: '/', label: 'Chat', icon: 'chat' },
     { path: '/forge', label: "Hapa's Forge", icon: 'whatshot' },
+    { path: '/thors-hamma', label: "Thor's Hamma", icon: 'satellite' },
     { path: '/cards', label: 'Card Library', icon: 'photo-library' },
     { path: '/wormhole', label: 'Wormhole', icon: 'cloud-download' },
 
@@ -222,6 +225,7 @@ const Layout: React.FC = () => {
 
     return (
         <div className="flex h-screen bg-gray-900 text-white font-sans overflow-hidden">
+            <DragCanvas />
             {/* Sidebar */}
             <aside className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
                 <div className="relative p-6 border-b border-gray-700 overflow-hidden group bg-gray-900/50">
@@ -282,6 +286,11 @@ const Layout: React.FC = () => {
                         {/* Pet Portal - mini pet habitat */}
                         <div className="flex-shrink-0">
                             <PetPortal />
+                        </div>
+                        
+                        {/* The Hand - Card Dock (next to Pet) */}
+                        <div className="flex-shrink-0">
+                            <CardHand />
                         </div>
                         
                         {/* Spacer */}

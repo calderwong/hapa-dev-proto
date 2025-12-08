@@ -47,6 +47,7 @@ const electron_store_1 = __importDefault(require("electron-store"));
 const generative_ai_1 = require("@google/generative-ai");
 const p2p_1 = require("./p2p");
 const pipeline_1 = require("./pipeline");
+const thors_hamma_1 = require("./thors-hamma");
 const vertexai_1 = require("./vertexai");
 const persistence_1 = require("./persistence");
 const store = new electron_store_1.default();
@@ -815,7 +816,7 @@ const transcribeAudioWithOpenAI = async (base64, mimeType, apiKey) => {
     }
     return data.text || '';
 };
-const DEFAULT_GEMINI_MODEL = 'gemini-1.5-pro';
+const DEFAULT_GEMINI_MODEL = 'gemini-3-pro-preview';
 const resolveGeminiModelName = (modelName) => {
     const trimmed = (modelName || '').toString().trim();
     if (!trimmed || trimmed === 'gemini-pro') {
@@ -1262,6 +1263,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             webSecurity: false,
+            webviewTag: true, // Enable <webview> for portal cards
         },
         autoHideMenuBar: true,
     });
@@ -1272,6 +1274,30 @@ function createWindow() {
             event.preventDefault();
         }
     });
+    // Strip X-Frame-Options and CSP frame-ancestors headers to allow embedding external sites
+    // This enables portal cards to embed any website regardless of their framing policies
+    win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        const headers = details.responseHeaders || {};
+        // Remove headers that block iframe embedding (case-insensitive)
+        const headersToRemove = ['x-frame-options', 'content-security-policy', 'content-security-policy-report-only'];
+        for (const key of Object.keys(headers)) {
+            if (headersToRemove.includes(key.toLowerCase())) {
+                delete headers[key];
+            }
+        }
+        callback({ responseHeaders: headers });
+    });
+    // Handle webview permissions for portal cards
+    win.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+        // Allow common permissions for embedded sites
+        const allowedPermissions = ['media', 'geolocation', 'notifications', 'midi', 'pointerLock', 'fullscreen', 'clipboard-read'];
+        if (allowedPermissions.includes(permission)) {
+            callback(true);
+        }
+        else {
+            callback(false);
+        }
+    });
     if (electron_is_dev_1.default) {
         win.loadURL('http://localhost:5173');
         // win.webContents.openDevTools(); // Use F12 to toggle
@@ -1279,15 +1305,14 @@ function createWindow() {
     else {
         win.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
     }
-    // Initialize Hell Week Pipeline
+    // Initialize Pipeline Manager
     (0, pipeline_1.initPipeline)(win);
-}
-electron_1.app.whenReady().then(() => {
-    electron_1.ipcMain.handle('toggle-dev-tools', (event) => {
-        const win = electron_1.BrowserWindow.fromWebContents(event.sender);
-        if (win) {
-            win.webContents.toggleDevTools();
-        }
+    // Initialize Thor's Hamma Manager
+    thors_hamma_1.thorsHammaManager.setWindow(win);
+    electron_1.ipcMain.handle('thor:process-url', async (event, { url, handCards }) => {
+        return thors_hamma_1.thorsHammaManager.processUrl(url, handCards);
+    });
+    win.on('closed', () => {
     });
     // Settings IPC handlers
     electron_1.ipcMain.handle('get-settings', () => {
@@ -1643,7 +1668,7 @@ electron_1.app.whenReady().then(() => {
         const adminSettings = getAdminSettings();
         const imageGenSettings = adminSettings.imageGenSettings || {
             defaultImageModel: 'gemini-2.0-flash-exp', // Updated to a valid model that supports image gen
-            defaultPromptLLM: 'gemini-1.5-flash', // Safer default
+            defaultPromptLLM: 'gemini-2.5-flash', // Fast flash model
         };
         const imageNumber = seriesContext?.imageNumber || 1;
         const isSeriesContinuation = imageNumber > 1 && seriesContext?.previousPrompt;
@@ -1921,8 +1946,7 @@ Create a vivid image prompt that visually represents this content:`;
             imageBuffer = null; // Release buffer immediately
             const imageMimeType = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
             // Step 2: Craft a loop-optimized prompt using LLM
-            const adminSettings = getAdminSettings();
-            const promptLLM = adminSettings.imageGenSettings?.defaultPromptLLM || 'gemini-1.5-pro';
+            // Priority: Vertex AI -> Google AI Studio
             const loopPromptRequest = `You are crafting a prompt for a SEAMLESS LOOPING VIDEO that will be generated from a still image.
 
 The still image was created with this prompt:
@@ -1942,20 +1966,46 @@ Create a video prompt that describes SUBTLE, CONTINUOUS motion for a seamless lo
 5. The motion should feel hypnotic and calming
 
 Output ONLY the video motion prompt, under 80 words. Focus purely on describing the motion/animation, not the static scene.`;
-            const llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${promptLLM}:generateContent?key=${apiKey}`;
-            const llmResponse = await fetch(llmUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ role: 'user', parts: [{ text: loopPromptRequest }] }],
-                }),
-            });
-            if (!llmResponse.ok) {
-                const errText = await llmResponse.text();
-                throw new Error(`LLM prompt crafting failed: ${errText}`);
+            let loopPrompt;
+            if ((0, vertexai_1.isVertexAIConfigured)()) {
+                console.log('[LoopVideo] Using Vertex AI for prompt crafting (Fast LLM)');
+                try {
+                    const vertexClient = (0, vertexai_1.getVertexAIClient)();
+                    // Use Fast LLM (Gemini 2.5 Flash) for reliable, high-quota generation
+                    const result = await vertexClient.generateContent(loopPromptRequest, 'fast-llm');
+                    loopPrompt = result.text.trim();
+                }
+                catch (e) {
+                    console.error('[LoopVideo] Vertex AI Prompt Crafting failed:', e);
+                    // Don't throw yet, try fallback if key exists
+                    if (!apiKey)
+                        throw e;
+                }
             }
-            const llmData = await llmResponse.json();
-            const loopPrompt = llmData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            // Fallback to Google AI Studio if Vertex failed or not configured
+            if (!loopPrompt) {
+                if (!apiKey) {
+                    throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+                }
+                const adminSettings = getAdminSettings();
+                // Default to flash for reliability if falling back
+                let promptLLM = 'gemini-2.5-flash';
+                let llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${promptLLM}:generateContent?key=${apiKey}`;
+                console.log(`[LoopVideo] Crafting prompt with AI Studio model: ${promptLLM}`);
+                let llmResponse = await fetch(llmUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ role: 'user', parts: [{ text: loopPromptRequest }] }],
+                    }),
+                });
+                if (!llmResponse.ok) {
+                    const errText = await llmResponse.text();
+                    throw new Error(`LLM prompt crafting failed (${promptLLM}): ${errText}`);
+                }
+                const llmData = await llmResponse.json();
+                loopPrompt = llmData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            }
             if (!loopPrompt) {
                 throw new Error('Failed to craft loop video prompt');
             }
@@ -2010,7 +2060,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             }
             // Fallback to Google AI Studio if Vertex not configured or failed
             if (!useVertex) {
-                const videoModel = 'veo-3.1-generate-preview';
+                // Use stable Veo model - preview models may have different response formats
+                const videoModel = 'veo-3.0-generate-001';
                 const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
                 // Build instance with image as start frame and loop mode
                 const instance = {
@@ -2055,7 +2106,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             hintGC();
             logMemory('LoopVideo After Request (before polling)');
             // Step 4: Poll for completion
-            const videoModel = 'veo-3.1-generate-preview';
+            const videoModel = 'veo-3.0-generate-001';
             const maxAttempts = 60; // 5 minutes with 5 second intervals
             let videoBuffer = null;
             if (useVertex) {
@@ -2096,10 +2147,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                     const pollData = await pollResponse.json();
                     if (pollData.done) {
                         console.log('[LoopVideo] AI Studio video generation complete!');
-                        // Extract video from response
+                        console.log('[LoopVideo] Response structure:', JSON.stringify(Object.keys(pollData.response || {})));
+                        // Extract video from response - handle multiple possible structures
                         const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples ||
-                            pollData.response?.generatedVideos || [];
+                            pollData.response?.generatedVideos ||
+                            pollData.response?.videos ||
+                            pollData.result?.videos ||
+                            [];
                         if (generatedSamples.length === 0) {
+                            console.error('[LoopVideo] No videos in response. Full response:', JSON.stringify(pollData).slice(0, 500));
                             throw new Error('No video generated');
                         }
                         const sample = generatedSamples[0];
@@ -2343,9 +2399,9 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         if (!apiKey) {
             // Fallback list when no API key is configured (include Veo models)
             return [
-                { name: 'gemini-pro', displayName: 'Gemini Pro', description: 'Standard model' },
-                { name: 'gemini-1.5-flash-001', displayName: 'Gemini 1.5 Flash', description: 'Fast model' },
-                { name: 'gemini-1.5-pro-001', displayName: 'Gemini 1.5 Pro', description: 'Advanced model' },
+                { name: 'gemini-3-pro-preview', displayName: 'Gemini 3 Pro Preview', description: 'Latest pro model' },
+                { name: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', description: 'Fast flash model' },
+                { name: 'gemini-2.0-flash-exp', displayName: 'Gemini 2.0 Flash Exp', description: 'Experimental model' },
                 ...VEO_VIDEO_MODELS,
             ];
         }
@@ -2372,9 +2428,9 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         }
         // Fallback to common model names on error (include Veo models)
         return [
-            { name: 'gemini-pro', displayName: 'Gemini Pro', description: 'Standard model' },
-            { name: 'gemini-1.5-flash-001', displayName: 'Gemini 1.5 Flash', description: 'Fast model' },
-            { name: 'gemini-1.5-pro-001', displayName: 'Gemini 1.5 Pro', description: 'Advanced model' },
+            { name: 'gemini-3-pro-preview', displayName: 'Gemini 3 Pro Preview', description: 'Latest pro model' },
+            { name: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', description: 'Fast flash model' },
+            { name: 'gemini-2.0-flash-exp', displayName: 'Gemini 2.0 Flash Exp', description: 'Experimental model' },
             ...VEO_VIDEO_MODELS,
         ];
     });
@@ -2641,7 +2697,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         if (!apiKey) {
             throw new Error('Gemini API Key not found. Please configure it in Settings.');
         }
-        const resolvedModel = modelName || 'veo-3.1-generate-preview';
+        const resolvedModel = modelName || 'veo-3.0-generate-001';
         console.log('Starting video generation with model:', resolvedModel, {
             hasStartFrame: !!imageBase64,
             hasEndFrame: !!lastFrameBase64,
@@ -4920,6 +4976,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             return { repaired: 0, errors: [err.message], repairedIds: [] };
         }
     });
+}
+electron_1.app.on('ready', async () => {
     // Initialize P2P and optionally auto-start local llama.cpp server, then open the window
     (0, p2p_1.initP2P)();
     // Initialize persistence layer (SQLite projection engine)

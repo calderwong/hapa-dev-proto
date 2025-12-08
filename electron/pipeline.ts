@@ -51,7 +51,7 @@ export function savePipelineSettings(settings: Partial<PipelineSettings>): void 
 }
 
 interface PipelineState {
-  status: 'IDLE' | 'LEO_ANALYSIS' | 'LEO_REVIEW' | 'THOR_CHUNKING' | 'THOR_PROCESSING' | 'THOR_MEDIA_PENDING' | 'THOR_MEDIA_GENERATING' | 'THOR_REVIEW' | 'CONVICTION_FINALIZING' | 'COMPLETE';
+  status: 'IDLE' | 'LEO_ANALYSIS' | 'LEO_REVIEW' | 'THOR_CHUNKING' | 'THOR_PROCESSING' | 'THOR_MEDIA_PENDING' | 'THOR_MEDIA_GENERATING' | 'THOR_REVIEW' | 'CONVICTION_FINALIZING' | 'COMPLETE' | 'ERROR';
   currentStep: string;
   progress: number;
   logs: string[];
@@ -287,7 +287,10 @@ class PipelineManager {
 
     } catch (error: any) {
       this.log(`CRITICAL ERROR: ${error.message}`);
-      this.updateState({ currentStep: 'ERROR: ' + error.message });
+      this.updateState({ 
+        status: 'ERROR',
+        currentStep: 'ERROR: ' + error.message 
+      });
     }
   }
 

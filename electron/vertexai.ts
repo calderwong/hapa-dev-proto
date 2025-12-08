@@ -110,8 +110,8 @@ export interface VideoGenerationOptions {
 
 export const MODEL_SHORTHAND_MAP: Record<string, string> = {
   // LLM Models
-  'smart-llm': 'gemini-2.5-pro',           // Latest stable pro model
-  'fast-llm': 'gemini-2.5-flash',          // Latest stable flash model
+  'smart-llm': 'gemini-3-pro-preview',  // Gemini 3 Pro Preview (latest)
+  'fast-llm': 'gemini-2.5-flash',     // Gemini 2.5 Flash (fast model)
   
   // Image Models  
   'pro-image': 'imagen-4.0-generate-001',  // Imagen 4 GA (best quality, quota limited)
@@ -121,18 +121,18 @@ export const MODEL_SHORTHAND_MAP: Record<string, string> = {
   'gemini-image': 'gemini-2.0-flash-exp',  // Alias for Gemini-based image generation
   
   // Video Models
-  'video': 'veo-2.0-generate-001',         // Veo 2 (stable)
+  'video': 'veo-3.0-generate-001',         // Veo 3 (latest stable with audio)
 };
 
 export const MODEL_DISPLAY_NAMES: Record<string, string> = {
-  'smart-llm': 'Smart LLM (Gemini 2.5 Pro)',
+  'smart-llm': 'Smart LLM (Gemini 3 Pro Preview)',
   'fast-llm': 'Fast LLM (Gemini 2.5 Flash)',
   'pro-image': 'Pro Image (Imagen 4)',
   'fast-image': 'Fast Image (Imagen 4 Fast)',
   'ultra-image': 'Ultra Image (Imagen 4 Ultra)',
   'common-image': 'Common Image (Gemini Flash)',
   'gemini-image': 'Gemini Image (Gemini Flash)',
-  'video': 'Video (Veo 2)',
+  'video': 'Video (Veo 3)',
 };
 
 // Default settings
@@ -141,11 +141,11 @@ export const DEFAULT_VERTEX_SETTINGS: VertexAISettings = {
   projectId: '',
   region: 'us-central1',
   apiKey: '',
-  defaultSmartLLM: 'gemini-2.5-pro',
+  defaultSmartLLM: 'gemini-3-pro-preview',
   defaultFastLLM: 'gemini-2.5-flash',
   defaultProImage: 'imagen-4.0-generate-001',
   defaultCommonImage: 'imagen-4.0-generate-001',
-  defaultVideo: 'veo-2.0-generate-001',
+  defaultVideo: 'veo-3.0-generate-001',
 };
 
 // Available regions
@@ -227,6 +227,16 @@ export class VertexAIClient {
   buildImagenEndpoint(modelId: string, action: 'predict'): string {
     const { projectId, region, apiKey } = this.settings;
     // Imagen still requires the regional endpoint
+    return `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${modelId}:${action}?key=${apiKey}`;
+  }
+
+  /**
+   * Build endpoint for video generation models (Veo)
+   * Veo requires the regional endpoint like Imagen
+   */
+  buildVideoEndpoint(modelId: string, action: 'predict' | 'predictLongRunning'): string {
+    const { projectId, region, apiKey } = this.settings;
+    // Veo requires the regional endpoint
     return `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${modelId}:${action}?key=${apiKey}`;
   }
 
@@ -463,8 +473,10 @@ export class VertexAIClient {
     prompt: string,
     options: VideoGenerationOptions = {}
   ): Promise<{ operationName: string; raw: any }> {
-    const modelId = this.settings.defaultVideo || 'veo-3.1-generate-preview';
-    const endpoint = this.buildEndpoint(modelId, 'predictLongRunning');
+    const modelId = this.settings.defaultVideo || 'veo-3.0-generate-001';
+    // Veo requires the regional endpoint, not the simplified one
+    const endpoint = this.buildVideoEndpoint(modelId, 'predictLongRunning');
+    console.log('[VertexAI] Video endpoint:', endpoint.replace(/key=[^&]+/, 'key=***'));
 
     const instance: any = { prompt };
 

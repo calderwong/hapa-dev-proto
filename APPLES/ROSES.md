@@ -19,3 +19,13 @@ Entries:
 2025-12-06T07:44:00.000Z - 4 - Card Sets feature design and Card Inspector image quota issues - User provided clear feature requirements for Card Sets grouping, identified quota error with Card Inspector image gen, and guided fixes - Implemented full Card Sets feature with backend IPC, pipeline integration, and Card Library filtering UI; fixed image model mapping - 5 - 🌹🌹🌹🌹🌹 - {CJ, Mimi} - [c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9] - [f0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5] - [SHA-256]
 
 2025-12-07T03:35:00.000Z - 5 - Epistemological blind spot: assumed web search results were authoritative for Astro UXDS icons - User caught the failure pattern, explained that web rankings are profit-optimized not truth-optimized, and requested a permanent validation protocol be established - Created VALIDATION_PROTOCOL.md and memory entries establishing primary source verification as core principle - 5 - 🌹🌹🌹🌹🌹 - {CJ} - [a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6] - [b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2] - [SHA-256]
+
+2025-12-07T01:50:00.000Z - 6 - HTML5 Ghost Card interfering with Anime.js drag - User forced a deep step back and re-evaluation when quick fixes failed, leading to discovery of proper preventDefault() pattern - Re-architected drag hook to use React events and explicit dragstart prevention - 4 - 🌹🌹🌹🌹 - {CJ} - [SHA-256-PENDING] - [SHA-256-PENDING] - [SHA-256]
+
+2025-12-07T04:40:00.000Z - 34 - Ghost card interference with custom drag - "Try taking the drop zone out... CHECK FOR DUPLICATE FILES" - Fixed by removing native drag and drop zones - 5 - 🌹🌹🌹🌹🌹 - {Unknown} - [SHA-256 hash] - [Previous Hash] - SHA-256
+
+2025-12-07T12:35:00.000Z - 35 - Cards needed visual "hover" life on canvas - "make them 'hover'... subtle pulses... sway effect" - Implemented detailed Anime.js physics loops - 4 - 🌹🌹🌹 - {Unknown} - [SHA-256 hash] - [Previous Hash] - SHA-256
+
+2025-12-07T12:45:00.000Z - 36 - Hover animation was jumpy/robotic - "animation 'loops' and just subtley sways... dropping and restarting" - Refined into dual desync'd alternating loops (bob + tilt) for organic feel - 3 - 🌹🌹🌹 - {Unknown} - [SHA-256 hash] - [Previous Hash] - SHA-256
+
+2025-12-07T04:38:00.000Z - 7 - Invisible Drag Clones & Broken Interactions - User identified "drop zone" interference and persistent invisibility of clones, forcing deep debugging of mounting & pointer events - Mounted DragCanvas and implemented Pointer Capture for seamless drag - 5 - 🌹🌹🌹🌹🌹 - {CJ} - [SHA-256-PENDING] - [SHA-256-PENDING] - [SHA-256]

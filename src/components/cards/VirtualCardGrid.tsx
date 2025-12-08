@@ -1,0 +1,254 @@
+/**
+ * VirtualCardGrid - Performance-optimized card grid with progressive loading
+ * 
+ * Features:
+ * - Virtual scrolling (only renders visible cards + buffer)
+ * - Progressive loading with queued animations
+ * - One card animates at a time (no performance bombs)
+ * - Rarity-based reveal animations
+ */
+
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useCardLoadQueue, getRevealAnimationClass } from '../../hooks/useCardLoadQueue';
+import type { QueuedCard, CardIndexEntry } from '../../hooks/useCardLoadQueue';
+import { DraggableGridCard } from './DraggableGridCard';
+
+interface VirtualCardGridProps {
+  cards: CardIndexEntry[];
+  onCardClick?: (card: CardIndexEntry, event: React.MouseEvent) => void;
+  onCardDragStart?: (event: React.DragEvent, card: CardIndexEntry) => void;
+  selectedCardId?: string | null;
+  renderCard: (card: CardIndexEntry, index: number) => React.ReactNode;
+  className?: string;
+  cardHeight?: number;    // Approx card height for virtual scroll calc
+  columns?: number;       // Number of columns in grid
+  bufferRows?: number;    // Rows to buffer above/below viewport
+}
+
+// Skeleton placeholder component
+const CardSkeleton: React.FC<{ onClick?: () => void }> = ({ onClick }) => (
+  <div 
+    className="card-skeleton rounded-lg aspect-[3/4] cursor-pointer"
+    onClick={onClick}
+  >
+    <div className="h-full flex flex-col">
+      <div className="flex-1 bg-gray-800/50 rounded-t-lg"></div>
+      <div className="p-2 space-y-2">
+        <div className="h-2 bg-gray-700/50 rounded w-3/4"></div>
+        <div className="h-2 bg-gray-700/50 rounded w-1/2"></div>
+      </div>
+    </div>
+  </div>
+);
+
+// Card wrapper with reveal animation
+// Note: animatedCards set is passed from parent to persist across re-renders
+const CardWithReveal: React.FC<{
+  queuedCard: QueuedCard;
+  card: CardIndexEntry | null;
+  children: React.ReactNode;
+  onPrioritize?: () => void;
+  animatedCards: Set<string>;
+}> = ({ queuedCard, card, children, onPrioritize, animatedCards }) => {
+  const { state, tier } = queuedCard;
+  const cardId = card?.cardId || queuedCard.cardId || '';
+  
+  // Check if already animated (persisted in parent's Set)
+  const wasAnimated = animatedCards.has(cardId);
+  
+  // Mark as animated when revealing
+  if (state === 'revealing' && cardId && !wasAnimated) {
+    animatedCards.add(cardId);
+  }
+  
+  // Show skeleton only if NO data at all
+  if (!card && !queuedCard.data) {
+    return <CardSkeleton onClick={onPrioritize} />;
+  }
+  
+  // If still waiting to be revealed (queued but not processed yet), show skeleton
+  if (state === 'skeleton' && !wasAnimated) {
+    return <CardSkeleton onClick={onPrioritize} />;
+  }
+  
+  // Determine animation class - only animate if just revealed, not if already animated
+  const shouldAnimate = state === 'revealing' && !wasAnimated;
+  const animClass = shouldAnimate ? getRevealAnimationClass(tier) : '';
+  
+  return (
+    <div className={animClass}>
+      {children}
+    </div>
+  );
+};
+
+export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
+  cards,
+  onCardClick,
+  onCardDragStart,
+  selectedCardId,
+  renderCard,
+  className = '',
+  cardHeight = 280,
+  columns = 5,
+  bufferRows = 2,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(800);
+  
+  // Track which cards have been animated (persists across virtual scroll re-renders)
+  const animatedCardsRef = useRef<Set<string>>(new Set());
+  
+  // Progressive loading queue
+  const {
+    cards: queuedCards,
+    isLoading,
+    loadedCount,
+    totalCount,
+    setVisibleRange,
+    loadCards,
+    pauseReveals,
+    resumeReveals,
+    prioritizeCard,
+  } = useCardLoadQueue({
+    revealDelay: 60,
+    bufferSize: columns * bufferRows,
+    onCardRevealed: (cardId, tier) => {
+      console.log(`[VirtualGrid] Card revealed: ${cardId} (tier ${tier})`);
+    },
+  });
+  
+  // Calculate row height and total height
+  const rowHeight = cardHeight + 16; // card height + gap
+  const totalRows = Math.ceil(cards.length / columns);
+  const totalHeight = totalRows * rowHeight;
+  
+  // Calculate visible range
+  const visibleRange = useMemo(() => {
+    const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - bufferRows);
+    const visibleRows = Math.ceil(containerHeight / rowHeight) + bufferRows * 2;
+    const endRow = Math.min(totalRows, startRow + visibleRows);
+    
+    return {
+      startIndex: startRow * columns,
+      endIndex: Math.min(cards.length, endRow * columns),
+      offsetY: startRow * rowHeight,
+    };
+  }, [scrollTop, containerHeight, rowHeight, columns, bufferRows, totalRows, cards.length]);
+  
+  // Load cards ONCE when cards first arrive (not on every change)
+  const hasLoadedRef = useRef(false);
+  useEffect(() => {
+    if (cards.length > 0 && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      loadCards(cards);
+    }
+  }, [cards.length]); // Only depend on length, not cards array reference
+  
+  // Update visible range when scroll changes
+  useEffect(() => {
+    setVisibleRange(visibleRange.startIndex, visibleRange.endIndex);
+  }, [visibleRange, setVisibleRange]);
+  
+  // Handle scroll
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    setScrollTop(target.scrollTop);
+    
+    // Pause reveals during scroll, resume after
+    pauseReveals();
+    // Debounced resume
+    const timeoutId = setTimeout(() => resumeReveals(), 150);
+    return () => clearTimeout(timeoutId);
+  }, [pauseReveals, resumeReveals]);
+  
+  // Measure container on mount/resize
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerHeight(entry.contentRect.height);
+      }
+    });
+    
+    observer.observe(container);
+    setContainerHeight(container.clientHeight);
+    
+    return () => observer.disconnect();
+  }, []);
+  
+  // Get visible cards to render
+  const visibleCards = useMemo(() => {
+    const visible: Array<{ card: CardIndexEntry; queued: QueuedCard; index: number }> = [];
+    
+    for (let i = visibleRange.startIndex; i < visibleRange.endIndex; i++) {
+      const card = cards[i];
+      const queued = queuedCards[i];
+      if (card && queued) {
+        visible.push({ card, queued, index: i });
+      }
+    }
+    
+    return visible;
+  }, [visibleRange, cards, queuedCards]);
+  
+  return (
+    <div className={`relative ${className}`}>
+      {/* Loading progress indicator */}
+      {isLoading && (
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-2 px-3 py-1.5 bg-gray-900/90 backdrop-blur rounded-full border border-cyan-500/30">
+          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></div>
+          <span className="text-xs font-mono text-cyan-400">
+            {loadedCount}/{totalCount}
+          </span>
+        </div>
+      )}
+      
+      {/* Scrollable container */}
+      <div
+        ref={containerRef}
+        className="h-full overflow-y-auto custom-scrollbar"
+        onScroll={handleScroll}
+      >
+        {/* Virtual spacer for total height */}
+        <div style={{ height: totalHeight, position: 'relative' }}>
+          {/* Positioned grid for visible cards */}
+          <div
+            className="card-grid absolute left-0 right-0"
+            style={{ transform: `translateY(${visibleRange.offsetY}px)` }}
+          >
+            {visibleCards.map(({ card, queued, index }) => (
+              <CardWithReveal
+                key={card.cardId}
+                queuedCard={queued}
+                card={queued.data}
+                onPrioritize={() => prioritizeCard(card.cardId)}
+                animatedCards={animatedCardsRef.current}
+              >
+                <DraggableGridCard
+                  card={card}
+                  renderPreview={() => renderCard(card, index)}
+                  onClick={(e) => onCardClick?.(card, e)}
+                  className={`
+                    group relative bg-gray-900/40 border-2 rounded-lg 
+                    cursor-grab active:cursor-grabbing 
+                    hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200
+                    flex flex-col overflow-hidden
+                    ${selectedCardId === card.cardId ? 'card-selected' : ''}
+                  `}
+                >
+                  {renderCard(card, index)}
+                </DraggableGridCard>
+              </CardWithReveal>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default VirtualCardGrid;

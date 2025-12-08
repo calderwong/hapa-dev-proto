@@ -2,6 +2,8 @@
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { useEffect } from 'react';
 import Layout from './components/Layout';
+import { HandProvider } from './contexts/HandContext';
+import { DragCanvasProvider } from './contexts/DragCanvasContext';
 import Chat from './pages/Chat';
 import Settings from './pages/Settings';
 import { initFirebase } from './firebase';
@@ -16,6 +18,7 @@ import Revid from './pages/Revid';
 import RevidMedia from './pages/RevidMedia';
 import CardLibrary from './pages/CardLibrary';
 import Forge from './pages/Forge';
+import ThorsHamma from './pages/ThorsHamma';
 
 import WormholeAstro from './pages/WormholeAstro';
 import Wiki from './pages/Wiki';
@@ -45,6 +48,8 @@ function App() {
         <rux-status status="normal"></rux-status>
       </div>
       
+      <HandProvider>
+      <DragCanvasProvider>
       <Router>
       <Routes>
         <Route path="/" element={<Layout />}>
@@ -65,9 +70,12 @@ function App() {
           <Route path="pets" element={<Pets />} />
           <Route path="pipeline" element={<Pipeline />} />
           <Route path="mermaid" element={<Mermaid />} />
+          <Route path="thors-hamma" element={<ThorsHamma />} />
         </Route>
       </Routes>
     </Router>
+    </DragCanvasProvider>
+    </HandProvider>
     </>
   );
 }

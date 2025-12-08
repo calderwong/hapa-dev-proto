@@ -486,6 +486,8 @@ export interface ElectronAPI {
     saveProfile?: (profile: UserProfile) => Promise<boolean>;
     saveProfileImage?: (params: { bytesBase64: string; mimeType: string }) => Promise<{ cardId: string; imageUrl: string }>;
     getSystemStats?: () => Promise<SystemStats>;
+    processThorUrl?: (url: string, handCards: any[]) => Promise<{ success: boolean; cards?: any[]; error?: string }>;
+    onThorUpdate?: (callback: (data: { type: string; payload: any }) => void) => () => void;
 }
 
 export interface UserProfile {
