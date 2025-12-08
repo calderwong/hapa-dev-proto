@@ -56,6 +56,7 @@ const Admin: React.FC = () => {
         projectId: '',
         region: 'us-central1',
         apiKey: '',
+        keyFilePath: '',
         defaultSmartLLM: 'gemini-3.0-pro',
         defaultFastLLM: 'gemini-2.5-flash-lite',
         defaultProImage: 'imagen-4.0-generate-001',
@@ -459,6 +460,40 @@ const Admin: React.FC = () => {
                                         value={vertexSettings.apiKey}
                                         onChange={(e) => setVertexSettings(prev => ({ ...prev, apiKey: e.target.value }))}
                                         placeholder="Enter your Vertex AI API key"
+                                        className="w-full bg-gray-900/50 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                    />
+                                </div>
+
+                                {/* Service Account Key File (Optional) */}
+                                <div className="mb-4">
+                                    <label className="text-[10px] text-gray-400 uppercase tracking-wider mb-1 block">
+                                        Service Account Key File (Optional)
+                                    </label>
+                                    <div className="text-[9px] text-gray-500 mb-1.5 leading-tight">
+                                        Required for advanced features (e.g., Veo Video) on regional endpoints.
+                                        Path to your downloaded JSON key.
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={vertexSettings.keyFilePath || ''}
+                                        onChange={(e) => setVertexSettings(prev => ({ ...prev, keyFilePath: e.target.value }))}
+                                        onDrop={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                                const file = e.dataTransfer.files[0];
+                                                // Electron/Chrome exposes full path on File object
+                                                const filePath = (file as any).path; 
+                                                if (filePath) {
+                                                    setVertexSettings(prev => ({ ...prev, keyFilePath: filePath }));
+                                                }
+                                            }
+                                        }}
+                                        onDragOver={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                        }}
+                                        placeholder="C:\path\to\service-account-key.json (Drag & Drop file here)"
                                         className="w-full bg-gray-900/50 border border-gray-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
                                     />
                                 </div>

@@ -36,6 +36,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const stream_1 = require("stream");
+const util_1 = require("util");
+const promises_1 = require("stream/promises");
+const streamPipeline = (0, util_1.promisify)(stream_1.pipeline);
 const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
@@ -2029,19 +2033,27 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             });
             // Step 3: Generate the video using Veo with loop mode
             // Use Veo 3.1 for best loop quality (supports last_frame for seamless looping)
+            // Pre-calculate path to stream directly to disk
+            const userDataDir = electron_1.app.getPath('userData');
+            const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
+            await fs.promises.mkdir(videosDir, { recursive: true });
+            const videoCardId = `loop-video-${Date.now()}`;
+            const videoFileName = `${videoCardId}.mp4`;
+            const videoPath = path.join(videosDir, videoFileName);
+            let success = false;
             broadcastLoopProgress({
                 imageId,
                 status: 'generating',
                 message: 'Generating loop video...',
             });
-            let operationName = '';
-            let useVertex = false;
-            // Check if Vertex AI is configured (preferred)
+            // =================================================================================
+            // ATTEMPT 1: Vertex AI (Preferred)
+            // =================================================================================
             if ((0, vertexai_1.isVertexAIConfigured)()) {
                 console.log('[LoopVideo] Using Vertex AI for video generation');
-                useVertex = true;
                 try {
                     const vertexClient = (0, vertexai_1.getVertexAIClient)();
+                    // 1. Generate
                     const result = await vertexClient.generateVideo(loopPrompt, {
                         startFrameBase64: imageBase64,
                         startFrameMimeType: imageMimeType,
@@ -2050,31 +2062,53 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                         aspectRatio: '16:9',
                         loopMode: true,
                     });
-                    operationName = result.operationName;
-                    console.log('[LoopVideo] Vertex AI video generation started, operation:', operationName);
+                    console.log('[LoopVideo] Vertex AI video generation started, operation:', result.operationName);
+                    // 2. Poll
+                    console.log('[LoopVideo] Polling Vertex AI for completion...');
+                    const pollResult = await vertexClient.pollVideoOperation(result.operationName, 60, // maxAttempts
+                    5000, // intervalMs
+                    (attempt, max) => {
+                        broadcastLoopProgress({
+                            imageId,
+                            status: 'generating',
+                            message: `Generating video... ${Math.round((attempt / max) * 100)}%`,
+                            progress: Math.round((attempt / max) * 100),
+                        });
+                    });
+                    // 3. Save
+                    await fs.promises.writeFile(videoPath, Buffer.from(pollResult.videoBase64, 'base64'));
+                    console.log('[LoopVideo] Vertex AI video generation complete!');
+                    success = true;
                 }
                 catch (vertexErr) {
-                    console.error('[LoopVideo] Vertex AI failed, falling back to AI Studio:', vertexErr.message);
-                    useVertex = false;
+                    console.error('[LoopVideo] Vertex AI failed (Gen or Poll), switching to AI Studio fallback:', vertexErr.message);
+                    // Fall through to AI Studio
                 }
             }
-            // Fallback to Google AI Studio if Vertex not configured or failed
-            if (!useVertex) {
-                // Use stable Veo model - preview models may have different response formats
+            // =================================================================================
+            // ATTEMPT 2: Google AI Studio (Fallback)
+            // =================================================================================
+            if (!success) {
+                console.log('[LoopVideo] Starting AI Studio Fallback...');
+                if (!apiKey) {
+                    throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+                }
+                // Use stable Veo model
                 const videoModel = 'veo-3.0-generate-001';
                 const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
-                // Build instance with image as start frame and loop mode
+                // Ensure imageBase64 is available (Vertex might have failed mid-way, but we didn't null it yet)
+                if (!imageBase64) {
+                    // Should not happen as we removed the premature nulling, but strict check
+                    throw new Error('Image data lost during fallback');
+                }
+                // Build instance
                 const instance = {
                     prompt: loopPrompt,
                     image: {
                         bytesBase64Encoded: imageBase64,
                         mimeType: imageMimeType,
                     },
-                    // For loop mode: use same image as lastFrame for seamless loop
-                    lastFrame: {
-                        bytesBase64Encoded: imageBase64,
-                        mimeType: imageMimeType,
-                    },
+                    // Note: lastFrame removed to avoid INVALID_ARGUMENT in AI Studio
                 };
                 const parameters = {
                     aspectRatio: '16:9',
@@ -2083,7 +2117,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                     instances: [instance],
                     parameters,
                 };
-                console.log('[LoopVideo] Calling AI Studio Veo API for loop generation...');
+                console.log('[LoopVideo] Calling AI Studio Veo API...');
                 const videoResponse = await fetch(videoUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2091,48 +2125,19 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 });
                 if (!videoResponse.ok) {
                     const errText = await videoResponse.text();
-                    throw new Error(`Video generation request failed: ${errText}`);
+                    throw new Error(`AI Studio Video generation request failed: ${errText}`);
                 }
                 const videoOpData = await videoResponse.json();
-                operationName = videoOpData.name;
+                const operationName = videoOpData.name;
                 if (!operationName) {
-                    throw new Error('No operation name returned from video generation');
+                    throw new Error('No operation name returned from AI Studio');
                 }
                 console.log('[LoopVideo] AI Studio video generation started, operation:', operationName);
-            }
-            // CRITICAL: Release base64 data BEFORE the polling loop
-            // This was staying in memory for 5+ minutes during polling!
-            imageBase64 = null;
-            hintGC();
-            logMemory('LoopVideo After Request (before polling)');
-            // Step 4: Poll for completion
-            const videoModel = 'veo-3.0-generate-001';
-            const maxAttempts = 60; // 5 minutes with 5 second intervals
-            let videoBuffer = null;
-            if (useVertex) {
-                // Poll using Vertex AI
-                console.log('[LoopVideo] Polling Vertex AI for completion...');
-                const vertexClient = (0, vertexai_1.getVertexAIClient)();
-                try {
-                    const result = await vertexClient.pollVideoOperation(operationName, maxAttempts, 5000, (attempt, max) => {
-                        broadcastLoopProgress({
-                            imageId,
-                            status: 'generating',
-                            message: `Generating video... ${Math.round((attempt / max) * 100)}%`,
-                            progress: Math.round((attempt / max) * 100),
-                        });
-                    });
-                    // Vertex returns base64 directly
-                    videoBuffer = Buffer.from(result.videoBase64, 'base64').buffer;
-                    console.log('[LoopVideo] Vertex AI video generation complete!');
-                }
-                catch (pollErr) {
-                    throw new Error(`Vertex AI polling failed: ${pollErr.message}`);
-                }
-            }
-            else {
-                // Poll using AI Studio
+                // Poll AI Studio
                 const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+                const maxAttempts = 60;
+                // Release memory now that request is sent
+                imageBase64 = null;
                 for (let attempt = 0; attempt < maxAttempts; attempt++) {
                     await new Promise(resolve => setTimeout(resolve, 5000));
                     broadcastLoopProgress({
@@ -2147,8 +2152,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                     const pollData = await pollResponse.json();
                     if (pollData.done) {
                         console.log('[LoopVideo] AI Studio video generation complete!');
-                        console.log('[LoopVideo] Response structure:', JSON.stringify(Object.keys(pollData.response || {})));
-                        // Extract video from response - handle multiple possible structures
+                        // Extract video from response
                         const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples ||
                             pollData.response?.generatedVideos ||
                             pollData.response?.videos ||
@@ -2156,38 +2160,35 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                             [];
                         if (generatedSamples.length === 0) {
                             console.error('[LoopVideo] No videos in response. Full response:', JSON.stringify(pollData).slice(0, 500));
-                            throw new Error('No video generated');
+                            throw new Error('No video generated from AI Studio');
                         }
                         const sample = generatedSamples[0];
                         const videoUri = sample.video?.uri || sample.uri;
                         if (!videoUri) {
                             throw new Error('No video URI in response');
                         }
-                        // Download the video
+                        // Stream the video directly to disk
+                        console.log('[LoopVideo] Streaming video to disk:', videoPath);
                         const downloadResponse = await fetch(videoUri, {
                             headers: { 'x-goog-api-key': apiKey },
                             redirect: 'follow',
                         });
                         if (!downloadResponse.ok) {
-                            throw new Error('Failed to download generated video');
+                            throw new Error(`Failed to download video: ${downloadResponse.statusText}`);
                         }
-                        videoBuffer = await downloadResponse.arrayBuffer();
+                        const fileStream = fs.createWriteStream(videoPath);
+                        // @ts-ignore
+                        await (0, promises_1.finished)(stream_1.Readable.fromWeb(downloadResponse.body).pipe(fileStream));
+                        success = true;
                         break;
                     }
                 }
+                if (!success) {
+                    throw new Error('AI Studio video generation timed out');
+                }
             }
-            if (!videoBuffer) {
-                throw new Error('Video generation timed out');
-            }
-            // Save video to card-videos directory
-            const userDataDir = electron_1.app.getPath('userData');
-            const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
-            await fs.promises.mkdir(videosDir, { recursive: true });
-            const videoCardId = `loop-video-${Date.now()}`;
-            const videoFileName = `${videoCardId}.mp4`;
-            const videoPath = path.join(videosDir, videoFileName);
-            await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
             console.log('[LoopVideo] Saved video to:', videoPath);
+            hintGC(); // Hint garbage collection after streaming
             // Step 5: Create child video card with full lineage
             const videoCardRecord = {
                 cardId: videoCardId,

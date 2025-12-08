@@ -52,6 +52,13 @@ This application is a collaboration. Both parties bring value:
 4. **Mutual accountability** - call out deviations from these protocols
 5. **Learning together** - document the journey, not just the destination
 
+## API & Endpoint Validation
+
+- **The "Preview" Law**: If a model name contains "preview" (e.g., `veo-3.1-preview`), it **MUST** be accessed via `v1beta1` endpoints. Using `v1` will result in phantom 404s during polling, even if the initial request succeeds.
+- **The "Ghost Operation" Anomaly (Veo 3.1)**: As of Dec 2025, `veo-3.1-generate-preview` operations return a UUID that is **unpollable** via any standard Vertex AI REST endpoint (Standard or Publisher, v1/beta/alpha). The API returns 404 or 400. **Do not rely on polling Vertex for Veo 3.1.** Always implement a fallback to Google AI Studio.
+- **The "Region" Law**: Service Accounts **MUST** use Regional Endpoints (e.g., `us-central1-aiplatform...`). Global endpoints are for API Keys only.
+- **Verification**: When adding a new model, verify its "Stability Level" in Google documentation. Default to `v1beta1` for anything bleeding edge.
+
 ## Example: The Icon Incident (2025-12-06)
 
 **What happened:**

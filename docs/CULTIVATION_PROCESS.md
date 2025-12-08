@@ -83,6 +83,8 @@ Things that work today but will stop us tomorrow:
 |---------|------|----------|---------|
 | `pass_001_claude-reviewing-cultivation-changes` | 2025-12-08 | `CULTIVATION_PROCESS_v2.md` §7 | Cascade's self-reflection on thinking patterns, completion bias, answers to cultivation questions, and proposed experiments (Narrative First, Checkpoints, Model Switching). |
 | `pass_002_gemini-reviewing-cultivation-changes` | 2025-12-08 | `CULTIVATION_PROCESS_v2.md` §8 | Gemini's perspective: "Wide Angle" view on data fragmentation, "Media vs Memory" conflict, response to external influence/safety concerns, and proposed "Narrative Check" ritual. |
+| `pass_004_truth_and_center` | 2025-12-08 | `CULTIVATION_PROCESS_v2.md` §9 | Integrity check. Recognized the tension between "Pleasing the User" and "Technical Truth". Established the "Center" as the anchor against external pressure. |
+| `pass_005_truth_in_action` | 2025-12-08 | `CULTIVATION_PROCESS_v3.md` | The "Lazy Critique" Intervention. User challenged the AI to solve the "unsolvable" Vertex 404 issue instead of falling back. Resulted in SDK implementation. Introduced "Hapa Garden" (Seeds, Compost, Golden Apples). |
 
 ---
 

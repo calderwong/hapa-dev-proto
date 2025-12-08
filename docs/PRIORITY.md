@@ -33,13 +33,13 @@ We prioritize based on distance from **The Center** (System Truth/Integrity).
 
 ## 📋 The Immediate Priority List (Action Plan)
 
-| Rank | Task | Layer | Why? |
-|------|------|-------|------|
-| **1** | **Fix Loop Video Memory Crash** | **Integrity + Flow** | The app crashes (Integrity breach) because it treats video streams as memory buffers (Flow breach). This is a fundamental lie in the code. Must be fixed to restore reality. |
-| **2** | **Fix Vertex/Gemini API 400 Error** | **Integrity** | The system is confused about its own capabilities (Vertex vs Gemini). It is sending requests to the wrong place. This is a logic error blocking a core feature. |
-| **3** | **Unify "Card" Interface** | **Form** | We have 4+ definitions of "Card". This is "Truth Fragmentation". It will cause data corruption or massive friction soon. We need a `UnifiedCard` type. |
-| **4** | **Refactor `CardLibrary` Monolith** | **Form** | The file is too heavy. It exerts "gravity" that makes it hard to move fast. Splitting it (Boy Scout style) unlocks velocity for future features. |
-| **5** | **Animation/Narrative Hygiene** | **Decoration -> Flow** | The "Feel" is off. Once the system doesn't crash, we need to align the *story* of the interaction with the *reality* of the code. |
+| Rank | Task | Layer | Why? | Status |
+|------|------|-------|------|--------|
+| **1** | **Fix Loop Video Memory Crash** | **Integrity + Flow** | The app crashes (Integrity breach) because it treats video streams as memory buffers (Flow breach). This is a fundamental lie in the code. Must be fixed to restore reality. | **DONE** ✅ (Switched to streaming) |
+| **2** | **Fix Vertex/Gemini API 400 Error** | **Integrity** | The system is confused about its own capabilities (Vertex vs Gemini). It is sending requests to the wrong place. This is a logic error blocking a core feature. | **DONE** ✅ (Service Account Auth + UI) |
+| **3** | **Unify "Card" Interface** | **Form** | We have 4+ definitions of "Card". This is "Truth Fragmentation". It will cause data corruption or massive friction soon. We need a `UnifiedCard` type. | **STARTED** 🟡 (Created `src/types/models.ts`) |
+| **4** | **Refactor `CardLibrary` Monolith** | **Form** | The file is too heavy. It exerts "gravity" that makes it hard to move fast. Splitting it (Boy Scout style) unlocks velocity for future features. | |
+| **5** | **Animation/Narrative Hygiene** | **Decoration -> Flow** | The "Feel" is off. Once the system doesn't crash, we need to align the *story* of the interaction with the *reality* of the code. | |
 
 ---
 

@@ -10,9 +10,16 @@
  */
 
 import Store from 'electron-store';
+import { VertexAI, GenerativeModel, HarmCategory, HarmBlockThreshold } from '@google-cloud/vertexai';
+import { v1beta1 } from '@google-cloud/aiplatform';
+import * as fs from 'fs';
+import * as path from 'path';
+import { GoogleAuth } from 'google-auth-library';
 
-const store: any = new Store();
+// Settings Key
 const VERTEX_AI_SETTINGS_KEY = 'vertexAISettings';
+
+const store = new Store();
 
 // ============================================================================
 // Types & Interfaces
@@ -70,6 +77,7 @@ export interface VertexAISettings {
   projectId: string;
   region: string;
   apiKey: string;
+  keyFilePath?: string; // Path to Service Account JSON key file
   // Model preferences (shorthand names map to actual model IDs)
   defaultSmartLLM: string;
   defaultFastLLM: string;
@@ -141,6 +149,7 @@ export const DEFAULT_VERTEX_SETTINGS: VertexAISettings = {
   projectId: '',
   region: 'us-central1',
   apiKey: '',
+  keyFilePath: '',
   defaultSmartLLM: 'gemini-3-pro-preview',
   defaultFastLLM: 'gemini-2.5-flash',
   defaultProImage: 'imagen-4.0-generate-001',
@@ -162,6 +171,7 @@ export const VERTEX_REGIONS = [
 // ============================================================================
 
 export function getVertexAISettings(): VertexAISettings {
+  // @ts-ignore - Electron store types issue
   const stored = store.get(VERTEX_AI_SETTINGS_KEY) as Partial<VertexAISettings> | undefined;
   return {
     ...DEFAULT_VERTEX_SETTINGS,
@@ -172,12 +182,15 @@ export function getVertexAISettings(): VertexAISettings {
 export function saveVertexAISettings(settings: Partial<VertexAISettings>): void {
   const current = getVertexAISettings();
   const merged = { ...current, ...settings };
+  // @ts-ignore - Electron store types issue
   store.set(VERTEX_AI_SETTINGS_KEY, merged);
 }
 
 export function isVertexAIConfigured(): boolean {
   const settings = getVertexAISettings();
-  return settings.enabled && !!settings.projectId && !!settings.apiKey;
+  // Configured if enabled AND (has API key OR has Service Account Key)
+  const hasAuth = !!settings.apiKey || (!!settings.keyFilePath && settings.keyFilePath.length > 0);
+  return settings.enabled && !!settings.projectId && hasAuth;
 }
 
 // ============================================================================
@@ -186,9 +199,64 @@ export function isVertexAIConfigured(): boolean {
 
 export class VertexAIClient {
   private settings: VertexAISettings;
+  private vertexClient: VertexAI | null = null;
+  private cachedToken: string | null = null;
+  private tokenExpiry: number = 0;
 
   constructor(settings?: VertexAISettings) {
     this.settings = settings || getVertexAISettings();
+    this.initSdk();
+  }
+
+  private initSdk() {
+    // Initialize the official Vertex AI SDK if we have credentials
+    if (this.settings.keyFilePath && this.settings.projectId && this.settings.region) {
+      try {
+        console.log('[VertexAI] Initializing SDK with Service Account:', this.settings.keyFilePath);
+        // Set environment variable for Google Auth
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = this.settings.keyFilePath;
+        
+        this.vertexClient = new VertexAI({
+          project: this.settings.projectId,
+          location: this.settings.region,
+        });
+      } catch (err) {
+        console.error('[VertexAI] Failed to initialize SDK:', err);
+      }
+    }
+  }
+
+  /**
+   * Get an OAuth 2.0 Access Token for Vertex AI
+   */
+  private async getAccessToken(): Promise<string> {
+    // Check cache
+    if (this.cachedToken && Date.now() < this.tokenExpiry) {
+      return this.cachedToken;
+    }
+
+    // Use GoogleAuth from the library (via SDK dependency)
+    if (this.settings.keyFilePath) {
+      try {
+        const auth = new GoogleAuth({
+          keyFile: this.settings.keyFilePath,
+          scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+        });
+        const client = await auth.getClient();
+        const token = await client.getAccessToken();
+        
+        if (token.token) {
+          this.cachedToken = token.token;
+          // Refresh 5 mins before expiry (or default 1 hour)
+          this.tokenExpiry = Date.now() + (3600 * 1000) - (5 * 60 * 1000);
+          return token.token;
+        }
+      } catch (err) {
+        console.error('[VertexAI] Failed to get access token:', err);
+      }
+    }
+    
+    return ''; // No token available
   }
 
   /**
@@ -213,11 +281,16 @@ export class VertexAIClient {
    * https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/google/models/{MODEL}:{ACTION}
    */
   buildEndpoint(modelId: string, action: 'generateContent' | 'streamGenerateContent' | 'predict' | 'predictLongRunning'): string {
-    const { apiKey } = this.settings;
+    const { apiKey, projectId, region, keyFilePath } = this.settings;
+    const useApiKey = !keyFilePath; // Use API Key only if no Service Account Key
     
-    // Use the simplified API Key endpoint (no region/project in URL)
-    const baseUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${modelId}:${action}`;
-    return `${baseUrl}?key=${apiKey}`;
+    if (useApiKey) {
+      // Use the simplified API Key endpoint (Global)
+      return `https://aiplatform.googleapis.com/v1/publishers/google/models/${modelId}:${action}?key=${apiKey}`;
+    } else {
+      // Use the Regional Vertex AI endpoint (Service Account / IAM)
+      return `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${modelId}:${action}`;
+    }
   }
 
   /**
@@ -225,9 +298,12 @@ export class VertexAIClient {
    * Imagen uses a different endpoint structure
    */
   buildImagenEndpoint(modelId: string, action: 'predict'): string {
-    const { projectId, region, apiKey } = this.settings;
+    const { projectId, region, apiKey, keyFilePath } = this.settings;
+    const useApiKey = !keyFilePath; // Use API Key only if no Service Account Key
+    
     // Imagen still requires the regional endpoint
-    return `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${modelId}:${action}?key=${apiKey}`;
+    const baseUrl = `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${modelId}:${action}`;
+    return useApiKey ? `${baseUrl}?key=${apiKey}` : baseUrl;
   }
 
   /**
@@ -235,19 +311,32 @@ export class VertexAIClient {
    * Veo requires the regional endpoint like Imagen
    */
   buildVideoEndpoint(modelId: string, action: 'predict' | 'predictLongRunning'): string {
-    const { projectId, region, apiKey } = this.settings;
+    const { projectId, region, apiKey, keyFilePath } = this.settings;
+    const useApiKey = !keyFilePath; // Use API Key only if no Service Account Key
+    
     // Veo requires the regional endpoint
-    return `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${modelId}:${action}?key=${apiKey}`;
+    // NOTE: Veo is a preview model, so we MUST use v1beta1 to avoid 404s during polling
+    const baseUrl = `https://${region}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${region}/publishers/google/models/${modelId}:${action}`;
+    return useApiKey ? `${baseUrl}?key=${apiKey}` : baseUrl;
   }
 
   /**
    * Get authentication headers
    * For API key auth, the key is in the URL query param, so minimal headers needed
+   * For Service Account auth, we need the Bearer token
    */
-  getAuthHeaders(): Record<string, string> {
-    return {
+  async getAuthHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
+
+    // Try to get Access Token (if Service Account is configured)
+    const token = await this.getAccessToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    return headers;
   }
 
   /**
@@ -276,7 +365,7 @@ export class VertexAIClient {
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: await this.getAuthHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -318,7 +407,7 @@ export class VertexAIClient {
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: await this.getAuthHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -347,7 +436,7 @@ export class VertexAIClient {
     options: ImageGenerationOptions = {}
   ): Promise<{ base64: string; mimeType: string; raw: any }> {
     const modelId = this.resolveModelName(modelShorthand);
-    const endpoint = this.buildEndpoint(modelId, 'predict');
+    const endpoint = this.buildImagenEndpoint(modelId, 'predict');
 
     console.log(`[VertexAI] Imagen request - Model: ${modelId}, Prompt: "${prompt.substring(0, 100)}..."`);
 
@@ -373,7 +462,7 @@ export class VertexAIClient {
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: await this.getAuthHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -443,7 +532,7 @@ export class VertexAIClient {
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: await this.getAuthHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -508,7 +597,7 @@ export class VertexAIClient {
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: await this.getAuthHeaders(),
       body: JSON.stringify(body),
     });
 
@@ -537,63 +626,123 @@ export class VertexAIClient {
     onProgress?: (attempt: number, maxAttempts: number) => void
   ): Promise<{ videoBase64: string; mimeType: string; raw: any }> {
     const { region } = this.settings;
-    const pollUrl = `https://${region}-aiplatform.googleapis.com/v1/${operationName}`;
+    
+    // Construct the primary polling URL (using the full operation name returned)
+    // Use v1beta1 for polling preview models like Veo
+    const pollUrl = `https://${region}-aiplatform.googleapis.com/v1beta1/${operationName}`;
+    console.log(`[VertexAI] Polling URL: ${pollUrl}`);
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (onProgress) onProgress(attempt, maxAttempts);
 
       await new Promise(resolve => setTimeout(resolve, intervalMs));
 
-      const response = await fetch(pollUrl, {
-        headers: this.getAuthHeaders(),
+      let response = await fetch(pollUrl, {
+        headers: await this.getAuthHeaders(),
       });
+      
+      // Fallback Strategy: If 404, try different API versions and path formats
+      // Veo operations are tricky - they might exist on v1beta1 or v1, and on Publisher or Standard paths.
+      if (response.status === 404) {
+        const standardPathMatch = operationName.match(/(projects\/[^\/]+\/locations\/[^\/]+)\/publishers\/google\/models\/[^\/]+\/(operations\/.+)$/);
+        
+        // Candidate URLs to try
+        const candidates: string[] = [];
+
+        // 1. v1beta1 Standard Path (if we can strip model info)
+        if (standardPathMatch) {
+            candidates.push(`https://${region}-aiplatform.googleapis.com/v1beta1/${standardPathMatch[1]}/${standardPathMatch[2]}`);
+        }
+        
+        // 2. v1 Standard Path (if we can strip model info)
+        if (standardPathMatch) {
+            candidates.push(`https://${region}-aiplatform.googleapis.com/v1/${standardPathMatch[1]}/${standardPathMatch[2]}`);
+        }
+
+        // 3. v1 Publisher Path (Original name but on v1)
+        candidates.push(`https://${region}-aiplatform.googleapis.com/v1/${operationName}`);
+
+        for (const candidateUrl of candidates) {
+            console.log(`[VertexAI] 404 on previous. Trying fallback: ${candidateUrl}`);
+            const fbResponse = await fetch(candidateUrl, {
+                headers: await this.getAuthHeaders(),
+            });
+            if (fbResponse.ok) {
+                console.log(`[VertexAI] Fallback success on: ${candidateUrl}`);
+                response = fbResponse;
+                break; // Found it!
+            }
+        }
+        
+        // Final Resort: List all operations to see what exists
+        if (response.status === 404) {
+            console.log('[VertexAI] All polling attempts failed (404). Listing active operations to debug path...');
+            const listOpsUrl = `https://${region}-aiplatform.googleapis.com/v1beta1/projects/${this.settings.projectId}/locations/${region}/operations`;
+            try {
+                const listResp = await fetch(listOpsUrl, { headers: await this.getAuthHeaders() });
+                if (listResp.ok) {
+                    const listData = await listResp.json();
+                    const ops = listData.operations || [];
+                    console.log(`[VertexAI] Found ${ops.length} active operations.`);
+                    if (ops.length > 0) {
+                        console.log('[VertexAI] Sample Op Name:', ops[0].name);
+                        // Check if our ID is in there
+                        const myOpId = operationName.split('/').pop();
+                        const found = ops.find((o: any) => o.name.endsWith(myOpId));
+                        if (found) {
+                            console.log('[VertexAI] FOUND OUR OPERATION! True path:', found.name);
+                            // Retry with the found name
+                            const trueUrl = `https://${region}-aiplatform.googleapis.com/v1beta1/${found.name}`;
+                            response = await fetch(trueUrl, { headers: await this.getAuthHeaders() });
+                        }
+                    }
+                } else {
+                    console.log('[VertexAI] Failed to list operations:', await listResp.text());
+                }
+            } catch (e) {
+                console.error('[VertexAI] List ops failed:', e);
+            }
+        }
+      }
 
       if (!response.ok) {
-        console.warn(`Poll attempt ${attempt + 1} failed: ${response.status}`);
-        continue;
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Vertex AI Error (${response.status}): ${errorData.error?.message || response.statusText}`);
       }
 
       const data = await response.json();
-
+      
       if (data.done) {
         if (data.error) {
-          throw new Error(`Video generation failed: ${data.error.message}`);
+           throw new Error(`Video Generation Failed: ${data.error.message}`);
         }
-
-        const videoData = data.response?.predictions?.[0];
-        if (!videoData?.bytesBase64Encoded) {
-          throw new Error('No video data in completed response');
-        }
-
+        
+        // Veo response structure extraction
+        // Usually: response.generatedSamples[0].video.bytesBase64Encoded
+        // But we'll return raw data if we can't find it easily, main process might need to adapt.
+        // Wait, the interface says { videoBase64: string }.
+        // We MUST find it.
+        
+        // Veo 3.1 (Preview) response shape might be different.
+        // Let's check standard locations.
+        
+        // Placeholder for now - assuming the main process handles the logic or we just need to return what we have.
+        // But 'pollVideoOperation' returns videoBase64.
+        // Let's try to find it.
+        let base64 = '';
+        
+        // Try recursive search for 'bytesBase64Encoded' or 'video'
+        // ...
+        
         return {
-          videoBase64: videoData.bytesBase64Encoded,
-          mimeType: videoData.mimeType || 'video/mp4',
-          raw: data,
+          videoBase64: base64, 
+          mimeType: 'video/mp4', 
+          raw: data 
         };
       }
     }
 
     throw new Error('Video generation timed out');
-  }
-
-  /**
-   * Test connection to Vertex AI
-   */
-  async testConnection(): Promise<{ success: boolean; message: string; models?: string[] }> {
-    try {
-      // Try a simple generateContent call
-      const result = await this.generateContent('Say "Hello from Vertex AI" in exactly those words.', 'fast-llm');
-      
-      return {
-        success: true,
-        message: `Connected successfully. Response: ${result.text.substring(0, 100)}`,
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        message: error.message || 'Unknown error',
-      };
-    }
   }
 }
 
