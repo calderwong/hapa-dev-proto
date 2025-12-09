@@ -15,16 +15,16 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { initP2P, createCore, appendToCore, readCore, getCoreLength, getP2PStats } from './p2p';
 import { initPipeline } from './pipeline';
 import { thorsHammaManager } from './thors-hamma';
-import { 
-  isVertexAIConfigured, 
-  getVertexAIClient, 
+import {
+  isVertexAIConfigured,
+  getVertexAIClient,
   getVertexAISettings,
-  resetVertexAIClient 
+  resetVertexAIClient
 } from './vertexai';
-import { 
-  initPersistence, 
-  getPersistence, 
-  emitCardEvent 
+import {
+  initPersistence,
+  getPersistence,
+  emitCardEvent
 } from './persistence';
 
 const store: any = new Store();
@@ -324,7 +324,7 @@ const getLocalVisionSettingsInternal = (): LocalVisionSettingsInternal => {
     typeof stored.modelsDir === 'string' && stored.modelsDir.length > 0
       ? stored.modelsDir
       : path.join(app.getPath('userData'), 'vision-models');
-  
+
   return {
     pythonPath: stored.pythonPath || 'python', // Default to 'python' in PATH
     modelsDir,
@@ -357,7 +357,7 @@ const startVisionServerInternal = async (): Promise<LocalVisionStatusInternal> =
 
   try {
     // Path to the python server script
-    const serverScript = isDev 
+    const serverScript = isDev
       ? path.join(__dirname, '../python/server.py')
       : path.join(process.resourcesPath, 'python/server.py'); // Assuming we package it here for prod
 
@@ -365,27 +365,27 @@ const startVisionServerInternal = async (): Promise<LocalVisionStatusInternal> =
     // We need to reliably find the python folder. 
     // In dev: root/python/server.py
     // In prod: resources/python/server.py
-    
+
     let scriptPath = '';
     if (isDev) {
-       scriptPath = path.resolve(__dirname, '..', 'python', 'server.py');
+      scriptPath = path.resolve(__dirname, '..', 'python', 'server.py');
     } else {
-       // In production, we likely need to bundle the python script
-       // For now, let's assume it's in resources
-       scriptPath = path.join(process.resourcesPath, 'python', 'server.py');
+      // In production, we likely need to bundle the python script
+      // For now, let's assume it's in resources
+      scriptPath = path.join(process.resourcesPath, 'python', 'server.py');
     }
 
     if (!fs.existsSync(scriptPath)) {
-       // Fallback check for dev environment relative to main.ts location
-       scriptPath = path.resolve(__dirname, '../../python/server.py'); 
+      // Fallback check for dev environment relative to main.ts location
+      scriptPath = path.resolve(__dirname, '../../python/server.py');
     }
 
     console.log('Starting Vision Server at:', scriptPath);
 
     const env = {
-        ...process.env,
-        HAPA_VISION_PORT: String(settings.port),
-        HF_HOME: settings.modelsDir
+      ...process.env,
+      HAPA_VISION_PORT: String(settings.port),
+      HF_HOME: settings.modelsDir
     };
 
     const child = spawn(settings.pythonPath, [scriptPath], {
@@ -404,14 +404,14 @@ const startVisionServerInternal = async (): Promise<LocalVisionStatusInternal> =
     };
 
     if (child.stdout) {
-        child.stdout.on('data', (data) => {
-            console.log(`[Vision]: ${data.toString().trim()}`);
-        });
+      child.stdout.on('data', (data) => {
+        console.log(`[Vision]: ${data.toString().trim()}`);
+      });
     }
     if (child.stderr) {
-        child.stderr.on('data', (data) => {
-            console.error(`[Vision Err]: ${data.toString().trim()}`);
-        });
+      child.stderr.on('data', (data) => {
+        console.error(`[Vision Err]: ${data.toString().trim()}`);
+      });
     }
 
     child.on('exit', (code, signal) => {
@@ -1137,7 +1137,7 @@ const analyzeImageWithGemini = async (
 ): Promise<VisualAnalysisResult> => {
   const opId = `img-analyze-${Date.now()}`;
   startOperation(opId, 'analyzeImage');
-  
+
   const apiKey = store.get('geminiKey') as string | undefined;
   if (!apiKey) {
     endOperation(opId);
@@ -1153,10 +1153,10 @@ const analyzeImageWithGemini = async (
   let imageBuffer: Buffer | null = await fs.promises.readFile(imagePath);
   const fileSizeMB = imageBuffer.length / (1024 * 1024);
   console.log('[VisualAnalysis] Image size:', fileSizeMB.toFixed(2), 'MB');
-  
+
   let base64Image: string | null = imageBuffer.toString('base64');
   imageBuffer = null; // Release buffer immediately after encoding
-  
+
   // Detect MIME type from extension
   const ext = path.extname(imagePath).toLowerCase();
   const mimeMap: Record<string, string> = {
@@ -1202,14 +1202,14 @@ Return ONLY valid JSON, no markdown code blocks.`;
       },
     },
   ]);
-  
+
   // Release base64 after API call
   base64Image = null;
   hintGC();
 
   const response = await result.response;
   const rawText = ((response as any).text?.() as string) || '';
-  
+
   // Parse JSON response
   let parsed: any = {};
   try {
@@ -1234,7 +1234,7 @@ Return ONLY valid JSON, no markdown code blocks.`;
   const shortSummary = summary.split(/[.!?]/).slice(0, 2).join('. ').trim() || summary.slice(0, 200);
 
   endOperation(opId);
-  
+
   return {
     description,
     colors: Array.isArray(parsed.colors) ? parsed.colors : [],
@@ -1257,7 +1257,7 @@ const analyzeVideoWithGemini = async (
 ): Promise<VisualAnalysisResult> => {
   const opId = `vid-analyze-${Date.now()}`;
   startOperation(opId, 'analyzeVideo');
-  
+
   const apiKey = store.get('geminiKey') as string | undefined;
   if (!apiKey) {
     endOperation(opId);
@@ -1267,7 +1267,7 @@ const analyzeVideoWithGemini = async (
   // Check file size - Gemini inline limit is ~20MB for videos
   const stats = await fs.promises.stat(videoPath);
   const fileSizeMB = stats.size / (1024 * 1024);
-  
+
   if (fileSizeMB > 20) {
     endOperation(opId);
     throw new Error(`Video file is ${fileSizeMB.toFixed(1)}MB. Maximum supported size for inline analysis is 20MB. Please use a shorter/smaller video.`);
@@ -1280,10 +1280,10 @@ const analyzeVideoWithGemini = async (
   // Read and encode video - use let so we can null after use
   let videoBuffer: Buffer | null = await fs.promises.readFile(videoPath);
   console.log('[VideoAnalysis] Video size:', fileSizeMB.toFixed(2), 'MB');
-  
+
   let base64Video: string | null = videoBuffer.toString('base64');
   videoBuffer = null; // Release buffer immediately after encoding
-  
+
   // Detect MIME type from extension
   const ext = path.extname(videoPath).toLowerCase();
   const mimeMap: Record<string, string> = {
@@ -1330,14 +1330,14 @@ Return ONLY valid JSON, no markdown code blocks.`;
       },
     },
   ]);
-  
+
   // Release base64 after API call
   base64Video = null;
   hintGC();
 
   const response = await result.response;
   const rawText = ((response as any).text?.() as string) || '';
-  
+
   // Parse JSON response
   let parsed: any = {};
   try {
@@ -1360,7 +1360,7 @@ Return ONLY valid JSON, no markdown code blocks.`;
   const shortSummary = summary.split(/[.!?]/).slice(0, 2).join('. ').trim() || summary.slice(0, 200);
 
   endOperation(opId);
-  
+
   return {
     description,
     colors: Array.isArray(parsed.colors) ? parsed.colors : [],
@@ -1382,14 +1382,14 @@ const getScrollContextForCard = async (cardRecord: any): Promise<string> => {
   }
 
   const scrollTexts: string[] = [];
-  
+
   for (const scroll of cardRecord.scrolls) {
     if (!scroll.cardId || !scroll.includeInSummarization) continue;
-    
+
     try {
       const scrollRecords = await readCore(scroll.cardId);
       if (!Array.isArray(scrollRecords) || scrollRecords.length === 0) continue;
-      
+
       // Find the card record in the scroll's Hypercore
       let scrollCardRecord: any = null;
       for (let i = scrollRecords.length - 1; i >= 0; i--) {
@@ -1403,14 +1403,14 @@ const getScrollContextForCard = async (cardRecord: any): Promise<string> => {
           }
         } catch { /* ignore */ }
       }
-      
+
       if (!scrollCardRecord) continue;
-      
+
       // Get text content from scroll card
       const scrollMediaType = scrollCardRecord.mediaType || '';
       const scrollIngest = scrollCardRecord.wormhole?.ingest;
       const scrollOriginalPath = scrollIngest?.originalPath;
-      
+
       if (scrollOriginalPath && (scrollMediaType === 'text' || scrollMediaType === 'markdown')) {
         try {
           const scrollText = await fs.promises.readFile(scrollOriginalPath, 'utf-8');
@@ -1424,9 +1424,9 @@ const getScrollContextForCard = async (cardRecord: any): Promise<string> => {
       console.warn('[Scroll] Failed to read scroll card:', scroll.cardId, err);
     }
   }
-  
+
   if (scrollTexts.length === 0) return '';
-  
+
   // Combine and cap at 32KB
   const combined = scrollTexts.join('\n\n');
   return combined.length > 32000 ? combined.slice(0, 32000) + '\n[...truncated]' : combined;
@@ -1436,13 +1436,13 @@ const getScrollContextForCard = async (cardRecord: any): Promise<string> => {
 // Includes: scroll text, existing summaries, image prompts, video prompts, derivatives info
 const buildComprehensiveContext = async (cardRecord: any, cardId: string): Promise<string> => {
   const contextParts: string[] = [];
-  
+
   // 1. Scroll context
   const scrollText = await getScrollContextForCard(cardRecord);
   if (scrollText) {
     contextParts.push(`=== ATTACHED SCROLLS ===\n${scrollText}`);
   }
-  
+
   // 2. Existing summaries (from previous runs)
   if (cardRecord.summaries && Array.isArray(cardRecord.summaries)) {
     const latestSummary = cardRecord.summaries.find((s: any) => s.kind === 'medium' || s.kind === 'visual-analysis');
@@ -1465,7 +1465,7 @@ const buildComprehensiveContext = async (cardRecord: any, cardId: string): Promi
       }
     }
   }
-  
+
   // 3. Image generation prompts (from card or derived images)
   if (cardRecord.imagePrompt) {
     contextParts.push(`=== IMAGE GENERATION PROMPT ===\n${cardRecord.imagePrompt}`);
@@ -1473,12 +1473,12 @@ const buildComprehensiveContext = async (cardRecord: any, cardId: string): Promi
   if (cardRecord.prompt) {
     contextParts.push(`=== GENERATION PROMPT ===\n${cardRecord.prompt}`);
   }
-  
+
   // 4. Video generation prompts
   if (cardRecord.videoPrompt) {
     contextParts.push(`=== VIDEO GENERATION PROMPT ===\n${cardRecord.videoPrompt}`);
   }
-  
+
   // 5. Check for children/derivatives and include their prompts
   if (cardRecord.children && Array.isArray(cardRecord.children)) {
     for (const child of cardRecord.children) {
@@ -1486,7 +1486,7 @@ const buildComprehensiveContext = async (cardRecord: any, cardId: string): Promi
       try {
         const childRecords = await readCore(child.cardId);
         if (!Array.isArray(childRecords) || childRecords.length === 0) continue;
-        
+
         for (let i = childRecords.length - 1; i >= 0; i--) {
           const raw = childRecords[i];
           if (!raw || typeof raw !== 'string') continue;
@@ -1506,14 +1506,14 @@ const buildComprehensiveContext = async (cardRecord: any, cardId: string): Promi
       } catch { /* ignore */ }
     }
   }
-  
+
   // 6. Title and metadata
   if (cardRecord.title || cardRecord.name) {
     contextParts.push(`=== CARD TITLE ===\n${cardRecord.title || cardRecord.name}`);
   }
-  
+
   if (contextParts.length === 0) return '';
-  
+
   const combined = contextParts.join('\n\n');
   // Cap at 48KB to leave room for the main content
   return combined.length > 48000 ? combined.slice(0, 48000) + '\n[...context truncated]' : combined;
@@ -1595,12 +1595,12 @@ function createWindow() {
       event.preventDefault();
     }
   });
-  
+
   // Strip X-Frame-Options and CSP frame-ancestors headers to allow embedding external sites
   // This enables portal cards to embed any website regardless of their framing policies
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     const headers = details.responseHeaders || {};
-    
+
     // Remove headers that block iframe embedding (case-insensitive)
     const headersToRemove = ['x-frame-options', 'content-security-policy', 'content-security-policy-report-only'];
     for (const key of Object.keys(headers)) {
@@ -1608,10 +1608,10 @@ function createWindow() {
         delete headers[key];
       }
     }
-    
+
     callback({ responseHeaders: headers });
   });
-  
+
   // Handle webview permissions for portal cards
   win.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
     // Allow common permissions for embedded sites
@@ -1632,7 +1632,7 @@ function createWindow() {
 
   // Initialize Pipeline Manager
   initPipeline(win);
-  
+
   // Initialize Thor's Hamma Manager
   thorsHammaManager.setWindow(win);
   ipcMain.handle('thor:process-url', async (event, { url, handCards }) => {
@@ -1815,8 +1815,8 @@ function createWindow() {
   ipcMain.handle(
     'save-local-vision-settings',
     (_event, settings: LocalVisionSettingsInternal) => {
-        saveLocalVisionSettingsInternal(settings);
-        return true;
+      saveLocalVisionSettingsInternal(settings);
+      return true;
     }
   );
 
@@ -1835,68 +1835,68 @@ function createWindow() {
   ipcMain.handle('list-vision-models', async () => {
     const status = getLocalVisionStatusInternal();
     if (!status.running || !status.port) {
-        throw new Error('Vision server is not running.');
+      throw new Error('Vision server is not running.');
     }
     const settings = getLocalVisionSettingsInternal();
     const params = new URLSearchParams();
     if (settings.modelsDir) {
-        params.set('cache_dir', settings.modelsDir);
+      params.set('cache_dir', settings.modelsDir);
     }
 
     try {
-        const response = await fetch(`http://127.0.0.1:${status.port}/models?${params.toString()}`);
-        if (!response.ok) throw new Error(`Server returned ${response.status}`);
-        return await response.json();
+      const response = await fetch(`http://127.0.0.1:${status.port}/models?${params.toString()}`);
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
+      return await response.json();
     } catch (e: any) {
-        throw new Error(`Failed to list models: ${e.message}`);
+      throw new Error(`Failed to list models: ${e.message}`);
     }
   });
 
   ipcMain.handle('download-vision-model', async (_event, payload: { repo_id: string; variant?: string }) => {
     const status = getLocalVisionStatusInternal();
     if (!status.running || !status.port) {
-        throw new Error('Vision server is not running.');
+      throw new Error('Vision server is not running.');
     }
     if (!payload.repo_id) throw new Error('repo_id is required');
 
     const settings = getLocalVisionSettingsInternal();
 
     try {
-        const response = await fetch(`http://127.0.0.1:${status.port}/models/download`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                repo_id: payload.repo_id,
-                cache_dir: settings.modelsDir,
-                variant: payload.variant
-            })
-        });
-        if (!response.ok) throw new Error(`Server returned ${response.status}`);
-        return await response.json();
+      const response = await fetch(`http://127.0.0.1:${status.port}/models/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo_id: payload.repo_id,
+          cache_dir: settings.modelsDir,
+          variant: payload.variant
+        })
+      });
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
+      return await response.json();
     } catch (e: any) {
-        throw new Error(`Failed to trigger download: ${e.message}`);
+      throw new Error(`Failed to trigger download: ${e.message}`);
     }
   });
 
   ipcMain.handle('generate-local-image', async (_event, payload: any) => {
     const status = getLocalVisionStatusInternal();
     if (!status.running || !status.port) {
-        throw new Error('Vision server is not running.');
+      throw new Error('Vision server is not running.');
     }
     try {
-        const response = await fetch(`http://127.0.0.1:${status.port}/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Generation failed: ${errText}`);
-        }
-        return await response.json();
+      const response = await fetch(`http://127.0.0.1:${status.port}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Generation failed: ${errText}`);
+      }
+      return await response.json();
     } catch (e: any) {
-        throw new Error(`Failed to generate image: ${e.message}`);
+      throw new Error(`Failed to generate image: ${e.message}`);
     }
   });
 
@@ -2175,7 +2175,7 @@ function createWindow() {
       const opId = `img-gen-${Date.now()}`;
       startOperation(opId, 'generateImage');
       logMemory('ImageGen Start');
-      
+
       const apiKey = store.get('geminiKey') as string | undefined;
       if (!apiKey && provider === 'gemini') {
         endOperation(opId);
@@ -2196,38 +2196,38 @@ function createWindow() {
       console.log('[ImageGen] Image #', imageNumber, isSeriesContinuation ? '(series continuation)' : '(first image)');
       console.log('[ImageGen] Using LLM:', imageGenSettings.defaultPromptLLM);
       if (cardContext.image) console.log('[ImageGen] Including Input Image for Multimodal Context');
-      
+
       try {
         // Step 1: Craft image prompt using LLM (always done)
         const contentParts: string[] = [];
-        
+
         if (cardContext.name && cardContext.name !== 'Untitled') {
           contentParts.push(`Title: ${cardContext.name}`);
         }
-        
+
         if (cardContext.text) {
           // Truncate to reasonable length for LLM
-          const truncatedText = cardContext.text.length > 2000 
-            ? cardContext.text.substring(0, 2000) + '...' 
+          const truncatedText = cardContext.text.length > 2000
+            ? cardContext.text.substring(0, 2000) + '...'
             : cardContext.text;
           contentParts.push(`Content/Request:\n${truncatedText}`);
         }
-        
+
         if (cardContext.messageContent) {
           contentParts.push(`Message: ${cardContext.messageContent}`);
         }
-        
+
         if (cardContext.tags && cardContext.tags.length > 0) {
           contentParts.push(`Key Terms/Tags: ${cardContext.tags.slice(0, 30).join(', ')}`);
         }
-        
-        const contextSummary = contentParts.length > 0 
+
+        const contextSummary = contentParts.length > 0
           ? contentParts.join('\n\n')
           : `Card Type: ${cardContext.mediaKind || 'document'}\nTitle: ${cardContext.name || 'Untitled'}`;
 
         // Build prompt based on whether this is a series continuation or first image
         let promptCraftingRequest: string;
-        
+
         if (isSeriesContinuation && seriesContext?.previousPrompt) {
           // Series continuation - build on previous image
           promptCraftingRequest = `
@@ -2272,48 +2272,48 @@ Create a vivid image prompt that visually represents this content:`;
 
         // Call LLM to craft the prompt
         let craftedPrompt = '';
-        
+
         // Check if Vertex AI is configured (preferred)
         if (isVertexAIConfigured()) {
-            console.log('[ImageGen] Using Vertex AI for prompt crafting');
-            try {
-                const vertexClient = getVertexAIClient();
-                // Note: Vertex AI multimodal requires different handling
-                // For now, use text-only prompt crafting
-                const result = await vertexClient.generateContent(promptCraftingRequest, 'fast-llm');
-                craftedPrompt = result.text.trim();
-            } catch (e: any) {
-                console.error('[ImageGen] Vertex AI Prompt Crafting failed:', e);
-                throw new Error(`Vertex AI prompt crafting failed: ${e.message}`);
-            }
+          console.log('[ImageGen] Using Vertex AI for prompt crafting');
+          try {
+            const vertexClient = getVertexAIClient();
+            // Note: Vertex AI multimodal requires different handling
+            // For now, use text-only prompt crafting
+            const result = await vertexClient.generateContent(promptCraftingRequest, 'fast-llm');
+            craftedPrompt = result.text.trim();
+          } catch (e: any) {
+            console.error('[ImageGen] Vertex AI Prompt Crafting failed:', e);
+            throw new Error(`Vertex AI prompt crafting failed: ${e.message}`);
+          }
         } else {
-            // Fallback to Google AI Studio
-            if (!apiKey) {
-                throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
-            }
+          // Fallback to Google AI Studio
+          if (!apiKey) {
+            throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+          }
 
-            const genAI = new GoogleGenerativeAI(apiKey);
-            const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
-            
-            try {
-                // Construct Multimodal Request
-                const promptParts: any[] = [promptCraftingRequest];
-                if (cardContext.image) {
-                    promptParts.push({
-                        inlineData: {
-                            mimeType: cardContext.mimeType || 'image/png',
-                            data: cardContext.image // Base64 string
-                        }
-                    });
+          const genAI = new GoogleGenerativeAI(apiKey);
+          const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
+
+          try {
+            // Construct Multimodal Request
+            const promptParts: any[] = [promptCraftingRequest];
+            if (cardContext.image) {
+              promptParts.push({
+                inlineData: {
+                  mimeType: cardContext.mimeType || 'image/png',
+                  data: cardContext.image // Base64 string
                 }
-
-                const result = await promptModel.generateContent(promptParts);
-                const response = await result.response;
-                craftedPrompt = response.text().trim();
-            } catch (e: any) {
-                console.error('[ImageGen] SDK Prompt Crafting failed:', e);
-                throw new Error(`LLM prompt crafting failed: ${e.message}`);
+              });
             }
+
+            const result = await promptModel.generateContent(promptParts);
+            const response = await result.response;
+            craftedPrompt = response.text().trim();
+          } catch (e: any) {
+            console.error('[ImageGen] SDK Prompt Crafting failed:', e);
+            throw new Error(`LLM prompt crafting failed: ${e.message}`);
+          }
         }
 
         if (!craftedPrompt) {
@@ -2327,115 +2327,115 @@ Create a vivid image prompt that visually represents this content:`;
         let mimeType = 'image/png';
 
         if (provider === 'local-vision') {
-            const status = getLocalVisionStatusInternal();
-            if (!status.running || !status.port) {
-                throw new Error('Local Vision server is not running.');
-            }
-            const visionSettings = getLocalVisionSettingsInternal();
-            console.log(`[ImageGen] Routing to Local Vision (Model: ${visionSettings.activeModel})`);
+          const status = getLocalVisionStatusInternal();
+          if (!status.running || !status.port) {
+            throw new Error('Local Vision server is not running.');
+          }
+          const visionSettings = getLocalVisionSettingsInternal();
+          console.log(`[ImageGen] Routing to Local Vision (Model: ${visionSettings.activeModel})`);
 
-            const response = await fetch(`http://127.0.0.1:${status.port}/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    prompt: craftedPrompt,
-                    model_id: visionSettings.activeModel,
-                    cache_dir: visionSettings.modelsDir,
-                    num_inference_steps: 4, // Z-Image-Turbo default
-                    guidance_scale: 1.5,
-                    width: 1024,
-                    height: 1024
-                })
-            });
+          const response = await fetch(`http://127.0.0.1:${status.port}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: craftedPrompt,
+              model_id: visionSettings.activeModel,
+              cache_dir: visionSettings.modelsDir,
+              num_inference_steps: 4, // Z-Image-Turbo default
+              guidance_scale: 1.5,
+              width: 1024,
+              height: 1024
+            })
+          });
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`Local generation failed: ${errText}`);
-            }
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Local generation failed: ${errText}`);
+          }
 
-            const data = await response.json();
-            if (data.images && data.images.length > 0) {
-                imageBase64 = data.images[0]; // Base64 string without prefix
-                mimeType = 'image/png';
-            } else {
-                throw new Error('Local server returned no images.');
-            }
+          const data = await response.json();
+          if (data.images && data.images.length > 0) {
+            imageBase64 = data.images[0]; // Base64 string without prefix
+            mimeType = 'image/png';
+          } else {
+            throw new Error('Local server returned no images.');
+          }
 
         } else if (isVertexAIConfigured()) {
-            // Vertex AI Image Generation using Imagen 4 (same as Hell Week pipeline)
-            console.log('[ImageGen] Using Vertex AI Imagen for image generation');
-            try {
-                const vertexClient = getVertexAIClient();
-                // Use generateImageImagen with 'pro-image' (Imagen 4) - same as Hell Week pipeline
-                const result = await vertexClient.generateImageImagen(craftedPrompt, 'pro-image', {
-                    aspectRatio: '1:1',
-                    sampleCount: 1,
-                });
-                imageBase64 = result.base64;
-                mimeType = result.mimeType;
-            } catch (e: any) {
-                console.error('[ImageGen] Vertex AI Imagen Generation failed:', e);
-                throw new Error(`Vertex AI image generation failed: ${e.message}`);
-            }
-        } else {
-            // Fallback: Google AI Studio Gemini Image Generation
-            if (!apiKey) {
-                throw new Error('No AI provider configured for image generation.');
-            }
-            
-            const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultImageModel}:generateContent?key=${apiKey}`;
-            
-            console.log(`[ImageGen] Calling Gemini Image API: ${imageUrl.replace(apiKey!, 'HIDDEN_KEY')}`);
-            console.log(`[ImageGen] Payload:`, JSON.stringify({ contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }] }).substring(0, 200) + '...');
-
-            const imageResponse = await fetch(imageUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }],
-              }),
+          // Vertex AI Image Generation using Imagen 4 (same as Hell Week pipeline)
+          console.log('[ImageGen] Using Vertex AI Imagen for image generation');
+          try {
+            const vertexClient = getVertexAIClient();
+            // Use generateImageImagen with 'pro-image' (Imagen 4) - same as Hell Week pipeline
+            const result = await vertexClient.generateImageImagen(craftedPrompt, 'pro-image', {
+              aspectRatio: '1:1',
+              sampleCount: 1,
             });
-    
-            console.log(`[ImageGen] Response Status: ${imageResponse.status} ${imageResponse.statusText}`);
+            imageBase64 = result.base64;
+            mimeType = result.mimeType;
+          } catch (e: any) {
+            console.error('[ImageGen] Vertex AI Imagen Generation failed:', e);
+            throw new Error(`Vertex AI image generation failed: ${e.message}`);
+          }
+        } else {
+          // Fallback: Google AI Studio Gemini Image Generation
+          if (!apiKey) {
+            throw new Error('No AI provider configured for image generation.');
+          }
 
-            if (!imageResponse.ok) {
-              const errText = await imageResponse.text();
-              console.error(`[ImageGen] API Error Body:`, errText);
-              throw new Error(`Image generation failed (${imageResponse.status}): ${errText}`);
+          const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/${imageGenSettings.defaultImageModel}:generateContent?key=${apiKey}`;
+
+          console.log(`[ImageGen] Calling Gemini Image API: ${imageUrl.replace(apiKey!, 'HIDDEN_KEY')}`);
+          console.log(`[ImageGen] Payload:`, JSON.stringify({ contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }] }).substring(0, 200) + '...');
+
+          const imageResponse = await fetch(imageUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: craftedPrompt }] }],
+            }),
+          });
+
+          console.log(`[ImageGen] Response Status: ${imageResponse.status} ${imageResponse.statusText}`);
+
+          if (!imageResponse.ok) {
+            const errText = await imageResponse.text();
+            console.error(`[ImageGen] API Error Body:`, errText);
+            throw new Error(`Image generation failed (${imageResponse.status}): ${errText}`);
+          }
+
+          const rawText = await imageResponse.text();
+          console.log(`[ImageGen] Raw Response Body (first 500 chars):`, rawText.substring(0, 500));
+
+          let imageData: any;
+          try {
+            imageData = JSON.parse(rawText);
+          } catch (e) {
+            console.error(`[ImageGen] JSON Parse Error:`, e);
+            throw new Error('Failed to parse image API response.');
+          }
+
+          // Extract image from response
+          const parts = imageData.candidates?.[0]?.content?.parts || [];
+
+          for (const part of parts) {
+            if (part.inlineData?.data) {
+              imageBase64 = part.inlineData.data;
+              mimeType = part.inlineData.mimeType || 'image/png';
+              break;
             }
-    
-            const rawText = await imageResponse.text();
-            console.log(`[ImageGen] Raw Response Body (first 500 chars):`, rawText.substring(0, 500));
-            
-            let imageData: any;
-            try {
-                imageData = JSON.parse(rawText);
-            } catch (e) {
-                console.error(`[ImageGen] JSON Parse Error:`, e);
-                throw new Error('Failed to parse image API response.');
+          }
+
+          if (!imageBase64) {
+            // Check if response contains text (markdown image) instead
+            const textContent = parts.find((p: any) => p.text)?.text || '';
+            const base64Match = textContent.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+            if (base64Match) {
+              imageBase64 = base64Match[1];
+            } else {
+              throw new Error('No image data in response. The model may not support image generation.');
             }
-            
-            // Extract image from response
-            const parts = imageData.candidates?.[0]?.content?.parts || [];
-    
-            for (const part of parts) {
-              if (part.inlineData?.data) {
-                imageBase64 = part.inlineData.data;
-                mimeType = part.inlineData.mimeType || 'image/png';
-                break;
-              }
-            }
-    
-            if (!imageBase64) {
-              // Check if response contains text (markdown image) instead
-              const textContent = parts.find((p: any) => p.text)?.text || '';
-              const base64Match = textContent.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
-              if (base64Match) {
-                imageBase64 = base64Match[1];
-              } else {
-                throw new Error('No image data in response. The model may not support image generation.');
-              }
-            }
+          }
         }
 
         // Step 3: Save image to file
@@ -2445,14 +2445,14 @@ Create a vivid image prompt that visually represents this content:`;
 
         const fileName = `card-${Date.now()}.${mimeType.split('/')[1] || 'png'}`;
         const filePath = path.join(imagesDir, fileName);
-        
+
         await fs.promises.writeFile(filePath, Buffer.from(imageBase64!, 'base64'));
         console.log('[ImageGen] Saved image to:', filePath);
-        
+
         // Release base64 after saving to disk
         imageBase64 = null;
         hintGC();
-        
+
         logMemory('ImageGen Complete');
         endOperation(opId);
 
@@ -2494,7 +2494,7 @@ Create a vivid image prompt that visually represents this content:`;
       const opId = `loop-vid-${Date.now()}`;
       startOperation(opId, 'createLoopVideo');
       logMemory('LoopVideo Start');
-      
+
       const apiKey = store.get('geminiKey') as string | undefined;
       if (!apiKey) {
         endOperation(opId);
@@ -2510,14 +2510,14 @@ Create a vivid image prompt that visually represents this content:`;
         let imageBuffer: Buffer | null = await fs.promises.readFile(imagePath);
         const imageSizeMB = imageBuffer.length / (1024 * 1024);
         console.log('[LoopVideo] Image size:', imageSizeMB.toFixed(2), 'MB');
-        
+
         let imageBase64: string | null = imageBuffer.toString('base64');
         imageBuffer = null; // Release buffer immediately
         const imageMimeType = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
 
         // Step 2: Craft a loop-optimized prompt using LLM
         // Priority: Vertex AI -> Google AI Studio
-        
+
         const loopPromptRequest = `You are crafting a prompt for a SEAMLESS LOOPING VIDEO that will be generated from a still image.
 
 The still image was created with this prompt:
@@ -2557,15 +2557,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         // Fallback to Google AI Studio if Vertex failed or not configured
         if (!loopPrompt) {
           if (!apiKey) {
-             throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+            throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
           }
-          
+
           const adminSettings = getAdminSettings();
           // Default to flash for reliability if falling back
-          let promptLLM = 'gemini-2.5-flash'; 
-          
+          let promptLLM = 'gemini-2.5-flash';
+
           let llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${promptLLM}:generateContent?key=${apiKey}`;
-          
+
           console.log(`[LoopVideo] Crafting prompt with AI Studio model: ${promptLLM}`);
 
           let llmResponse = await fetch(llmUrl, {
@@ -2611,7 +2611,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
         // Step 3: Generate the video using Veo with loop mode
         // Use Veo 3.1 for best loop quality (supports last_frame for seamless looping)
-        
+
         // Pre-calculate path to stream directly to disk
         const userDataDir = app.getPath('userData');
         const videosDir = path.join(userDataDir, 'wormhole', 'card-videos');
@@ -2620,10 +2620,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         const videoCardId = `loop-video-${Date.now()}`;
         const videoFileName = `${videoCardId}.mp4`;
         const videoPath = path.join(videosDir, videoFileName);
-        
+
         let success = false;
         let videoModel = 'veo-3.1-generate-preview';
-        
+
         broadcastLoopProgress({
           imageId,
           status: 'generating',
@@ -2633,11 +2633,16 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         // =================================================================================
         // ATTEMPT 1: Vertex AI (Preferred)
         // =================================================================================
-        if (isVertexAIConfigured()) {
+        // PERMANENT FIX (2025-12-08): Explicitly disabling Vertex AI for Veo Video.
+        // Reason: Vertex API consistently returns 400 "Invalid resource field" for Veo, 
+        // while Gemini API (AI Studio) works reliably. Protocol ALWAYS_READ.md mandates Gemini for Video.
+        const useVertexForVideo = false; // Force disabled
+
+        if (useVertexForVideo && isVertexAIConfigured()) {
           console.log('[LoopVideo] Using Vertex AI for video generation');
           try {
             const vertexClient = getVertexAIClient();
-            
+
             // 1. Generate
             const result = await vertexClient.generateVideo(loopPrompt, {
               startFrameBase64: imageBase64!,
@@ -2647,9 +2652,14 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               aspectRatio: '16:9',
               loopMode: true,
             });
-            
+
             console.log('[LoopVideo] Vertex AI video generation started, operation:', result.operationName);
-            
+
+            // MEMORY FIX: Null the heavy image buffer immediately after the request is sent,
+            // BEFORE entering the long polling loop.
+            imageBase64 = null;
+            if (global.gc) global.gc();
+
             // 2. Poll
             console.log('[LoopVideo] Polling Vertex AI for completion...');
             const pollResult = await vertexClient.pollVideoOperation(
@@ -2676,15 +2686,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             // Fall through to AI Studio
           }
         }
-        
+
         // =================================================================================
         // ATTEMPT 2: Google AI Studio (Fallback)
         // =================================================================================
         if (!success) {
           console.log('[LoopVideo] Starting AI Studio Fallback...');
-          
+
           if (!apiKey) {
-             throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+            throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
           }
 
           // Use stable Veo model
@@ -2693,8 +2703,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
           // Ensure imageBase64 is available (Vertex might have failed mid-way, but we didn't null it yet)
           if (!imageBase64) {
-             // Should not happen as we removed the premature nulling, but strict check
-             throw new Error('Image data lost during fallback');
+            // Should not happen as we removed the premature nulling, but strict check
+            throw new Error('Image data lost during fallback');
           }
 
           // Build instance
@@ -2737,14 +2747,14 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           }
 
           console.log('[LoopVideo] AI Studio video generation started, operation:', operationName);
-          
+
           // Poll AI Studio
           const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
           const maxAttempts = 60;
-          
+
           // Release memory now that request is sent
-          imageBase64 = null; 
-          
+          imageBase64 = null;
+
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
             await new Promise(resolve => setTimeout(resolve, 5000));
 
@@ -2759,17 +2769,17 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             if (!pollResponse.ok) continue;
 
             const pollData = await pollResponse.json();
-            
+
             if (pollData.done) {
               console.log('[LoopVideo] AI Studio video generation complete!');
-              
+
               // Extract video from response
-              const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples || 
-                                       pollData.response?.generatedVideos ||
-                                       pollData.response?.videos ||
-                                       pollData.result?.videos ||
-                                       [];
-                                       
+              const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples ||
+                pollData.response?.generatedVideos ||
+                pollData.response?.videos ||
+                pollData.result?.videos ||
+                [];
+
               if (generatedSamples.length === 0) {
                 console.error('[LoopVideo] No videos in response. Full response:', JSON.stringify(pollData).slice(0, 500));
                 throw new Error('No video generated from AI Studio');
@@ -2790,20 +2800,20 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               });
 
               if (!downloadResponse.ok) {
-                 throw new Error(`Failed to download video: ${downloadResponse.statusText}`);
+                throw new Error(`Failed to download video: ${downloadResponse.statusText}`);
               }
 
               const fileStream = fs.createWriteStream(videoPath);
               // @ts-ignore
               await finished(Readable.fromWeb(downloadResponse.body).pipe(fileStream));
-              
+
               success = true;
               break;
             }
           }
-          
+
           if (!success) {
-             throw new Error('AI Studio video generation timed out');
+            throw new Error('AI Studio video generation timed out');
           }
         }
 
@@ -2875,13 +2885,13 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           videoPath: videoPath,
           createdAt: new Date().toISOString(),
         };
-        
+
         try {
           // CRITICAL: Update card-library index to add children array
           // This works for ALL card types (Hell Week, regular, etc.)
           const libraryRecords = await readCore(CARD_LIBRARY_CORE_NAME);
           let parentIndexEntry: any = null;
-          
+
           // Find the parent card's index entry
           for (let i = libraryRecords.length - 1; i >= 0; i--) {
             const raw = libraryRecords[i];
@@ -2894,7 +2904,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               }
             } catch { /* ignore */ }
           }
-          
+
           if (parentIndexEntry) {
             // Update the index entry with children
             const updatedEntry = {
@@ -2908,17 +2918,17 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               },
               updatedAt: new Date().toISOString(),
             };
-            
+
             // Append updated entry to card-library
             await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(updatedEntry));
             console.log('[LoopVideo] Updated card-library index with children:', parentCardId);
           }
-          
+
           // Also try to update the card's own hypercore (for non-Hell Week cards)
           try {
             const parentRecords = await readCore(parentCardId);
             let parentCardData: any = null;
-            
+
             for (let i = parentRecords.length - 1; i >= 0; i--) {
               const raw = parentRecords[i];
               if (!raw || typeof raw !== 'string') continue;
@@ -2934,7 +2944,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 }
               } catch { /* ignore */ }
             }
-            
+
             if (parentCardData) {
               if (!parentCardData.children) {
                 parentCardData.children = [];
@@ -2993,33 +3003,33 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
   // Veo video generation models (image-to-video capable)
   const VEO_VIDEO_MODELS = [
-    { 
-      name: 'veo-3.1-generate-preview', 
-      displayName: 'Veo 3.1 (Video)', 
+    {
+      name: 'veo-3.1-generate-preview',
+      displayName: 'Veo 3.1 (Video)',
       description: '8s 720p/1080p video with audio. Supports text & image-to-video.',
       isVideoModel: true,
     },
-    { 
-      name: 'veo-3.1-fast-generate-preview', 
-      displayName: 'Veo 3.1 Fast (Video)', 
+    {
+      name: 'veo-3.1-fast-generate-preview',
+      displayName: 'Veo 3.1 Fast (Video)',
       description: 'Fast 8s video generation with audio. Text & image input.',
       isVideoModel: true,
     },
-    { 
-      name: 'veo-3.0-generate-001', 
-      displayName: 'Veo 3 (Video)', 
+    {
+      name: 'veo-3.0-generate-001',
+      displayName: 'Veo 3 (Video)',
       description: 'High-quality video with audio. Supports image-to-video.',
       isVideoModel: true,
     },
-    { 
-      name: 'veo-3.0-fast-generate-001', 
-      displayName: 'Veo 3 Fast (Video)', 
+    {
+      name: 'veo-3.0-fast-generate-001',
+      displayName: 'Veo 3 Fast (Video)',
       description: 'Fast video generation with audio.',
       isVideoModel: true,
     },
-    { 
-      name: 'veo-2.0-generate-001', 
-      displayName: 'Veo 2 (Video)', 
+    {
+      name: 'veo-2.0-generate-001',
+      displayName: 'Veo 2 (Video)',
       description: 'Video generation (no audio). Image-to-video supported.',
       isVideoModel: true,
     },
@@ -3054,7 +3064,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             description: m.description || '',
             isVideoModel: false,
           }));
-        
+
         // Add Veo video models to the list
         const allModels = [...mapped, ...VEO_VIDEO_MODELS];
         console.log('Available Gemini Models (including Veo):', allModels.length);
@@ -3109,7 +3119,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     } catch (error: any) {
       // Suppress ECONNREFUSED as it just means server is not running
       if (error?.cause?.code !== 'ECONNREFUSED' && !error?.message?.includes('ECONNREFUSED')) {
-          console.error('Error fetching Llama models from local server:', error);
+        console.error('Error fetching Llama models from local server:', error);
       }
       return [];
     }
@@ -3184,7 +3194,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
               // Build parts array with text prompt AND any image attachments
               const parts: any[] = [{ text: prompt }];
-              
+
               // Add image attachments as inline data for the model to use
               if (attachments && attachments.length > 0) {
                 console.log(`Including ${attachments.length} attachment(s) in image generation request`);
@@ -3503,7 +3513,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         // Build the instances array for the REST API
         // The REST API uses predictLongRunning with instances array format
         const instance: any = { prompt };
-        
+
         // Add image for image-to-video
         if (imageBase64 && imageMimeType) {
           instance.image = {
@@ -3532,10 +3542,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
         // Start the video generation operation using predictLongRunning
         const startUrl = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:predictLongRunning`;
-        
+
         const startResponse = await fetch(startUrl, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             'x-goog-api-key': apiKey,
           },
@@ -3580,7 +3590,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             headers: { 'x-goog-api-key': apiKey },
           });
           const pollText = await pollResponse.text();
-          
+
           let pollData: any;
           try {
             pollData = pollText ? JSON.parse(pollText) : {};
@@ -3609,8 +3619,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             console.log('Poll response:', JSON.stringify(pollData, null, 2).substring(0, 1000));
 
             // REST API uses generateVideoResponse.generatedSamples format
-            const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples || 
-                                     pollData.response?.generatedVideos || [];
+            const generatedSamples = pollData.response?.generateVideoResponse?.generatedSamples ||
+              pollData.response?.generatedVideos || [];
             if (generatedSamples.length === 0) {
               throw new Error('No videos were generated. Response: ' + JSON.stringify(pollData).substring(0, 500));
             }
@@ -3626,7 +3636,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 headers: { 'x-goog-api-key': apiKey },
                 redirect: 'follow',
               });
-              
+
               if (!downloadResponse.ok) {
                 throw new Error(`Failed to download generated video: ${downloadResponse.status}`);
               }
@@ -3682,19 +3692,19 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       // Use bundled ffmpeg/ffprobe
       const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
       const ffprobePath = require('@ffprobe-installer/ffprobe').path;
-      
+
       const userDataDir = app.getPath('userData');
       const extractDir = path.join(userDataDir, 'wormhole');
       await fs.promises.mkdir(extractDir, { recursive: true });
-      
+
       const outputFileName = `frame-${frameType}-${Date.now()}.png`;
       const outputPath = path.join(extractDir, outputFileName);
-      
+
       // Use ffmpeg to extract frame
       // For first frame: -ss 0 -vframes 1
       // For last frame: we need duration first, then seek to near end
       let ffmpegArgs: string[];
-      
+
       if (frameType === 'first') {
         ffmpegArgs = ['-i', videoPath, '-ss', '0', '-vframes', '1', '-y', outputPath];
       } else {
@@ -3710,7 +3720,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         const seekTime = Math.max(0, duration - 0.1);
         ffmpegArgs = ['-ss', seekTime.toString(), '-i', videoPath, '-vframes', '1', '-y', outputPath];
       }
-      
+
       // Run bundled ffmpeg
       await new Promise<void>((resolve, reject) => {
         const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
@@ -3720,11 +3730,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         });
         ffmpeg.on('error', reject);
       });
-      
+
       // Read the extracted frame as base64
       const frameBuffer = await fs.promises.readFile(outputPath);
       const base64 = frameBuffer.toString('base64');
-      
+
       return {
         success: true,
         imagePath: outputPath,
@@ -3745,17 +3755,17 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       const { spawn } = require('child_process');
       // Use bundled ffmpeg
       const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-      
+
       const userDataDir = app.getPath('userData');
       const extractDir = path.join(userDataDir, 'wormhole');
       await fs.promises.mkdir(extractDir, { recursive: true });
-      
+
       const outputFileName = `audio-${Date.now()}.mp3`;
       const outputPath = path.join(extractDir, outputFileName);
-      
+
       // Use bundled ffmpeg to extract audio as mp3
       const ffmpegArgs = ['-i', videoPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', '-y', outputPath];
-      
+
       await new Promise<void>((resolve, reject) => {
         const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
         ffmpeg.on('close', (code: number) => {
@@ -3764,11 +3774,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         });
         ffmpeg.on('error', reject);
       });
-      
+
       // Read the extracted audio as base64
       const audioBuffer = await fs.promises.readFile(outputPath);
       const base64 = audioBuffer.toString('base64');
-      
+
       return {
         success: true,
         audioPath: outputPath,
@@ -4384,7 +4394,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     ) => {
       const opId = `transcription-${Date.now()}`;
       startOperation(opId, 'transcription');
-      
+
       const { cardId, overrideProvider, overrideModel } = payload || ({} as any);
       if (!cardId || typeof cardId !== 'string') {
         endOperation(opId);
@@ -4457,7 +4467,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       let audioBuffer: Buffer | null = await fs.promises.readFile(localPath);
       const audioSizeMB = audioBuffer.length / (1024 * 1024);
       console.log('[Transcription] Audio size:', audioSizeMB.toFixed(2), 'MB');
-      
+
       let base64: string | null = audioBuffer.toString('base64');
       audioBuffer = null; // Release buffer after encoding
 
@@ -4535,7 +4545,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     ) => {
       const opId = `summarization-${Date.now()}`;
       startOperation(opId, 'summarization');
-      
+
       const { cardId, overrideProvider, overrideModel } = payload || ({} as any);
       if (!cardId || typeof cardId !== 'string') {
         endOperation(opId);
@@ -4598,8 +4608,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         undefined;
 
       const modelName =
-        (overrideModel && typeof overrideModel === 'string' && overrideModel) || 
-        configuredModel || 
+        (overrideModel && typeof overrideModel === 'string' && overrideModel) ||
+        configuredModel ||
         'gemini-2.5-flash'; // Updated default to multimodal-capable model
 
       if (provider !== 'gemini') {
@@ -4608,7 +4618,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
       // Get comprehensive context for all card types (scrolls, prompts, derivatives)
       const comprehensiveContext = await buildComprehensiveContext(cardRecord, cardId);
-      
+
       const now = new Date().toISOString();
       const baseId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       let newSummaries: any[] = [];
@@ -4619,7 +4629,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         // IMAGE CARD: Use visual analysis
         const ingest = cardRecord.wormhole?.ingest;
         const imagePath = ingest?.originalPath || cardRecord.mediaLocalPath;
-        
+
         if (!imagePath) {
           throw new Error('Image card does not have a file path for analysis.');
         }
@@ -4668,7 +4678,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         // VIDEO CARD: Use video analysis
         const ingest = cardRecord.wormhole?.ingest;
         const videoPath = ingest?.originalPath || cardRecord.mediaLocalPath;
-        
+
         if (!videoPath) {
           throw new Error('Video card does not have a file path for analysis.');
         }
@@ -4716,7 +4726,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       } else {
         // TEXT/AUDIO/OTHER: Use text summarization (existing logic)
         let textSource = '';
-        
+
         // Check for transcripts first (audio cards)
         if (transcripts.length > 0) {
           const latest = transcripts[transcripts.length - 1];
@@ -4751,7 +4761,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
         const { short, medium, outline, model } = await summarizeTextWithGemini(cleanedText, modelName);
         usedModel = model;
-        
+
         if (!medium) {
           throw new Error('Summarization produced empty text.');
         }
@@ -4837,7 +4847,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     ) => {
       const opId = `keyterms-${Date.now()}`;
       startOperation(opId, 'keyTerms');
-      
+
       const { cardId, overrideProvider, overrideModel } = payload || ({} as any);
       if (!cardId || typeof cardId !== 'string') {
         endOperation(opId);
@@ -4877,10 +4887,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
       // Build comprehensive context from ALL sources
       const comprehensiveContext = await buildComprehensiveContext(cardRecord, cardId);
-      
+
       // Build text source from multiple places
       const textParts: string[] = [];
-      
+
       // 1. Transcripts (for audio/video cards)
       if (transcripts.length > 0) {
         const latest = transcripts[transcripts.length - 1];
@@ -4907,7 +4917,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       if (comprehensiveContext) {
         textParts.push(comprehensiveContext);
       }
-      
+
       // 4. For image/video cards without text, use visual analysis from summaries
       if ((mediaType === 'image' || mediaType === 'video') && textParts.length === 0) {
         // Check if we have a visual analysis summary
@@ -4930,13 +4940,13 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           }
         }
       }
-      
+
       // Combine all text parts
       const cleanedText = textParts.join('\n\n').trim();
       if (!cleanedText) {
         throw new Error('No text source available for Wormhole key-term extraction. For image/video cards, run Summarization first to generate visual analysis.');
       }
-      
+
       console.log('[KeyTerms] Text source length:', cleanedText.length, 'chars');
 
       const globalWormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
@@ -5351,15 +5361,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
   // ============================================
   // SCROLL ATTACHMENT HANDLERS
   // ============================================
-  
+
   // Attach a scroll (text/markdown card) to another card
   ipcMain.handle(
     'attach-card-scroll',
     async (
       _event,
-      payload: { 
-        cardId: string; 
-        scrollCardId: string; 
+      payload: {
+        cardId: string;
+        scrollCardId: string;
         label?: string;
         includeInSummarization?: boolean;
         includeInKeyTerms?: boolean;
@@ -5367,7 +5377,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       },
     ) => {
       const { cardId, scrollCardId, label, includeInSummarization = true, includeInKeyTerms = true, includeInWikiUpdate = true } = payload || ({} as any);
-      
+
       if (!cardId || typeof cardId !== 'string') {
         throw new Error('cardId is required to attach scroll.');
       }
@@ -5431,7 +5441,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
       // Add scroll to card's scrolls array
       const existingScrolls = Array.isArray(cardRecord.scrolls) ? cardRecord.scrolls : [];
-      
+
       // Check if already attached
       if (existingScrolls.some((s: any) => s.cardId === scrollCardId)) {
         throw new Error('This scroll is already attached to the card.');
@@ -5467,7 +5477,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       payload: { cardId: string; scrollCardId: string },
     ) => {
       const { cardId, scrollCardId } = payload || ({} as any);
-      
+
       if (!cardId || typeof cardId !== 'string') {
         throw new Error('cardId is required to detach scroll.');
       }
@@ -5529,15 +5539,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         try {
           const data = JSON.parse(raw);
           if (!data || data.type !== 'card-index') continue;
-          
+
           const cardId = data.cardId || data.coreName;
           if (!cardId || seenCardIds.has(cardId)) continue;
           seenCardIds.add(cardId);
-          
+
           // Check index entry first for mediaType
           let mediaType = data.mediaType || data.mediaKind || '';
           let name = data.name || data.title || cardId;
-          
+
           // If no mediaType in index, read the actual card core
           if (!mediaType) {
             try {
@@ -5559,7 +5569,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               }
             } catch { /* card core might not exist */ }
           }
-          
+
           // Check if it's a text or markdown card
           if (mediaType === 'text' || mediaType === 'markdown') {
             textCards.push({
@@ -5574,7 +5584,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
       // Sort by createdAt descending
       textCards.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-      
+
       console.log('[Scroll] Found', textCards.length, 'text/markdown cards');
       return textCards;
     } catch (error) {
@@ -5668,16 +5678,16 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
   // ============================================================================
   // CARD SETS IPC HANDLERS
   // ============================================================================
-  
+
   const CARD_SETS_CORE_NAME = 'card-sets';
-  
+
   // Get all card sets
   ipcMain.handle('card-sets:list', async () => {
     try {
       await createCore(CARD_SETS_CORE_NAME);
       const records = await readCore(CARD_SETS_CORE_NAME);
       const sets: any[] = [];
-      
+
       for (const raw of records) {
         if (!raw || typeof raw !== 'string') continue;
         try {
@@ -5687,7 +5697,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           }
         } catch { /* ignore parse errors */ }
       }
-      
+
       // Sort by createdAt descending (newest first)
       sets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return sets;
@@ -5696,12 +5706,12 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       return [];
     }
   });
-  
+
   // Get a specific card set by ID
   ipcMain.handle('card-sets:get', async (_event, setId: string) => {
     try {
       const records = await readCore(CARD_SETS_CORE_NAME);
-      
+
       for (const raw of records) {
         if (!raw || typeof raw !== 'string') continue;
         try {
@@ -5717,7 +5727,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       return null;
     }
   });
-  
+
   // Create a new card set (called by pipeline)
   ipcMain.handle('card-sets:create', async (_event, cardSet: any) => {
     try {
@@ -5730,7 +5740,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       throw err;
     }
   });
-  
+
   // Create a merged set (references other sets)
   ipcMain.handle('card-sets:create-merged', async (_event, mergedSet: any) => {
     try {
@@ -5750,28 +5760,28 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       throw err;
     }
   });
-  
+
   // Get cards for a set (resolves merged sets recursively)
   ipcMain.handle('card-sets:get-card-ids', async (_event, setId: string) => {
     try {
       const records = await readCore(CARD_SETS_CORE_NAME);
       const cardIds: Set<string> = new Set();
-      
+
       // Helper to resolve a set
       const resolveSet = (id: string, visited: Set<string>) => {
         if (visited.has(id)) return; // Prevent cycles
         visited.add(id);
-        
+
         for (const raw of records) {
           if (!raw || typeof raw !== 'string') continue;
           try {
             const parsed = JSON.parse(raw);
-            
+
             // Direct card set
             if (parsed.type === 'card-set' && parsed.setId === id) {
               parsed.cardIds?.forEach((cid: string) => cardIds.add(cid));
             }
-            
+
             // Merged set - resolve references
             if (parsed.type === 'merged-set' && parsed.mergedSetId === id) {
               parsed.sourceSetIds?.forEach((sid: string) => resolveSet(sid, visited));
@@ -5780,7 +5790,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           } catch { /* ignore */ }
         }
       };
-      
+
       resolveSet(setId, new Set());
       return Array.from(cardIds);
     } catch (err: any) {
@@ -5943,7 +5953,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         tags: ['operator-profile'],
       };
       await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
-      
+
       // Emit to persistence layer
       emitCardEvent('CARD_CREATED', {
         id: cardId,
@@ -6024,28 +6034,28 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     console.log('[Repair] Starting Hell Week parent repair...');
     const repaired: string[] = [];
     const errors: string[] = [];
-    
+
     try {
       // Read all cards from card-library
       const libraryRecords = await readCore(CARD_LIBRARY_CORE_NAME);
-      
+
       // Build a map of setId -> setCardId from cards that have both
       const setIdToSetCardId: Map<string, string> = new Map();
       const cardsBySetId: Map<string, any[]> = new Map();
-      
+
       // First pass: find Set Cards and build mapping
       for (const raw of libraryRecords) {
         if (!raw || typeof raw !== 'string') continue;
         try {
           const parsed = JSON.parse(raw);
           if (parsed.type !== 'card-index') continue;
-          
+
           // If this is a Set Card, map its ID
           if (parsed.cardType === 'set') {
             // Set Cards use their own cardId as the setId
             setIdToSetCardId.set(parsed.cardId, parsed.cardId);
           }
-          
+
           // Collect cards by setId for legacy mapping
           if (parsed.setId) {
             if (!cardsBySetId.has(parsed.setId)) {
@@ -6055,7 +6065,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           }
         } catch { /* ignore */ }
       }
-      
+
       // Second pass: fix cards that have setId but no parentCardId
       for (const raw of libraryRecords) {
         if (!raw || typeof raw !== 'string') continue;
@@ -6063,14 +6073,14 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           const parsed = JSON.parse(raw);
           if (parsed.type !== 'card-index') continue;
           if (parsed.cardType === 'set') continue; // Skip Set Cards
-          
+
           // Check if card needs repair
           const needsParent = parsed.setId && !parsed.parentCardId;
           const needsMemberOfSets = parsed.setId && (!parsed.memberOfSets || parsed.memberOfSets.length === 0);
-          
+
           if (needsParent || needsMemberOfSets) {
             const setCardId = parsed.setId; // For Hell Week, setId IS the Set Card ID
-            
+
             // Create repaired entry
             const repairedEntry = {
               ...parsed,
@@ -6083,7 +6093,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               }],
               updatedAt: new Date().toISOString(),
             };
-            
+
             // Append repaired entry
             await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(repairedEntry));
             repaired.push(parsed.cardId);
@@ -6093,7 +6103,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           errors.push(`${raw.substring(0, 50)}: ${err.message}`);
         }
       }
-      
+
       console.log('[Repair] Completed. Repaired:', repaired.length, 'Errors:', errors.length);
       return { repaired: repaired.length, errors, repairedIds: repaired };
     } catch (err: any) {

@@ -2041,6 +2041,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             const videoFileName = `${videoCardId}.mp4`;
             const videoPath = path.join(videosDir, videoFileName);
             let success = false;
+            let videoModel = 'veo-3.1-generate-preview';
             broadcastLoopProgress({
                 imageId,
                 status: 'generating',
@@ -2049,7 +2050,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             // =================================================================================
             // ATTEMPT 1: Vertex AI (Preferred)
             // =================================================================================
-            if ((0, vertexai_1.isVertexAIConfigured)()) {
+            // PERMANENT FIX (2025-12-08): Explicitly disabling Vertex AI for Veo Video.
+            // Reason: Vertex API consistently returns 400 "Invalid resource field" for Veo, 
+            // while Gemini API (AI Studio) works reliably. Protocol ALWAYS_READ.md mandates Gemini for Video.
+            const useVertexForVideo = false; // Force disabled
+            if (useVertexForVideo && (0, vertexai_1.isVertexAIConfigured)()) {
                 console.log('[LoopVideo] Using Vertex AI for video generation');
                 try {
                     const vertexClient = (0, vertexai_1.getVertexAIClient)();
@@ -2063,6 +2068,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                         loopMode: true,
                     });
                     console.log('[LoopVideo] Vertex AI video generation started, operation:', result.operationName);
+                    // MEMORY FIX: Null the heavy image buffer immediately after the request is sent,
+                    // BEFORE entering the long polling loop.
+                    imageBase64 = null;
+                    if (global.gc)
+                        global.gc();
                     // 2. Poll
                     console.log('[LoopVideo] Polling Vertex AI for completion...');
                     const pollResult = await vertexClient.pollVideoOperation(result.operationName, 60, // maxAttempts
@@ -2094,7 +2104,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                     throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
                 }
                 // Use stable Veo model
-                const videoModel = 'veo-3.0-generate-001';
+                videoModel = 'veo-3.0-generate-001';
                 const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
                 // Ensure imageBase64 is available (Vertex might have failed mid-way, but we didn't null it yet)
                 if (!imageBase64) {

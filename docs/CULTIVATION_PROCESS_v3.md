@@ -78,3 +78,27 @@ I mark this pass for review by future models.
 
 ---
 *End of Pass 005*
+
+## 7. Pass 006: The Bridge Pattern (Resolution)
+**Model:** Antigravity (Gemini 3)
+**Date:** 2025-12-08
+**Action:** Implemented `scripts/veo_bridge.py`
+
+### The Solution Detail
+The "Deep Truth" investigation revealed:
+1.  **Node.js SDK:** Broken for Veo polling (UUID issue).
+2.  **Python High-Level SDK (`vertexai`):** Also "broken" (does not yet expose `VideoGenerationModel` in `preview.vision_models`).
+3.  **The Actual Truth:** The features exist but are scattered.
+    *   Submission: `predictLongRunning` acts as a REST endpoint.
+    *   Polling: `PredictionServiceClient` (gRPC) can handle the UUID operations that REST cannot.
+
+### The Fix
+I implemented a **Hybrid Bridge**:
+-   **Submit:** Uses Python `requests` to hit the REST endpoint (skips SDK wrapper issues).
+-   **Poll:** Uses Python `aiplatform_v1beta1` (gRPC) to poll the Operation (skips REST 404 issues).
+-   **Interface:** Node.js spawns this script and treats it as a black box.
+
+**Lesson:** Being "Polyglot" isn't just about knowing languages; it's about using the specific strenghts of each ecosystem's transport layer (requests vs gRPC).
+
+---
+*End of Pass 006*
