@@ -2,13 +2,18 @@ import { BrowserWindow, ipcMain, app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { 
-  getVertexAIClient, 
-  isVertexAIConfigured, 
+import {
+  getVertexAIClient,
+  isVertexAIConfigured,
   VertexAIClient,
   MODEL_SHORTHAND_MAP,
   createModelProvenance
 } from './vertexai';
+import {
+  AimlApiClient,
+  isAimlApiConfigured,
+  AIMLAPI_MODEL_MAP
+} from './aimlapi';
 import Store from 'electron-store';
 import { createCore, appendToCore } from './p2p';
 import { emitCardEvent } from './persistence';
@@ -55,7 +60,7 @@ export class ThorsHammaManager {
   private window: BrowserWindow | null = null;
   private currentUrl: string = '';
 
-  constructor() {}
+  constructor() { }
 
   public setWindow(window: BrowserWindow) {
     this.window = window;
@@ -76,16 +81,16 @@ export class ThorsHammaManager {
     try {
       this.currentUrl = url;
       this.log('SYS', `Initializing Sequence for: ${url}`);
-      
+
       // 1. Capture Phase
       const { html, screenshotPath } = await this.captureSite(url);
-      
+
       // 2. Leo Phase (Analysis + Hand Context)
       const leoContext = await this.runLeo(html, handCards);
-      
+
       // 3. Thor Phase (Synthesis with Leo's guidance)
       const { setData, cardDataList, siblingLinks } = await this.runThor(leoContext, handCards);
-      
+
       // 4. Fabrication Phase (Hypercore + Sibling Links)
       const forgeResult = await this.fabricateAssets(url, screenshotPath, setData, cardDataList, siblingLinks);
 
@@ -100,7 +105,7 @@ export class ThorsHammaManager {
 
   private async captureSite(url: string): Promise<{ html: string, screenshotPath: string }> {
     this.log('CAM', 'Spawning Scout Drone (Offscreen Window)...');
-    
+
     return new Promise((resolve, reject) => {
       const captureWin = new BrowserWindow({
         show: false,
@@ -131,7 +136,7 @@ export class ThorsHammaManager {
       captureWin.webContents.on('did-finish-load', async () => {
         try {
           this.log('CAM', 'Target Acquired. Capturing Assets...');
-          
+
           // 1. Get HTML
           const html = await captureWin.webContents.executeJavaScript('document.documentElement.outerHTML');
           this.log('CAM', `HTML Snapshot Secured (${html.length} bytes).`);
@@ -142,10 +147,10 @@ export class ThorsHammaManager {
           const filename = `thor-snap-${Date.now()}.png`;
           const userDataPath = app.getPath('userData');
           const savePath = path.join(userDataPath, 'thor-assets', filename);
-          
+
           await fs.promises.mkdir(path.dirname(savePath), { recursive: true });
           await fs.promises.writeFile(savePath, png);
-          
+
           this.log('CAM', `Visual Intel Saved to ${filename}`);
 
           clearTimeout(timeout);
@@ -163,21 +168,21 @@ export class ThorsHammaManager {
 
   private async runLeo(html: string, handCards: HandCardLite[]): Promise<LeoAnalysis> {
     this.log('LEO', '🐕 Analyzing Target Data Structure...');
-    
+
     // Clean HTML for token efficiency
     const cleanHtml = html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gm, "")
-                          .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gm, "")
-                          .slice(0, 40000); 
+      .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gm, "")
+      .slice(0, 40000);
 
     // Build rich hand context for Leo to analyze
-    const handContext = handCards.length > 0 
+    const handContext = handCards.length > 0
       ? handCards.map(c => ({
-          id: c.cardId,
-          name: c.name || 'Unknown',
-          lore: c.lore || '',
-          skills: c.skills?.map(s => s.name) || [],
-          desires: c.desires || '',
-        }))
+        id: c.cardId,
+        name: c.name || 'Unknown',
+        lore: c.lore || '',
+        skills: c.skills?.map(s => s.name) || [],
+        desires: c.desires || '',
+      }))
       : [];
 
     const prompt = `
@@ -230,16 +235,16 @@ OUTPUT (JSON):
     `;
 
     const result = await this.callAI(prompt, 'LEO', 'smart-llm') as LeoAnalysis;
-    
+
     const synergyCount = result.hand_synergies?.length || 0;
     this.log('LEO', `🐕 Analysis Complete: "${result.title || 'Unknown'}" | ${synergyCount} Hand synergies found`);
-    
+
     return result;
   }
 
   private async runThor(leoContext: LeoAnalysis, handCards: HandCardLite[]): Promise<{ setData: any, cardDataList: any[], siblingLinks: Array<{ newCardSkill: string, handCardId: string }> }> {
     this.log('THOR', '🐱 Forging Connection...');
-    
+
     const prompt = `
 You are "Thor" 🐈, the Forge Master.
 
@@ -305,7 +310,7 @@ OUTPUT (JSON):
     `;
 
     const result = await this.callAI(prompt, 'THOR', 'smart-llm');
-    
+
     // Extract sibling links from cards
     const siblingLinks: Array<{ newCardSkill: string, handCardId: string }> = [];
     if (result.cards) {
@@ -319,56 +324,71 @@ OUTPUT (JSON):
         }
       }
     }
-    
+
     const skillCount = result.cards?.reduce((acc: number, c: any) => acc + (c.skills?.length || 0), 0) || 0;
     this.log('THOR', `🐱 Synthesis Complete: ${result.cards?.length || 0} cards, ${skillCount} skills, ${siblingLinks.length} sibling links`);
-    
+
     return { setData: result.set_card, cardDataList: result.cards, siblingLinks };
   }
 
-  private async callAI(prompt: string, agent: 'LEO'|'THOR', modelType: 'fast-llm'|'smart-llm'): Promise<any> {
-    const useVertex = isVertexAIConfigured();
-    
+  private async callAI(prompt: string, agent: 'LEO' | 'THOR', modelType: 'fast-llm' | 'smart-llm'): Promise<any> {
+    // Priority: AIMLAPI -> Vertex AI -> Google AI Studio
+    const useAimlApi = isAimlApiConfigured();
+    const useVertex = !useAimlApi && isVertexAIConfigured();
+
     let text = '';
-    
-    if (useVertex) {
-        const client = getVertexAIClient();
-        const result = await client.generateContent(prompt, modelType, { responseMimeType: 'application/json' });
-        text = result.text;
-    } else {
-        // Fallback to Gemini
-        const apiKey = store.get('geminiKey');
-        if (!apiKey) throw new Error("No AI Key Configured");
-        
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const modelName = modelType === 'smart-llm' ? 'gemini-3-pro-preview' : 'gemini-2.5-flash';
-        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: 'application/json' }});
-        const result = await model.generateContent(prompt);
-        text = result.response.text();
+
+    // PRIORITY 1: AIMLAPI.com
+    if (useAimlApi) {
+      const aimlClient = new AimlApiClient();
+      const aimlModelId = AIMLAPI_MODEL_MAP[modelType];
+      const result = await aimlClient.chatCompletion(
+        [{ role: 'user', content: prompt }],
+        aimlModelId,
+        { temperature: 0.7, max_tokens: 4000 }
+      );
+      text = result.content;
+    }
+    // PRIORITY 2: Vertex AI
+    else if (useVertex) {
+      const client = getVertexAIClient();
+      const result = await client.generateContent(prompt, modelType, { responseMimeType: 'application/json' });
+      text = result.text;
+    }
+    // PRIORITY 3: Google AI Studio
+    else {
+      const apiKey = store.get('geminiKey');
+      if (!apiKey) throw new Error("No AI Key Configured. Set up AIMLAPI.com, Vertex AI, or Google AI Studio.");
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const modelName = modelType === 'smart-llm' ? 'gemini-3-pro-preview' : 'gemini-2.5-flash';
+      const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { responseMimeType: 'application/json' } });
+      const result = await model.generateContent(prompt);
+      text = result.response.text();
     }
 
     try {
-        return JSON.parse(text);
+      return JSON.parse(text);
     } catch (e) {
-        this.log('ERR', `AI JSON Parse Failed: ${text.slice(0, 100)}...`);
-        throw new Error("AI Output Malformed");
+      this.log('ERR', `AI JSON Parse Failed: ${text.slice(0, 100)}...`);
+      throw new Error("AI Output Malformed");
     }
   }
 
   private async fabricateAssets(
-    url: string, 
-    screenshotPath: string, 
-    setData: any, 
+    url: string,
+    screenshotPath: string,
+    setData: any,
     cardDataList: any[],
     siblingLinks: Array<{ newCardSkill: string, handCardId: string }>
   ) {
     this.log('THOR', '🐱 Minting Artifacts to Hypercore...');
-    
+
     const timestamp = Date.now();
     const setCardId = `thor-set-${timestamp}`;
     const childCardIds: string[] = [];
     const cardIdMap: Map<string, string> = new Map(); // card name -> cardId for sibling linking
-    
+
     // Ensure card-library core exists
     await createCore(CARD_LIBRARY_CORE_NAME);
 
@@ -377,7 +397,7 @@ OUTPUT (JSON):
       const data = cardDataList[i];
       const cardId = `thor-card-${timestamp}-${i}`;
       cardIdMap.set(data.name, cardId);
-      
+
       // Create card data core with full schema
       await createCore(cardId);
       const cardRecord = {
@@ -399,7 +419,7 @@ OUTPUT (JSON):
         sourceUrl: url,
       };
       await appendToCore(cardId, JSON.stringify(cardRecord));
-      
+
       // Add to library index with enriched data
       const libraryEntry = {
         type: 'card-index',
@@ -424,14 +444,14 @@ OUTPUT (JSON):
         },
       };
       await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
-      
+
       // Emit to persistence
       emitCardEvent('CARD_CREATED', libraryEntry);
-      
+
       childCardIds.push(cardId);
       this.log('THOR', `🐱 Forged: ${data.name} (${data.skills?.length || 0} skills)`);
     }
-    
+
     // 2. Create sibling link records for skills
     if (siblingLinks.length > 0) {
       this.log('THOR', `🐱 Linking ${siblingLinks.length} skill synergies to hand cards...`);
@@ -465,7 +485,7 @@ OUTPUT (JSON):
       createdAt: new Date().toISOString(),
     };
     await appendToCore(setCardId, JSON.stringify(setRecord));
-    
+
     // Add set to library index
     const setLibraryEntry = {
       type: 'card-index',
@@ -478,21 +498,21 @@ OUTPUT (JSON):
       children: childCardIds,
       createdAt: new Date().toISOString(),
       tags: ['thor-set', 'external-source'],
-      metadata: { 
-        url, 
+      metadata: {
+        url,
         iframeMode: true,
         truths: setData.truths || [],
         desires: setData.desires || '',
       },
     };
     await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(setLibraryEntry));
-    
+
     // Emit set to persistence
     emitCardEvent('CARD_CREATED', setLibraryEntry);
-    
+
     const totalSkills = cardDataList.reduce((acc, c) => acc + (c.skills?.length || 0), 0);
     this.log('SYS', `✨ Set "${setData.name}" Finalized: ${childCardIds.length} cards, ${totalSkills} skills, ${siblingLinks.length} synergies`);
-    
+
     // Return forge result for frontend display
     return {
       setCard: {

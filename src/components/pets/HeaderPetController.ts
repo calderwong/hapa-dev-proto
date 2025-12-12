@@ -151,6 +151,22 @@ export class HeaderPetController {
         this.environment = theme;
     }
 
+    public forceState(petId: string | null, state: PetState, duration: number = 5000) {
+        const targets = petId ? this.pets.filter(p => p.id === petId) : this.pets;
+        const now = Date.now();
+        
+        targets.forEach(pet => {
+            pet.state = state;
+            pet.nextStateTime = now + duration;
+            
+            // If it's an agentic state, stop movement immediately for responsiveness
+            if ([PetState.Listening, PetState.Requesting, PetState.Waiting, PetState.Communicating, PetState.Responding].includes(state)) {
+                const phys = this.physicsState.get(pet.id);
+                if (phys) phys.velocity.x = 0;
+            }
+        });
+    }
+
     public tick() {
         const now = Date.now();
         const { gravity, friction, verticality, bounciness } = this.environment.physics;

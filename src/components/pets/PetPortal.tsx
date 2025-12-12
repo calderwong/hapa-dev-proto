@@ -22,15 +22,23 @@ const MiniPet: React.FC<{
   pet: PetInstance; 
   onDragStart?: (pet: PetInstance, e: React.DragEvent) => void;
 }> = ({ pet, onDragStart }) => {
-  let action = 'idle';
-  if (pet.state === PetState.WalkRight || pet.state === PetState.WalkLeft) action = 'walk';
-  if (pet.state === PetState.RunRight || pet.state === PetState.RunLeft) action = 'run';
-
   let src = '';
-  if (pet.config.type === 'custom' && pet.config.assets) {
-    src = pet.config.assets[action] || pet.config.assets.idle;
-  } else {
-    src = `/pets/${pet.config.type}/${pet.config.color}_${action}.gif`;
+
+  // 1. Check Agent State Animations first (Camp Refactor)
+  if (pet.config.agentStateAnimations && pet.config.agentStateAnimations[pet.state]) {
+      src = pet.config.agentStateAnimations[pet.state];
+  } 
+  // 2. Standard Locomotion / Custom Assets
+  else {
+      let action = 'idle';
+      if (pet.state === PetState.WalkRight || pet.state === PetState.WalkLeft) action = 'walk';
+      if (pet.state === PetState.RunRight || pet.state === PetState.RunLeft) action = 'run';
+    
+      if (pet.config.type === 'custom' && pet.config.assets) {
+        src = pet.config.assets[action] || pet.config.assets.idle;
+      } else {
+        src = `/pets/${pet.config.type}/${pet.config.color}_${action}.gif`;
+      }
   }
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -207,6 +215,46 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
       window.removeEventListener('resize', handleResize);
     };
   }, []); // Run once on mount
+
+  // Listen for agent-state-change events from Chat.tsx (Camp Refactor)
+  useEffect(() => {
+    const handleAgentStateChange = (event: CustomEvent<{ petId: string | null; state: string }>) => {
+      if (!controllerRef.current || !event?.detail) return;
+
+      const { petId, state } = event.detail;
+
+      let nextState: PetState;
+      switch (state) {
+        case 'requesting':
+          nextState = PetState.Requesting;
+          break;
+        case 'responding':
+          nextState = PetState.Responding;
+          break;
+        case 'listening':
+          nextState = PetState.Listening;
+          break;
+        case 'waiting':
+          nextState = PetState.Waiting;
+          break;
+        case 'communicating':
+          nextState = PetState.Communicating;
+          break;
+        case 'idle':
+        default:
+          nextState = PetState.SitIdle;
+          break;
+      }
+
+      controllerRef.current.forceState(petId || null, nextState, 4000);
+    };
+
+    // Cast needed because addEventListener uses EventListener, not CustomEvent specifically
+    window.addEventListener('agent-state-change', handleAgentStateChange as any);
+    return () => {
+      window.removeEventListener('agent-state-change', handleAgentStateChange as any);
+    };
+  }, []);
 
   // Update environment when theme changes
   useEffect(() => {

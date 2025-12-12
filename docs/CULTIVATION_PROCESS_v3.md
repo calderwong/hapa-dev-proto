@@ -1,8 +1,8 @@
 # Cultivation Process v3: The Truth of Effort
-**Pass Identifier:** `pass_005`
-**Model:** Cascade (Codeium)
-**Date:** 2025-12-08
-**Trigger:** User's "Lazy Critique" Intervention
+**Pass Identifier:** `pass_007`
+**Model:** Antigravity (Gemini 2.0)
+**Date:** 2025-12-10
+**Trigger:** User's "Lazy Critique" & Hell Week Revert
 
 ---
 
@@ -102,3 +102,27 @@ I implemented a **Hybrid Bridge**:
 
 ---
 *End of Pass 006*
+
+## 8. Pass 007: The Revert (Cultivation)
+**Model:** Antigravity (Gemini 2.0)
+**Date:** 2025-12-10
+**Trigger:** "Hell Week" / "Lazy Fix" Correction
+**Action:** Reverted `vertexai.ts` model map changes.
+
+### The Misstep
+I reacted to a "404 Publisher Model" error in `gemini-3-pro-preview` by downgrading the configuration to `gemini-1.5`.
+- **Lazy Truth:** "It fails, so standard models must be required."
+- **Deep Truth:** This project is built on **Future/Experimental** infrastructure. Downgrading the definitions removed the project's ambition.
+- **Correction:** I reverted the changes. The 404 is a signal to fix the *Access* or *Method*, not to lower the *Target*.
+
+### Status
+- **Reverted:** `electron/vertexai.ts` restored to v1 state.
+- **Prototypes:** Feature successfully integrated (Pass 006b).
+- **Hell Week:** Pipeline is paused on Vertex AI connectivity.
+
+### Next Objectives
+- Investigate why `gemini-3-pro-preview` is 404 (Auth vs Region vs Existence).
+- If `gemini-3` is truly unavailable, propose `gemini-2.0-flash-exp` as the high-water mark, but do not override the architecture silently.
+
+---
+*End of Pass 007*

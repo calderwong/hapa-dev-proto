@@ -170,6 +170,7 @@ export function petCardToConfig(card: PetCard): PetConfig {
       run: getAnimationUrl(card.animations.run),
       lie: getAnimationUrl(card.animations.lie),
     },
+    agentStateAnimations: card.agentStateAnimations,
     modules: card.modules,
   };
 }

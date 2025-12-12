@@ -150,6 +150,7 @@ const ElapsedTime: React.FC<{ startTime: number }> = ({ startTime }) => {
 
 const GEMINI_MODEL_STORAGE_KEY = 'defaultGeminiModel';
 const OPENAI_MODEL_STORAGE_KEY = 'defaultOpenAIModel';
+const AIMLAPI_MODEL_STORAGE_KEY = 'defaultAimlApiModel';
 const LLAMA_MODEL_STORAGE_KEY = 'defaultLlamaModel';
 const PROVIDER_STORAGE_KEY = 'defaultChatProvider';
 
@@ -163,9 +164,10 @@ const CHAT_IMAGE_CARD_STATE_STORAGE_PREFIX = 'chatImageCardState';
 const CHAT_EXTRACTED_CARDS_STORAGE_KEY = 'chatExtractedCards';
 const CHAT_MESSAGE_CARDS_STORAGE_KEY = 'chatMessageCards';
 
-const formatProviderLabel = (value: 'gemini' | 'openai' | 'llama') => {
+const formatProviderLabel = (value: 'gemini' | 'openai' | 'llama' | 'aimlapi') => {
   if (value === 'gemini') return 'Gemini';
   if (value === 'openai') return 'OpenAI';
+  if (value === 'aimlapi') return 'AIMLAPI';
   return 'Local (llama.cpp)';
 };
 
@@ -188,12 +190,14 @@ const Chat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [provider, setProvider] = useState<'gemini' | 'openai' | 'llama'>('gemini');
+  const [provider, setProvider] = useState<'gemini' | 'openai' | 'llama' | 'aimlapi'>('gemini');
   const [geminiModels, setGeminiModels] = useState<ModelInfo[]>([]);
   const [openaiModels, setOpenaiModels] = useState<ModelInfo[]>([]);
+  const [aimlApiModels, setAimlApiModels] = useState<ModelInfo[]>([]);
   const [llamaModels, setLlamaModels] = useState<ModelInfo[]>([]);
   const [selectedGeminiModel, setSelectedGeminiModel] = useState('gemini-pro');
   const [selectedOpenAIModel, setSelectedOpenAIModel] = useState('gpt-4.1-mini');
+  const [selectedAimlApiModel, setSelectedAimlApiModel] = useState('gpt-4o');
   const [selectedLlamaModel, setSelectedLlamaModel] = useState('');
 
   const [imageCardState, setImageCardState] = useState<{
@@ -670,13 +674,35 @@ const Chat: React.FC = () => {
         }
       }
 
+      if (window.electronAPI?.listAimlApiModels) {
+        const availableAimlApiModels = await window.electronAPI.listAimlApiModels();
+        if (availableAimlApiModels && availableAimlApiModels.length > 0) {
+          setAimlApiModels(availableAimlApiModels);
+          const storedAimlApiModel =
+            typeof window !== 'undefined'
+              ? window.localStorage.getItem(AIMLAPI_MODEL_STORAGE_KEY)
+              : null;
+          if (storedAimlApiModel) {
+            const match = availableAimlApiModels.find((model) => model.name === storedAimlApiModel);
+            if (match) {
+              setSelectedAimlApiModel(match.name);
+            } else {
+              setSelectedAimlApiModel(availableAimlApiModels[0].name);
+            }
+          } else {
+            setSelectedAimlApiModel(availableAimlApiModels[0].name);
+          }
+        }
+      }
+
       if (typeof window !== 'undefined') {
         const storedProvider = window.localStorage.getItem(PROVIDER_STORAGE_KEY) as
           | 'gemini'
           | 'openai'
           | 'llama'
+          | 'aimlapi'
           | null;
-        if (storedProvider === 'gemini' || storedProvider === 'openai' || storedProvider === 'llama') {
+        if (storedProvider === 'gemini' || storedProvider === 'openai' || storedProvider === 'llama' || storedProvider === 'aimlapi') {
           setProvider(storedProvider);
         }
 
@@ -1074,6 +1100,8 @@ const Chat: React.FC = () => {
       modelName = selectedGeminiModel;
     } else if (provider === 'openai') {
       modelName = selectedOpenAIModel;
+    } else if (provider === 'aimlapi') {
+      modelName = selectedAimlApiModel;
     } else {
       modelName = selectedLlamaModel || (llamaModels[0]?.name ?? undefined);
     }
@@ -1252,6 +1280,9 @@ const Chat: React.FC = () => {
           result = await window.electronAPI.chatWithGemini(payload);
         } else if (provider === 'openai') {
           result = await window.electronAPI.chatWithOpenAI(payload);
+        } else if (provider === 'aimlapi') {
+          const content = await window.electronAPI.chatWithAimlApi(payload);
+          result = { content, model: modelName || 'unknown', provider: 'aimlapi' };
         } else {
           result = await window.electronAPI.chatWithLlama(payload);
         }
@@ -1287,7 +1318,9 @@ const Chat: React.FC = () => {
               ? "I'm a mock Gemini response. Please run in Electron to use real API."
               : provider === 'openai'
                 ? "I'm a mock OpenAI response. Please run in Electron to use real API."
-                : "I'm a mock Llama (local) response. Please run in Electron with llama.cpp server to use real API.";
+                : provider === 'aimlapi'
+                  ? "I'm a mock AIMLAPI response. Please run in Electron to use real API."
+                  : "I'm a mock Llama (local) response. Please run in Electron with llama.cpp server to use real API.";
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId ? { ...m, content: mockText } : m,
@@ -1380,9 +1413,9 @@ const Chat: React.FC = () => {
   };
 
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const raw = e.target.value as 'gemini' | 'openai' | 'llama';
-    const value: 'gemini' | 'openai' | 'llama' =
-      raw === 'openai' ? 'openai' : raw === 'llama' ? 'llama' : 'gemini';
+    const raw = e.target.value as 'gemini' | 'openai' | 'llama' | 'aimlapi';
+    const value: 'gemini' | 'openai' | 'llama' | 'aimlapi' =
+      raw === 'openai' ? 'openai' : raw === 'llama' ? 'llama' : raw === 'aimlapi' ? 'aimlapi' : 'gemini';
 
     setProvider(value);
     if (typeof window !== 'undefined') {
@@ -1403,6 +1436,11 @@ const Chat: React.FC = () => {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(OPENAI_MODEL_STORAGE_KEY, value);
       }
+    } else if (provider === 'aimlapi') {
+      setSelectedAimlApiModel(value);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(AIMLAPI_MODEL_STORAGE_KEY, value);
+      }
     } else {
       setSelectedLlamaModel(value);
       if (typeof window !== 'undefined') {
@@ -1420,7 +1458,7 @@ const Chat: React.FC = () => {
   };
 
   const activeModels =
-    provider === 'gemini' ? geminiModels : provider === 'openai' ? openaiModels : llamaModels;
+    provider === 'gemini' ? geminiModels : provider === 'openai' ? openaiModels : provider === 'aimlapi' ? aimlApiModels : llamaModels;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1479,7 +1517,7 @@ const Chat: React.FC = () => {
         role: m.role === 'model' ? 'model' : 'user',
         content: typeof m.content === 'string' ? m.content : '',
         provider:
-          m.provider === 'gemini' || m.provider === 'openai' || m.provider === 'llama'
+          m.provider === 'gemini' || m.provider === 'openai' || m.provider === 'llama' || m.provider === 'aimlapi'
             ? m.provider
             : undefined,
         model: typeof m.model === 'string' ? m.model : undefined,
@@ -1634,6 +1672,7 @@ const Chat: React.FC = () => {
             >
               <rux-option value="gemini" label="Gemini"></rux-option>
               <rux-option value="openai" label="OpenAI"></rux-option>
+              <rux-option value="aimlapi" label="AIMLAPI"></rux-option>
               <rux-option value="llama" label="Llama"></rux-option>
             </rux-select>
 
@@ -1645,7 +1684,9 @@ const Chat: React.FC = () => {
                   ? selectedGeminiModel
                   : provider === 'openai'
                     ? selectedOpenAIModel
-                    : selectedLlamaModel || (llamaModels[0]?.name ?? '')
+                    : provider === 'aimlapi'
+                      ? selectedAimlApiModel
+                      : selectedLlamaModel || (llamaModels[0]?.name ?? '')
               }
               onChange={handleModelChange}
               className="bg-gray-800 text-white text-sm rounded border border-gray-700 px-2 py-1 w-48 focus:outline-none focus:border-astro-primary"
@@ -1695,10 +1736,10 @@ const Chat: React.FC = () => {
               <p className="text-astro-off text-sm max-w-md">
                 Secure AI Operations Terminal. Select a model and begin transmission.
               </p>
-              {(provider === 'gemini' ? selectedGeminiModel : selectedOpenAIModel) && (
+              {(provider === 'gemini' ? selectedGeminiModel : provider === 'openai' ? selectedOpenAIModel : provider === 'aimlapi' ? selectedAimlApiModel : selectedLlamaModel) && (
                 <div className="mt-8 flex items-center gap-2 px-3 py-1 rounded-full bg-astro-surface border border-astro-border text-xs text-astro-primary">
                   <rux-icon icon="memory" size="extra-small"></rux-icon>
-                  <span>Active: {provider === 'gemini' ? selectedGeminiModel : selectedOpenAIModel}</span>
+                  <span>Active: {provider === 'gemini' ? selectedGeminiModel : provider === 'openai' ? selectedOpenAIModel : provider === 'aimlapi' ? selectedAimlApiModel : selectedLlamaModel}</span>
                 </div>
               )}
             </div>

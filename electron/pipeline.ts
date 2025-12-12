@@ -13,6 +13,11 @@ import {
   createModelProvenance,
   MODEL_SHORTHAND_MAP
 } from './vertexai';
+import { 
+  AimlApiClient, 
+  isAimlApiConfigured, 
+  AIMLAPI_MODEL_MAP 
+} from './aimlapi';
 import { emitCardEvents } from './persistence';
 import { 
   cardManager, 
@@ -23,6 +28,152 @@ import {
 } from './cardManager';
 
 const store: any = new Store();
+
+function buildArtifactSnippet(text: string, maxChars: number): string {
+  const raw = String(text ?? '');
+  if (raw.length <= maxChars) return raw;
+
+  // Representative sampling for huge artifacts: head + mid + tail.
+  // Keeps prompts stable across file sizes while supporting "any type of text" input.
+  const headLen = Math.floor(maxChars * 0.4);
+  const midLen = Math.floor(maxChars * 0.2);
+  const tailLen = maxChars - headLen - midLen;
+
+  const head = raw.slice(0, headLen);
+  const midStart = Math.max(0, Math.floor(raw.length / 2) - Math.floor(midLen / 2));
+  const mid = raw.slice(midStart, midStart + midLen);
+  const tail = raw.slice(Math.max(0, raw.length - tailLen));
+
+  return [
+    `[[ARTIFACT_TRUNCATED total_chars=${raw.length} included_chars=${maxChars}]]`,
+    `[[HEAD]]\n${head}`,
+    `[[MIDDLE]]\n${mid}`,
+    `[[TAIL]]\n${tail}`,
+    `[[/ARTIFACT_TRUNCATED]]`,
+  ].join('\n\n');
+}
+
+function tryParseJsonFromText(raw: string, options?: { allowTextFallback?: boolean }): any {
+  const stripFences = (input: string) => {
+    const trimmed = input.trim();
+    const fenced = trimmed.match(/^```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n```\s*$/);
+    if (fenced && fenced[1]) return fenced[1].trim();
+
+    const start = trimmed.indexOf('```');
+    if (start >= 0) {
+      const end = trimmed.lastIndexOf('```');
+      if (end > start) {
+        const inner = trimmed.slice(start + 3, end);
+        const firstNewline = inner.indexOf('\n');
+        if (firstNewline >= 0) return inner.slice(firstNewline + 1).trim();
+        return inner.trim();
+      }
+    }
+
+    return trimmed;
+  };
+
+  const stripComments = (input: string) => {
+    // Best-effort JSONC-ish support (common in model output).
+    // This is intentionally conservative to avoid mangling strings.
+    const withoutBlock = input.replace(/\/\*[\s\S]*?\*\//g, '');
+    const withoutLine = withoutBlock.replace(/^\s*\/\/.*$/gm, '');
+    return withoutLine;
+  };
+
+  const removeTrailingCommas = (input: string) => {
+    // Turns {"a":1,} into {"a":1} and [1,2,] into [1,2]
+    return input.replace(/,(\s*[}\]])/g, '$1');
+  };
+
+  const basicRepair = (input: string) => {
+    // Remove BOM + common JSON violations
+    const noBom = input.replace(/^\uFEFF/, '');
+    return removeTrailingCommas(stripComments(noBom));
+  };
+
+  const stripLeadingJsonWord = (input: string) => {
+    const trimmed = input.trimStart();
+    const m = trimmed.match(/^(json|JSON)\s*\n/);
+    if (m) return trimmed.slice(m[0].length).trimStart();
+    return trimmed;
+  };
+
+  const extractFirstJson = (input: string) => {
+    const firstObj = input.indexOf('{');
+    const firstArr = input.indexOf('[');
+    const start =
+      firstObj === -1
+        ? firstArr
+        : firstArr === -1
+          ? firstObj
+          : Math.min(firstObj, firstArr);
+    if (start < 0) return null;
+
+    const open = input[start];
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < input.length; i++) {
+      const ch = input[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === open) depth++;
+      if (ch === close) depth--;
+      if (depth === 0) return input.slice(start, i + 1);
+    }
+    return null;
+  };
+
+  const candidates: string[] = [];
+  candidates.push(raw ?? '');
+  candidates.push(stripFences(raw ?? ''));
+  candidates.push(stripLeadingJsonWord(stripFences(raw ?? '')));
+  candidates.push(basicRepair(stripLeadingJsonWord(stripFences(raw ?? ''))));
+
+  for (const candidate of candidates) {
+    const trimmed = (candidate ?? '').trim();
+    if (!trimmed) continue;
+    try {
+      return JSON.parse(trimmed);
+    } catch (_) {
+      const extracted = extractFirstJson(trimmed);
+      if (extracted) {
+        const repaired = basicRepair(extracted);
+        return JSON.parse(repaired);
+      }
+    }
+  }
+
+  if (options?.allowTextFallback) {
+    const txt = String(raw ?? '').trim();
+    return {
+      summary: txt,
+      audience_profiles: [],
+      objectives: [],
+      yarn_context: '',
+      _parseFallback: true,
+    };
+  }
+
+  throw new Error('Unable to parse JSON from model output');
+}
 
 // Pipeline settings key
 const PIPELINE_SETTINGS_KEY = 'pipelineSettings';
@@ -76,6 +227,7 @@ class PipelineManager {
   private window: BrowserWindow | null = null;
   private currentFilePath: string = '';
   private rawText: string = '';
+  private emitTimer: NodeJS.Timeout | null = null;
   
   private state: PipelineState = {
     status: 'IDLE',
@@ -96,18 +248,53 @@ class PipelineManager {
     this.window = window;
   }
 
+  private getRendererState(): PipelineState {
+    const MAX_LOGS = 250;
+    const logs = this.state.logs.length > MAX_LOGS ? this.state.logs.slice(-MAX_LOGS) : this.state.logs;
+
+    const chunks = this.state.chunks.length > 0 ? new Array(this.state.chunks.length).fill('') : [];
+
+    const { hellWeekCards: _hellWeekCards, ...rest } = this.state as any;
+    return {
+      ...rest,
+      logs,
+      chunks,
+    } as PipelineState;
+  }
+
+  private emitState(): void {
+    if (!this.window) return;
+    if (this.window.isDestroyed()) return;
+    const wc = this.window.webContents;
+    if (!wc || wc.isDestroyed()) return;
+
+    try {
+      wc.send('pipeline:update', this.getRendererState());
+    } catch (err) {
+      console.error('[Pipeline] Failed to send pipeline:update:', err);
+    }
+  }
+
+  private scheduleEmitState(): void {
+    if (this.emitTimer) return;
+    this.emitTimer = setTimeout(() => {
+      this.emitTimer = null;
+      this.emitState();
+    }, 100);
+  }
+
   private updateState(updates: Partial<PipelineState>) {
     this.state = { ...this.state, ...updates };
-    if (this.window) {
-      this.window.webContents.send('pipeline:update', this.state);
-    }
+    this.scheduleEmitState();
   }
 
   private log(message: string) {
     const timestamp = new Date().toLocaleTimeString();
     const logMessage = `[${timestamp}] ${message}`;
     console.log(`[Pipeline] ${message}`);
-    this.updateState({ logs: [...this.state.logs, logMessage] });
+    const MAX_LOGS = 250;
+    const nextLogs = [...this.state.logs, logMessage];
+    this.updateState({ logs: nextLogs.length > MAX_LOGS ? nextLogs.slice(-MAX_LOGS) : nextLogs });
   }
 
   /**
@@ -315,6 +502,9 @@ class PipelineManager {
 
   private async runLeoStep(text: string) {
     this.updateState({ currentStep: 'Leo: Reading & Contextualizing...', progress: 10 });
+
+    const artifactSnippet = buildArtifactSnippet(text, 100000);
+    this.log(`Leo artifact snippet: ${artifactSnippet.length} chars (from ${String(text ?? '').length} total)`);
     
     const prompt = `
       You are "Leo" 🐕, the Retrieval & Context Phamiliar for the Hapa Protocol.
@@ -338,16 +528,46 @@ class PipelineManager {
         "suggested_set_name": "Short Memorable Name",
         "suggested_set_description": "One sentence describing what this collection represents"
       }
+
+      IMPORTANT OUTPUT RULES:
+      - Output ONLY valid JSON
+      - Do NOT wrap in code fences
+      - Do NOT prefix with the word "json"
+      - Do NOT include any commentary outside the JSON object
       
       ARTIFACT CONTENT:
-      ${text.slice(0, 100000)} 
+      ${artifactSnippet}
     `;
 
     let jsonText: string;
     let leoProvenance: ModelProvenance;
 
-    // Check if Vertex AI is configured (preferred)
-    if (isVertexAIConfigured()) {
+    // Debug: Log which providers are configured
+    const aimlConfigured = isAimlApiConfigured();
+    const vertexConfigured = isVertexAIConfigured();
+    this.log(`Provider check: AIMLAPI=${aimlConfigured}, Vertex=${vertexConfigured}`);
+
+    // PRIORITY 1: Use AIMLAPI.com if configured (preferred - avoids Vertex 404 issues)
+    if (aimlConfigured) {
+      const aimlModelId = AIMLAPI_MODEL_MAP['smart-llm'];
+      this.log(`Using AIMLAPI.com (Smart LLM - ${aimlModelId})...`);
+      
+      // Create provenance record
+      leoProvenance = createModelProvenance('Smart LLM', 'AIMLAPI.com', aimlModelId);
+      
+      const aimlClient = new AimlApiClient();
+      
+      // AIMLAPI uses OpenAI-compatible chat completions format
+      // We instruct the model to respond in JSON via the prompt itself
+      const result = await aimlClient.chatCompletion(
+        [{ role: 'user', content: prompt }],
+        aimlModelId,
+        { temperature: 0.7, max_tokens: 8000 }
+      );
+      jsonText = result.content;
+    }
+    // PRIORITY 2: Fallback to Vertex AI if configured
+    else if (isVertexAIConfigured()) {
       const modelName = MODEL_SHORTHAND_MAP['smart-llm'];
       this.log(`Using Vertex AI (Smart LLM - ${modelName})...`);
       
@@ -360,10 +580,10 @@ class PipelineManager {
       });
       jsonText = result.text;
     } else {
-      // Fallback to Google AI Studio
+      // PRIORITY 3: Fallback to Google AI Studio
       const apiKey = store.get('geminiKey') as string | undefined;
       if (!apiKey) {
-        throw new Error('No AI provider configured. Please set up Vertex AI or Google AI Studio in Settings.');
+        throw new Error('No AI provider configured. Please set up AIMLAPI.com, Vertex AI, or Google AI Studio in Settings.');
       }
 
       const modelName = this.getDefaultGeminiModel();
@@ -386,10 +606,21 @@ class PipelineManager {
     }
     
     this.log(`Leo finished thinking. Model: ${leoProvenance.modelName} via ${leoProvenance.provider}`);
+
+    // Debug preview: helps diagnose provider formatting changes (code fences, leading "json", etc.)
+    // Keep it small to avoid log bloat / exposing full artifacts.
+    try {
+      const s = String(jsonText ?? '');
+      const head = s.slice(0, 240).replace(/\s+/g, ' ').trim();
+      const tail = s.length > 240 ? s.slice(Math.max(0, s.length - 240)).replace(/\s+/g, ' ').trim() : '';
+      this.log(`Leo raw output preview (len=${s.length}): head="${head}"${tail ? ` tail="${tail}"` : ''}`);
+    } catch {
+      // ignore
+    }
     
     let parsedOutput;
     try {
-        parsedOutput = JSON.parse(jsonText);
+        parsedOutput = tryParseJsonFromText(jsonText, { allowTextFallback: true });
     } catch (e) {
         this.log('Failed to parse JSON from Leo. Falling back to raw text.');
         parsedOutput = { summary: jsonText, error: "JSON Parse Failed" };
@@ -495,34 +726,46 @@ class PipelineManager {
       this.updateState({ status: 'THOR_PROCESSING', currentStep: 'Thor: Forging Cards...', progress: 40 });
       
       const pipelineSettings = getPipelineSettings();
-      const useVertex = isVertexAIConfigured();
+      const useAimlApi = isAimlApiConfigured();
+      const useVertex = !useAimlApi && isVertexAIConfigured();
       
       // Get the configured Thor model (fast-llm or smart-llm)
       const thorModelShorthand = this.state.thorModel || pipelineSettings.thorModel;
-      const thorModelName = MODEL_SHORTHAND_MAP[thorModelShorthand];
       const thorCommonName = thorModelShorthand === 'fast-llm' ? 'Fast LLM' : 'Smart LLM';
       
-      // Set up the appropriate client
+      // Set up the appropriate client based on priority: AIMLAPI > Vertex > Google AI Studio
+      let aimlClient: AimlApiClient | null = null;
       let vertexClient: VertexAIClient | null = null;
       let genAI: GoogleGenerativeAI | null = null;
       let model: any = null;
       let provider: string;
+      let thorModelName: string;
 
-      if (useVertex) {
+      if (useAimlApi) {
+        // PRIORITY 1: AIMLAPI.com
+        thorModelName = AIMLAPI_MODEL_MAP[thorModelShorthand];
+        this.log(`Thor using AIMLAPI.com (${thorCommonName} - ${thorModelName}) (throttle: ${pipelineSettings.thorThrottleMs}ms)`);
+        aimlClient = new AimlApiClient();
+        provider = 'AIMLAPI.com';
+      } else if (useVertex) {
+        // PRIORITY 2: Vertex AI
+        thorModelName = MODEL_SHORTHAND_MAP[thorModelShorthand];
         this.log(`Thor using Vertex AI (${thorCommonName} - ${thorModelName}) (throttle: ${pipelineSettings.thorThrottleMs}ms)`);
         vertexClient = getVertexAIClient();
         provider = 'Vertex AI';
       } else {
+        // PRIORITY 3: Google AI Studio
         const apiKey = store.get('geminiKey') as string | undefined;
         if (!apiKey) {
-          this.log('Error: No AI provider configured.');
+          this.log('Error: No AI provider configured. Please set up AIMLAPI.com, Vertex AI, or Google AI Studio in Settings.');
+          this.updateState({ status: 'ERROR', currentStep: 'No AI provider configured' });
           return;
         }
-        const modelName = this.getDefaultGeminiModel();
-        this.log(`Thor using Google AI Studio (${modelName}) (throttle: ${pipelineSettings.thorThrottleMs}ms)`);
+        thorModelName = this.getDefaultGeminiModel();
+        this.log(`Thor using Google AI Studio (${thorModelName}) (throttle: ${pipelineSettings.thorThrottleMs}ms)`);
         genAI = new GoogleGenerativeAI(apiKey);
         model = genAI.getGenerativeModel({ 
-          model: modelName,
+          model: thorModelName,
           generationConfig: { responseMimeType: "application/json" }
         });
         provider = 'Google AI Studio';
@@ -579,14 +822,24 @@ class PipelineManager {
               let jsonText: string;
               let actualModelName: string;
               
-              if (useVertex && vertexClient) {
-                // Use the configured Thor model (fast-llm or smart-llm)
+              if (useAimlApi && aimlClient) {
+                // PRIORITY 1: Use AIMLAPI.com
+                const result = await aimlClient.chatCompletion(
+                  [{ role: 'user', content: prompt }],
+                  thorModelName,
+                  { temperature: 0.7, max_tokens: 4000 }
+                );
+                jsonText = result.content;
+                actualModelName = thorModelName;
+              } else if (useVertex && vertexClient) {
+                // PRIORITY 2: Use Vertex AI
                 const result = await vertexClient.generateContent(prompt, thorModelShorthand, {
                   responseMimeType: 'application/json'
                 });
                 jsonText = result.text;
                 actualModelName = thorModelName;
               } else if (model) {
+                // PRIORITY 3: Use Google AI Studio
                 const result = await model.generateContent(prompt);
                 const response = await result.response;
                 jsonText = response.text();
@@ -595,7 +848,7 @@ class PipelineManager {
                 throw new Error('No AI model available');
               }
               
-              const cardData = JSON.parse(jsonText);
+              const cardData = tryParseJsonFromText(jsonText);
               const thorProvenance = createModelProvenance(thorCommonName, provider, actualModelName);
               
               // Add provenance to the card (legacy format)

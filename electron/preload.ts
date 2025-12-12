@@ -7,7 +7,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveSettings: (settings: any) => ipcRenderer.invoke('save-settings', settings),
     listGeminiModels: () => ipcRenderer.invoke('list-gemini-models'),
     listOpenAIModels: () => ipcRenderer.invoke('list-openai-models'),
+    listAimlApiModels: () => ipcRenderer.invoke('list-aimlapi-models'),
     listLlamaModels: () => ipcRenderer.invoke('list-llama-models'),
+    chatWithAimlApi: (data: { message: string; history: any[]; model?: string; attachments?: { mimeType: string; data: string }[] }) =>
+        ipcRenderer.invoke('chat-with-aimlapi', data),
     chatWithGemini: (data: { message: string; history: any[]; model?: string; attachments?: { mimeType: string; data: string }[] }) =>
         ipcRenderer.invoke('chat-with-gemini', data),
     chatWithOpenAI: (data: { message: string; history: any[]; model?: string; attachments?: { mimeType: string; data: string }[] }) =>
@@ -117,9 +120,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('video-generation-progress', (_event, payload) => listener(payload));
     },
     // Video extraction utilities
-    extractVideoFrame: (data: { videoPath: string; frameType: 'first' | 'last' }) => 
+    extractVideoFrame: (data: { videoPath: string; frameType: 'first' | 'last' }) =>
         ipcRenderer.invoke('extract-video-frame', data),
-    extractVideoAudio: (data: { videoPath: string }) => 
+    extractVideoAudio: (data: { videoPath: string }) =>
         ipcRenderer.invoke('extract-video-audio', data),
     // Image generation for cards (supports series continuation)
     generateImageForCard: (data: {
@@ -136,7 +139,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
             previousImagePath?: string;
         };
     }) => ipcRenderer.invoke('generate-image-for-card', data),
-    
+
     // Create looping video from an image
     createLoopVideoForImage: (data: {
         parentCardId: string;
@@ -146,15 +149,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
         cardName: string;
         imageOrder: number;
     }) => ipcRenderer.invoke('create-loop-video-for-image', data),
-    
+
     // Listen for loop video generation progress
     onLoopVideoProgress: (listener: (payload: any) => void) => {
         ipcRenderer.on('loop-video-progress', (_event, payload) => listener(payload));
     },
-    
+
     // Hell Week Pipeline
     pipelineStart: (filePath: string) => ipcRenderer.invoke('pipeline:start', filePath),
-    pipelineStartWithContent: (fileName: string, content: string) => 
+    pipelineStartWithContent: (fileName: string, content: string) =>
         ipcRenderer.invoke('pipeline:start-with-content', { fileName, content }),
     pipelineAdvance: () => ipcRenderer.invoke('pipeline:advance'),
     onPipelineUpdate: (listener: (state: any) => void) => {
@@ -173,26 +176,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pipelineRecoverCards: () => ipcRenderer.invoke('pipeline:recover-cards'),
     // Repair Hell Week card parents
     repairHellWeekParents: () => ipcRenderer.invoke('repair-hell-week-parents'),
-    
+
     // Card Sets
     cardSetsCreate: (cardSet: any) => ipcRenderer.invoke('card-sets:create', cardSet),
     cardSetsList: () => ipcRenderer.invoke('card-sets:list'),
     cardSetsGet: (setId: string) => ipcRenderer.invoke('card-sets:get', setId),
     cardSetsCreateMerged: (mergedSet: any) => ipcRenderer.invoke('card-sets:create-merged', mergedSet),
     cardSetsGetCardIds: (setId: string) => ipcRenderer.invoke('card-sets:get-card-ids', setId),
-    
+
     // Vertex AI
     getVertexAISettings: () => ipcRenderer.invoke('get-vertex-ai-settings'),
     saveVertexAISettings: (settings: any) => ipcRenderer.invoke('save-vertex-ai-settings', settings),
     testVertexAIConnection: () => ipcRenderer.invoke('test-vertex-ai-connection'),
     getVertexAIModels: () => ipcRenderer.invoke('get-vertex-ai-models'),
-    
+
     // Persistence Layer (SQLite Projection Engine)
     persistenceSearchCards: (query: any) => ipcRenderer.invoke('persistence:search-cards', query),
     persistenceGetRagContext: (query: any) => ipcRenderer.invoke('persistence:get-rag-context', query),
     persistenceGetNeighbors: (query: any) => ipcRenderer.invoke('persistence:get-neighbors', query),
     persistenceGetStats: () => ipcRenderer.invoke('persistence:get-stats'),
-    
+
     // Thor's Hamma
     processThorUrl: (url: string, handCards: any[]) => ipcRenderer.invoke('thor:process-url', { url, handCards }),
     onThorUpdate: (callback: (data: { type: string; payload: any }) => void) => {
@@ -200,6 +203,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('thor-update', listener);
         return () => ipcRenderer.removeListener('thor-update', listener);
     },
+
+    // Media download/export
+    saveMedia: (params: { mediaPath: string; suggestedFilename?: string; mediaType?: 'image' | 'video' }) =>
+        ipcRenderer.invoke('save-media', params),
+    exportMedia: (params: { mediaPath: string; fileName: string; mediaType?: 'image' | 'video' }) =>
+        ipcRenderer.invoke('export-media', params),
+    exportAllMedia: () =>
+        ipcRenderer.invoke('export-all-media'),
+    savePrototype: (data: { title: string; content: string }) =>
+        ipcRenderer.invoke('save-prototype', data),
 });
 
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? (window as any).electronAPI : 'window not defined');

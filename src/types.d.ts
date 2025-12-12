@@ -1,6 +1,7 @@
 export interface Settings {
     geminiKey: string;
     openaiKey: string;
+    aimlapiKey: string;
     firebaseConfig: string;
     revidKey: string;
     wormhole?: WormholeSettings;
@@ -488,6 +489,11 @@ export interface ElectronAPI {
     getSystemStats?: () => Promise<SystemStats>;
     processThorUrl?: (url: string, handCards: any[]) => Promise<{ success: boolean; cards?: any[]; error?: string }>;
     onThorUpdate?: (callback: (data: { type: string; payload: any }) => void) => () => void;
+    // Media download/export
+    saveMedia?: (params: { mediaPath: string; suggestedFilename?: string; mediaType?: 'image' | 'video' }) => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>;
+    exportMedia?: (params: { mediaPath: string; fileName: string; mediaType?: 'image' | 'video' }) => Promise<{ success: boolean; path?: string; error?: string }>;
+    exportAllMedia?: () => Promise<{ success: boolean; totalCards?: number; exportDir?: string; error?: string }>;
+    savePrototype?: (data: { title: string; content: string }) => Promise<{ success: boolean; cardId?: string; filePath?: string; error?: string }>;
 }
 
 export interface UserProfile {

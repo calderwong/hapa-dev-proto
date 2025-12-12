@@ -2660,3 +2660,216 @@ The previous custom pointer implementation solved the ghosting but missed the sp
 **Tags:** #bugfix #feature #thor #ipc
 **Est. Avg. Human Dev Time:** 1.5 hours
 
+## Entry 38 – Hell Week Pipeline: Switch to AIMLAPI.com
+**Date**: Dec 11, 2025
+**Prompt:** "Can you switch the entire hell week pipeline to use AIMLAPI.com versions of the same models with the same prompts and same structure, just switch out the API"
+
+**Summary of actions:**
+1. **Enhanced `electron/aimlapi.ts`**:
+   - Added `AIMLAPI_MODEL_MAP` mapping shorthand names to AIMLAPI model IDs:
+     - `smart-llm` → `google/gemini-3-pro-preview`
+     - `fast-llm` → `google/gemini-2.5-flash`
+   - Added `isAimlApiConfigured()` helper function
+   - Added `getAimlApiKey()` helper function
+   - Added `refreshApiKey()`, `isConfigured()`, and `resolveModelName()` methods to `AimlApiClient`
+
+2. **Refactored `electron/pipeline.ts`**:
+   - Added AIMLAPI imports
+   - **Leo Step (`runLeoStep`)**: Now uses AIMLAPI.com as Priority 1, Vertex AI as Priority 2, Google AI Studio as Priority 3
+   - **Thor Step (`runThorProcessing`)**: Same priority order - AIMLAPI.com first, then Vertex, then Google AI Studio
+   - Prompts and JSON schemas remain unchanged
+   - Provenance tracking updated to record "AIMLAPI.com" as provider when used
+
+3. **Image Generation**: Remains on Vertex AI (Imagen 4) since AIMLAPI uses a different endpoint structure (`/v1/images/generations`)
+
+**Why this change:**
+- Vertex AI was returning 404 errors for `gemini-3-pro-preview` model
+- AIMLAPI.com provides access to the same Google models via OpenAI-compatible API
+- User already had AIMLAPI key configured in Settings
+
+**Files Modified:**
+- `electron/aimlapi.ts` - Model mappings, configuration helpers
+- `electron/pipeline.ts` - Leo and Thor LLM calls now route through AIMLAPI
+
+**Tags:** #feature #refactor #aimlapi #hell-week #llm
+**Est. Avg. Human Dev Time:** 1.0 hours
+
+## Entry 39 – Complete AIMLAPI.com Migration (All LLM & Video)
+**Date**: Dec 11, 2025
+**Prompt:** "Please review every process using Vertex or Gemini and ensure they are all switched over to AIML's API"
+
+**Summary of actions:**
+
+### 1. Enhanced `electron/aimlapi.ts` with Video Generation
+- Added `generateVideo()` method supporting Veo 3.1 via AIMLAPI's `/v2/video/generations` endpoint
+- Added `pollVideoGeneration()` method for async video completion polling
+- Added `generateVideoAndWait()` convenience method
+- Supports first/last frame for seamless loop videos
+
+### 2. Updated `electron/main.ts` - LoopVideo Handler
+- **Prompt Crafting**: Now uses AIMLAPI (Priority 1) → Vertex AI (Priority 2) → Google AI Studio (Priority 3)
+- **Video Generation**: Now uses AIMLAPI Veo 3.1 (Priority 1) → Vertex AI (Priority 2) → AI Studio (Priority 3)
+- Fixed variable naming (`apiKey` → `geminiApiKey`) for clarity
+- Added provider check logging for debugging
+
+### 3. Updated `electron/main.ts` - ImageGen Handler
+- **Prompt Crafting**: Now uses AIMLAPI (Priority 1) → Vertex AI (Priority 2) → Google AI Studio (Priority 3)
+- Image generation itself still uses configured provider (Local Vision, Vertex Imagen, or AI Studio)
+
+### 4. Updated `electron/thors-hamma.ts`
+- Added AIMLAPI imports
+- `callAI()` method now uses AIMLAPI (Priority 1) → Vertex AI (Priority 2) → Google AI Studio (Priority 3)
+
+### 5. Updated `electron/pipeline.ts` (from Entry 38)
+- Leo and Thor LLM calls already switched to AIMLAPI priority
+
+### Video Files Investigation
+- Checked `C:\Users\cjwon\hapa-ag\temp\vertex-jobs\` - only JSON config files exist, no MP4 files
+- The Python Veo bridge was polling but videos weren't being created (Vertex AI 404 errors)
+- With AIMLAPI now as priority, video generation should work via their Veo 3.1 endpoint
+
+**Files Modified:**
+- `electron/aimlapi.ts` - Video generation methods
+- `electron/main.ts` - LoopVideo and ImageGen handlers
+- `electron/thors-hamma.ts` - callAI method
+- `electron/pipeline.ts` - Leo and Thor (from Entry 38)
+
+**Provider Priority Order (All LLM/Video calls):**
+1. **AIMLAPI.com** (if `aimlapiKey` configured)
+2. **Vertex AI** (if service account configured)
+3. **Google AI Studio** (if `geminiKey` configured)
+
+**Tags:** #feature #refactor #aimlapi #video #llm #migration
+**Est. Avg. Human Dev Time:** 2.0 hours
+
+## Entry 40 – Video Generation API Debugging & Fixes
+**Date**: Dec 11, 2025
+**Prompt:** "Debug video generation - AIMLAPI queue stuck, Vertex AI polling 404s"
+
+**Summary of actions:**
+
+### 1. Created Test Scripts for API Validation
+Built standalone test scripts to empirically validate API integrations instead of guessing:
+- `scripts/test_aimlapi_video.js` - Tests AIMLAPI video generation with different image formats
+- `scripts/poll_old_jobs.js` - Polls existing AIMLAPI job IDs
+- `scripts/test_vertex_video.py` - Tests Vertex AI Veo with official API format
+- `scripts/poll_vertex_job.py` - Tests Vertex AI polling endpoints
+
+### 2. AIMLAPI Findings
+- **Data URI format works**: `data:image/png;base64,{base64data}` is accepted
+- **Duration must be 4, 6, or 8** (not 5)
+- **Resolution must be uppercase**: `720P` or `1080P`
+- **Queue is backed up**: Jobs get accepted but stay in "queued" status for 30+ minutes across all models (Veo, Kling)
+
+### 3. Vertex AI Critical Discovery
+**The standard Operations API does NOT work for Veo** - it returns "Operation ID must be a Long" because Veo uses UUID-style operation IDs.
+
+**Solution**: Use `fetchPredictOperation` endpoint per official Google docs:
+```
+POST https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:fetchPredictOperation
+Body: {"operationName": "projects/.../operations/{uuid}"}
+```
+
+### 4. Updated `scripts/veo_bridge.py`
+- Changed from gRPC polling to REST `fetchPredictOperation` endpoint
+- Properly extracts model ID from operation name
+- Handles both inline `bytesBase64Encoded` and `gcsUri` responses
+- Increased timeout to 120 attempts (10 minutes)
+
+### 5. Updated `electron/vertexai.ts`
+- Changed default video model to `veo-3.1-generate-preview` per official docs
+- Updated `MODEL_SHORTHAND_MAP` and `DEFAULT_VERTEX_SETTINGS`
+
+### 6. Key API Requirements Discovered
+**Vertex AI Veo:**
+- Model: `veo-3.1-generate-preview` or `veo-3.1-fast-generate-001`
+- Images must use `gs://` Cloud Storage URIs (not HTTP URLs)
+- `durationSeconds` must be a STRING ("8" not 8)
+- `resolution` lowercase: "720p" or "1080p"
+- Polling via `fetchPredictOperation`, NOT standard operations API
+
+**AIMLAPI:**
+- Images: Data URI format `data:image/png;base64,...`
+- Duration: 4, 6, or 8 (integer)
+- Resolution: Uppercase "720P" or "1080P"
+- Queue may be slow/backed up
+
+**Files Modified:**
+- `scripts/veo_bridge.py` - fetchPredictOperation polling
+- `electron/vertexai.ts` - Model ID updates
+- `electron/aimlapi.ts` - Resolution uppercase fix
+
+**Test Scripts Created:**
+- `scripts/test_aimlapi_video.js`
+- `scripts/poll_old_jobs.js`
+- `scripts/test_vertex_video.py`
+- `scripts/poll_vertex_job.py`
+- `scripts/test_vertex_grpc_poll.py`
+- `scripts/test_kling_video.js`
+
+**Tags:** #bugfix #video #vertex-ai #aimlapi #api-integration
+**Est. Avg. Human Dev Time:** 3.0 hours
+
+## Entry 41 – Veo Python Bridge Dependency Fix (Fail Fast)
+**Date**: Dec 11, 2025
+**Prompt:** "Veo Python bridge crashes: ModuleNotFoundError: No module named 'google'"
+
+**Summary of actions:**
+- Updated `scripts/veo_bridge.py` to avoid import-time crashes by moving third-party imports into `main()` and emitting structured JSON errors when dependencies are missing.
+- Added `error_file` support so the Python bridge can write a machine-readable failure signal for the caller.
+- Updated `electron/vertexai.ts` Python bridge flow:
+  - Writes `error_file` into the Python config.
+  - Encodes `error_file` into the `python-ops::...` operation string.
+  - Poller checks the error file and fails immediately with the bridge’s error message (instead of timing out).
+- Added `scripts/requirements.txt` with the minimal dependencies needed for Veo bridge execution.
+
+**Files modified:**
+- `scripts/veo_bridge.py`
+- `electron/vertexai.ts`
+
+**Files created:**
+- `scripts/requirements.txt`
+
+**Tags:** #bugfix #video #vertex-ai #python
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 42 – White Screen Crash After Media Gens (Memory Mitigation)
+**Date**: Dec 11, 2025
+**Prompt:** "Investigate: app crashes to a white screen after a few image/video generations"
+
+**Summary of actions:**
+- Identified high-risk memory behavior: large base64 blobs being created/returned/stored during video and image generation flows.
+- Added Electron renderer diagnostics:
+  - `webContents.on('render-process-gone')`
+  - `webContents.on('unresponsive')`
+  - `webContents.on('did-fail-load')`
+- Updated `generate-video-with-gemini` to stream the downloaded MP4 directly to disk (no MP4 base64 in memory) and return only `videoPath` metadata.
+- Updated `src/pages/Chat.tsx` to never store `videoBase64` in message state.
+- Updated Gemini chat streaming image handling to persist inline images to disk (`userData/wormhole/chat-images`) and embed them as `file://` URLs instead of `data:image/...;base64,...` in markdown.
+- Updated Chat embedded-image extraction to recognize both `data:` and `file://` markdown image URLs.
+
+**Files modified:**
+- `electron/main.ts`
+- `src/pages/Chat.tsx`
+
+**Tags:** #bugfix #stability #memory #electron #video #images
+**Est. Avg. Human Dev Time:** 1.5 hours
+
+## Entry 43 – Hell Week White Screen During Thor (IPC Throttle + Slim State)
+**Date**: Dec 12, 2025
+**Prompt:** "Hell Week pipeline goes white / 'Render frame was disposed' during Thor processing"
+
+**Summary of actions:**
+- Diagnosed renderer disposal during long Thor runs as excessive IPC payload pressure (large `chunks` arrays + rapidly growing `logs`).
+- Hardened Hell Week pipeline state emission:
+  - Added guard rails around `webContents.send` to avoid throwing when renderer is disposed/destroyed.
+  - Throttled `pipeline:update` emission (coalesced updates to ~100ms).
+  - Capped pipeline logs to a fixed window (last 250 messages).
+  - Slimmed renderer state by stripping chunk contents while preserving chunk count.
+
+**Files modified:**
+- `electron/pipeline.ts`
+
+**Tags:** #bugfix #stability #electron #ipc #pipeline
+**Est. Avg. Human Dev Time:** 1.0 hours
+

@@ -13,6 +13,7 @@ interface NavItemConfig {
 
 const NAV_ITEMS: NavItemConfig[] = [
     { path: '/', label: 'Chat', icon: 'chat' },
+    { path: '/prototypes', label: 'Prototypes', icon: 'science' },
     { path: '/forge', label: "Hapa's Forge", icon: 'whatshot' },
     { path: '/thors-hamma', label: "Thor's Hamma", icon: 'satellite' },
     { path: '/cards', label: 'Card Library', icon: 'photo-library' },
@@ -29,7 +30,9 @@ const NAV_ITEMS: NavItemConfig[] = [
     { path: '/settings', label: 'Settings', icon: 'settings' },
     { path: '/admin', label: 'Admin', icon: 'security' },
     { path: '/pets', label: 'Sanctuary', icon: 'pets' },
+    { path: '/camp', label: 'Camp Refactor', icon: 'school' },
     { path: '/pipeline', label: 'Hell Week', icon: 'satellite' },
+    { path: '/flow', label: 'Flow Forger', icon: 'call-split' },
 ];
 
 const SystemClock = () => {
@@ -287,15 +290,15 @@ const Layout: React.FC = () => {
                         <div className="flex-shrink-0">
                             <PetPortal />
                         </div>
-                        
+
                         {/* The Hand - Card Dock (next to Pet) */}
                         <div className="flex-shrink-0">
                             <CardHand />
                         </div>
-                        
+
                         {/* Spacer */}
                         <div className="flex-1" />
-                        
+
                         {/* System Metrics */}
                         <div className="hidden md:flex items-center gap-4 text-[10px] font-mono text-gray-400">
                             <div className="flex items-center gap-1.5" title="Network Status">
@@ -371,18 +374,24 @@ interface SidebarNavItemProps {
 }
 
 const SidebarNavItem: React.FC<SidebarNavItemProps> = ({ to, label, icon, active }) => {
+    const isExperimental = to === '/prototypes';
+    const experimentalClass = isExperimental
+        ? (active
+            ? 'bg-red-900/30 text-red-100 border border-red-500/60 shadow-[0_0_12px_rgba(239,68,68,0.4)] animate-pulse'
+            : 'text-red-400 hover:text-red-200 hover:bg-red-900/20 border border-red-900/40')
+        : (active
+            ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20 font-medium'
+            : 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-100');
+
     return (
         <Link
             to={to}
-            className={`mx-3 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${active
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20 font-medium'
-                : 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-100'
-                }`}
+            className={`mx-3 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${experimentalClass}`}
         >
             <div
                 className={`${active
-                    ? 'text-white animate-neon-breathe'
-                    : 'text-gray-500 group-hover:text-gray-300 group-hover:animate-neon-breathe'
+                    ? (isExperimental ? 'text-red-400 animate-spin-slow' : 'text-white animate-neon-breathe')
+                    : (isExperimental ? 'text-red-500/70 group-hover:text-red-400' : 'text-gray-500 group-hover:text-gray-300 group-hover:animate-neon-breathe')
                     } transition-colors flex-shrink-0 flex items-center justify-center`}
             >
                 <rux-icon icon={icon} size="small"></rux-icon>

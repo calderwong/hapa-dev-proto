@@ -19,13 +19,16 @@ import RevidMedia from './pages/RevidMedia';
 import CardLibrary from './pages/CardLibrary';
 import Forge from './pages/Forge';
 import ThorsHamma from './pages/ThorsHamma';
+import Prototypes from './pages/Prototypes';
 
 import WormholeAstro from './pages/WormholeAstro';
 import Wiki from './pages/Wiki';
 import Profile from './pages/Profile';
 import Pets from './pages/Pets';
+import CampRefactor from './pages/CampRefactor';
 import Pipeline from './pages/Pipeline';
 import Mermaid from './pages/Mermaid';
+import FlowForger from './pages/FlowForger';
 
 function App() {
   useEffect(() => {
@@ -47,35 +50,38 @@ function App() {
         <rux-icon icon="check"></rux-icon>
         <rux-status status="normal"></rux-status>
       </div>
-      
+
       <HandProvider>
-      <DragCanvasProvider>
-      <Router>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Chat />} />
-          <Route path="archives" element={<Archives />} />
-          <Route path="p2p" element={<P2P />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="admin" element={<Admin />} />
-          <Route path="local-llama" element={<LocalLlama />} />
-          <Route path="local-vision" element={<LocalVision />} />
-          <Route path="revid" element={<Revid />} />
-          <Route path="revid-media" element={<RevidMedia />} />
-          <Route path="cards" element={<CardLibrary />} />
-          <Route path="forge" element={<Forge />} />
-          <Route path="wormhole" element={<WormholeAstro />} />
-          <Route path="wiki" element={<Wiki />} />
-          <Route path="profile" element={<Profile />} />
-          <Route path="pets" element={<Pets />} />
-          <Route path="pipeline" element={<Pipeline />} />
-          <Route path="mermaid" element={<Mermaid />} />
-          <Route path="thors-hamma" element={<ThorsHamma />} />
-        </Route>
-      </Routes>
-    </Router>
-    </DragCanvasProvider>
-    </HandProvider>
+        <DragCanvasProvider>
+          <Router>
+            <Routes>
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Chat />} />
+                <Route path="archives" element={<Archives />} />
+                <Route path="p2p" element={<P2P />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="admin" element={<Admin />} />
+                <Route path="local-llama" element={<LocalLlama />} />
+                <Route path="local-vision" element={<LocalVision />} />
+                <Route path="revid" element={<Revid />} />
+                <Route path="revid-media" element={<RevidMedia />} />
+                <Route path="cards" element={<CardLibrary />} />
+                <Route path="forge" element={<Forge />} />
+                <Route path="wormhole" element={<WormholeAstro />} />
+                <Route path="wiki" element={<Wiki />} />
+                <Route path="profile" element={<Profile />} />
+                <Route path="pets" element={<Pets />} />
+                <Route path="camp" element={<CampRefactor />} />
+                <Route path="pipeline" element={<Pipeline />} />
+                <Route path="mermaid" element={<Mermaid />} />
+                <Route path="flow" element={<FlowForger />} />
+                <Route path="thors-hamma" element={<ThorsHamma />} />
+                <Route path="prototypes" element={<Prototypes />} />
+              </Route>
+            </Routes>
+          </Router>
+        </DragCanvasProvider>
+      </HandProvider>
     </>
   );
 }

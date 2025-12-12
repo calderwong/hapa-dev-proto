@@ -22,6 +22,11 @@ import {
   resetVertexAIClient
 } from './vertexai';
 import {
+  AimlApiClient,
+  isAimlApiConfigured,
+  AIMLAPI_MODEL_MAP
+} from './aimlapi';
+import {
   initPersistence,
   getPersistence,
   emitCardEvent
@@ -1596,6 +1601,31 @@ function createWindow() {
     }
   });
 
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[Renderer] render-process-gone:', details);
+  });
+
+  win.webContents.on('unresponsive', () => {
+    console.error('[Renderer] unresponsive');
+  });
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[Renderer] did-fail-load:', { errorCode, errorDescription, validatedURL });
+  });
+
+  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const prefix = `[RendererConsole:${level}]`;
+    if (sourceId && line) {
+      console.error(prefix, message, `(${sourceId}:${line})`);
+      return;
+    }
+    console.error(prefix, message);
+  });
+
+  win.webContents.on('did-finish-load', () => {
+    console.log('[Renderer] did-finish-load:', win.webContents.getURL());
+  });
+
   // Strip X-Frame-Options and CSP frame-ancestors headers to allow embedding external sites
   // This enables portal cards to embed any website regardless of their framing policies
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
@@ -1645,9 +1675,11 @@ function createWindow() {
   // Settings IPC handlers
   ipcMain.handle('get-settings', () => {
     const wormhole = (store.get(WORMHOLE_SETTINGS_KEY, {}) as any) || {};
+    const settingsObj = (store.get('settings') as any) || {};
     return {
       geminiKey: store.get('geminiKey', ''),
       openaiKey: store.get('openaiKey', ''),
+      aimlapiKey: settingsObj.aimlapiKey || '',
       firebaseConfig: store.get('firebaseConfig', ''),
       revidKey: store.get('revidKey', ''),
       wormhole,
@@ -1661,6 +1693,7 @@ function createWindow() {
       settings: {
         geminiKey: string;
         openaiKey: string;
+        aimlapiKey: string;
         firebaseConfig: string;
         revidKey: string;
         wormhole?: any;
@@ -1671,6 +1704,12 @@ function createWindow() {
       store.set('firebaseConfig', settings.firebaseConfig);
       store.set('revidKey', settings.revidKey);
       store.set(WORMHOLE_SETTINGS_KEY, settings.wormhole || {});
+      
+      // Save AIMLAPI key under 'settings' object (where AimlApiClient reads it from)
+      const existingSettings = store.get('settings') as any || {};
+      existingSettings.aimlapiKey = settings.aimlapiKey;
+      store.set('settings', existingSettings);
+      
       return true;
     },
   );
@@ -2111,6 +2150,272 @@ function createWindow() {
     },
   );
 
+  // Media download handler
+  ipcMain.handle('save-media', async (_event, { mediaPath, suggestedFilename, mediaType }: { mediaPath: string; suggestedFilename?: string; mediaType?: 'image' | 'video' }) => {
+    try {
+      const { dialog } = require('electron');
+
+      // Determine file extension from media type or filename
+      const ext = mediaType === 'video' ? '.mp4' : '.png';
+      const defaultFilename = suggestedFilename || `hapa_${Date.now()}${ext}`;
+
+      // Show save dialog
+      const { filePath, canceled } = await dialog.showSaveDialog({
+        title: 'Save Media',
+        defaultPath: defaultFilename,
+        filters: mediaType === 'video'
+          ? [{ name: 'Video Files', extensions: ['mp4', 'mov', 'webm'] }]
+          : [{ name: 'Image Files', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      });
+
+      if (canceled || !filePath) {
+        return { success: false, canceled: true };
+      }
+
+      // Read the media file
+      let sourceFile = mediaPath;
+      // If it's a file:// URL, strip the protocol
+      if (sourceFile.startsWith('file://')) {
+        sourceFile = sourceFile.substring(7);
+      }
+
+      // Copy the file to the chosen location
+      await fs.promises.copyFile(sourceFile, filePath);
+
+      console.log('[Media Download] Saved to:', filePath);
+      return { success: true, path: filePath };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Media Download] Error:', error);
+      return { success: false, error: errorMessage };
+    }
+  });
+
+  // Media export handler - saves directly to configured directory
+  ipcMain.handle('export-media', async (_event, { mediaPath, fileName, mediaType }: { mediaPath: string; fileName: string; mediaType?: 'image' | 'video' }) => {
+    try {
+      // Get export directory from admin settings
+      const adminSettings = (store.get('adminSettings') || {}) as any;
+      const exportDir = adminSettings.exportDirectory || path.join(app.getPath('downloads'), 'HapaExports');
+
+      // Ensure export directory exists
+      await fs.promises.mkdir(exportDir, { recursive: true });
+
+      // Prepare source file
+      let sourceFile = mediaPath;
+      if (sourceFile.startsWith('file://')) {
+        sourceFile = sourceFile.substring(7);
+      }
+
+      // Create destination path
+      const destPath = path.join(exportDir, fileName);
+
+      // Copy file to export directory
+      await fs.promises.copyFile(sourceFile, destPath);
+
+      console.log('[Media Export] Exported to:', destPath);
+      return { success: true, path: destPath };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Media Export] Error:', error);
+      return { success: false, error: errorMessage };
+    }
+  });
+
+
+  // Bulk export all media handler - processes all cards in background
+  ipcMain.handle('export-all-media', async (_event) => {
+    try {
+      console.log('[Bulk Export] Starting bulk media export...');
+
+      // Get admin settings for export directory
+      const adminSettings = (store.get('adminSettings') || {}) as any;
+      const exportDir = adminSettings.exportDirectory || path.join(app.getPath('downloads'), 'HapaExports');
+
+      // Ensure export directory exists
+      await fs.promises.mkdir(exportDir, { recursive: true });
+
+      // Get all cards directly from Hypercore source of truth
+      const rawItems = await readCore(CARD_LIBRARY_CORE_NAME);
+      const cardMap = new Map();
+
+      // Deduplicate cards (last write wins)
+      for (const raw of rawItems) {
+        if (!raw || typeof raw !== 'string') continue;
+        try {
+          const data = JSON.parse(raw);
+          if (data && (data.cardId || data.id)) {
+            const id = data.cardId || data.id;
+            cardMap.set(id, data);
+          }
+        } catch { }
+      }
+
+      console.log(`[Bulk Export] Found ${cardMap.size} unique cards in index`);
+
+      const cardsWithMedia: Array<{ cardId: string; name: string; metadata: any }> = [];
+
+      for (const data of cardMap.values()) {
+        const cardId = data.cardId || data.id;
+        const name = data.name || 'Untitled';
+
+        const cardData = data.cardData || {};
+        const mediaPrompts = data.mediaPrompts || cardData.mediaPrompts || {};
+
+        const possiblePaths = [
+          data.mediaLocalPath,
+          data.thumbnail,
+          cardData.mediaLocalPath,
+          cardData.image?.localPath,
+          cardData.video?.localPath,
+          mediaPrompts.generated_image_local,
+          mediaPrompts.generated_video_local
+        ].filter(p => p && typeof p === 'string' && !p.startsWith('http'));
+
+        if (possiblePaths.length > 0) {
+          const mainPath = possiblePaths[0];
+          cardsWithMedia.push({
+            cardId,
+            name,
+            metadata: {
+              mediaLocalPath: mainPath,
+              mediaKind: data.mediaKind || (mainPath.endsWith('.mp4') ? 'video' : 'image'),
+              coreDiscoveryKey: data.coreDiscoveryKey
+            }
+          });
+        }
+      }
+
+      console.log(`[Bulk Export] Found ${cardsWithMedia.length} cards with media`);
+
+      // Process exports in background (async, non-blocking)
+      setImmediate(async () => {
+        let exported = 0;
+        let failed = 0;
+
+        for (const card of cardsWithMedia) {
+          try {
+            const metadata = card.metadata || {};
+            const imgPath = metadata.generated_image_local || metadata.mediaLocalPath || metadata.thumbnail;
+
+            if (!imgPath) continue;
+
+            // Generate detailed filename
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            const cardId = card.cardId || 'unknown';
+            const hypercoreDID = metadata.coreDiscoveryKey || 'no-did';
+            // Truncate name to avoid Windows MAX_PATH issues
+            const cardName = (card.name || 'untitled').replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 50);
+
+            // Determine file extension
+            const isVideo = metadata.mediaKind === 'video';
+            const ext = isVideo ? '.mp4' : '.png';
+
+            const fileName = `${cardName}_${timestamp}_${cardId}_${hypercoreDID}${ext}`;
+
+            // Prepare source file
+            let sourceFile = imgPath;
+            if (sourceFile.startsWith('file://')) {
+              sourceFile = sourceFile.substring(7);
+            }
+
+            // Create destination path
+            const destPath = path.join(exportDir, fileName);
+
+            // Copy file
+            await fs.promises.copyFile(sourceFile, destPath);
+            exported++;
+
+            // Log progress every 10 files
+            if (exported % 10 === 0) {
+              console.log(`[Bulk Export] Progress: ${exported}/${cardsWithMedia.length}`);
+            }
+          } catch (error) {
+            console.error(`[Bulk Export] Failed to export card ${card.cardId}:`, error);
+            failed++;
+          }
+        }
+
+        console.log(`[Bulk Export] Complete! Exported: ${exported}, Failed: ${failed}`);
+      });
+
+      // Return immediately with queue info
+      return { success: true, totalCards: cardsWithMedia.length, exportDir };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Bulk Export] Error:', error);
+      return { success: false, error: errorMessage };
+    }
+  });
+
+  // Save Prototype Handler
+  ipcMain.handle('save-prototype', async (_event, { title, content }: { title: string; content: string }) => {
+    try {
+      console.log(`[Save Prototype] Saving: ${title}`);
+
+      // 1. Save HTML file locally
+      const prototypesDir = path.join(app.getPath('userData'), 'prototypes');
+      await fs.promises.mkdir(prototypesDir, { recursive: true });
+      const filename = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${Date.now()}.html`;
+      const filePath = path.join(prototypesDir, filename);
+      await fs.promises.writeFile(filePath, content, 'utf8');
+      console.log(`[Save Prototype] File written: ${filePath}`);
+
+      // 2. Create Card Core
+      const crypto = require('crypto');
+      const cardId = crypto.randomUUID();
+      const cardCoreName = `card-${cardId}`;
+
+      // Create the core (ensure p2p module functions are available)
+      await createCore(cardCoreName);
+
+      // Construct Card Record
+      const cardRecord = {
+        id: cardId,
+        type: 'prototype',
+        title: title,
+        description: 'AI Generated Prototype',
+        createdAt: Date.now(),
+        mediaLocalPath: filePath, // Normalized path
+        mediaKind: 'html',
+        tags: ['prototype', 'html', 'ui', 'generated'],
+        cardData: {
+          htmlPath: filePath,
+          htmlContent: content,
+          source: 'hapa-forge'
+        }
+      };
+
+      // Write to Card Core
+      await appendToCore(cardCoreName, JSON.stringify(cardRecord));
+
+      // 3. Add to Card Library Index
+      // Get the key (we might need to read core props, but appendToCore usually handles it if we don't need key immediately)
+      // Actually we want the key for the index. 
+      // We can just put coreName in index, the p2p logic handles resolving.
+
+      const indexEntry = {
+        cardId: cardId,
+        coreName: cardCoreName,
+        // coreDiscoveryKey: ... (optional if using name resolution)
+        name: title,
+        mediaLocalPath: filePath,
+        mediaKind: 'html',
+        timestamp: Date.now(),
+        cardData: cardRecord
+      };
+
+      await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(indexEntry));
+      console.log(`[Save Prototype] Card created: ${cardId}`);
+
+      return { success: true, cardId, filePath };
+    } catch (error) {
+      console.error('[Save Prototype] Error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+
   // Vertex AI Settings handlers
   ipcMain.handle('get-vertex-ai-settings', () => {
     const { getVertexAISettings } = require('./vertexai');
@@ -2271,27 +2576,42 @@ Create a vivid image prompt that visually represents this content:`;
         }
 
         // Call LLM to craft the prompt
+        // Priority: AIMLAPI -> Vertex AI -> Google AI Studio
         let craftedPrompt = '';
 
-        // Check if Vertex AI is configured (preferred)
-        if (isVertexAIConfigured()) {
+        // PRIORITY 1: AIMLAPI.com for prompt crafting
+        if (isAimlApiConfigured()) {
+          console.log('[ImageGen] Using AIMLAPI.com for prompt crafting');
+          try {
+            const aimlClient = new AimlApiClient();
+            const result = await aimlClient.chatCompletion(
+              [{ role: 'user', content: promptCraftingRequest }],
+              AIMLAPI_MODEL_MAP['fast-llm'],
+              { temperature: 0.7, max_tokens: 500 }
+            );
+            craftedPrompt = result.content.trim();
+          } catch (e: any) {
+            console.error('[ImageGen] AIMLAPI Prompt Crafting failed:', e.message);
+            // Fall through to other providers
+          }
+        }
+
+        // PRIORITY 2: Vertex AI for prompt crafting
+        if (!craftedPrompt && isVertexAIConfigured()) {
           console.log('[ImageGen] Using Vertex AI for prompt crafting');
           try {
             const vertexClient = getVertexAIClient();
-            // Note: Vertex AI multimodal requires different handling
-            // For now, use text-only prompt crafting
             const result = await vertexClient.generateContent(promptCraftingRequest, 'fast-llm');
             craftedPrompt = result.text.trim();
           } catch (e: any) {
-            console.error('[ImageGen] Vertex AI Prompt Crafting failed:', e);
-            throw new Error(`Vertex AI prompt crafting failed: ${e.message}`);
+            console.error('[ImageGen] Vertex AI Prompt Crafting failed:', e.message);
+            // Fall through to AI Studio
           }
-        } else {
-          // Fallback to Google AI Studio
-          if (!apiKey) {
-            throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
-          }
+        }
 
+        // PRIORITY 3: Google AI Studio for prompt crafting
+        if (!craftedPrompt && apiKey) {
+          console.log('[ImageGen] Using Google AI Studio for prompt crafting');
           const genAI = new GoogleGenerativeAI(apiKey);
           const promptModel = genAI.getGenerativeModel({ model: imageGenSettings.defaultPromptLLM });
 
@@ -2311,13 +2631,12 @@ Create a vivid image prompt that visually represents this content:`;
             const response = await result.response;
             craftedPrompt = response.text().trim();
           } catch (e: any) {
-            console.error('[ImageGen] SDK Prompt Crafting failed:', e);
-            throw new Error(`LLM prompt crafting failed: ${e.message}`);
+            console.error('[ImageGen] AI Studio Prompt Crafting failed:', e.message);
           }
         }
 
         if (!craftedPrompt) {
-          throw new Error('Failed to craft image prompt from LLM');
+          throw new Error('Failed to craft image prompt - all providers failed');
         }
 
         console.log('[ImageGen] Crafted prompt:', craftedPrompt.substring(0, 200) + '...');
@@ -2495,14 +2814,18 @@ Create a vivid image prompt that visually represents this content:`;
       startOperation(opId, 'createLoopVideo');
       logMemory('LoopVideo Start');
 
-      const apiKey = store.get('geminiKey') as string | undefined;
-      if (!apiKey) {
+      // Check for any AI provider
+      const geminiApiKey = store.get('geminiKey') as string | undefined;
+      const aimlConfigured = isAimlApiConfigured();
+      
+      if (!aimlConfigured && !geminiApiKey && !isVertexAIConfigured()) {
         endOperation(opId);
-        throw new Error('Gemini API Key not found. Please configure it in Settings.');
+        throw new Error('No AI provider configured. Please set up AIMLAPI.com, Vertex AI, or Google AI Studio in Settings.');
       }
 
       console.log('[LoopVideo] Starting loop video creation for image:', imageId);
       console.log('[LoopVideo] Original prompt:', originalPrompt?.substring(0, 100));
+      console.log(`[LoopVideo] Provider check: AIMLAPI=${aimlConfigured}, Vertex=${isVertexAIConfigured()}, Gemini=${!!geminiApiKey}`);
 
       try {
         // Step 1: Read the source image and convert to base64
@@ -2516,7 +2839,7 @@ Create a vivid image prompt that visually represents this content:`;
         const imageMimeType = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
 
         // Step 2: Craft a loop-optimized prompt using LLM
-        // Priority: Vertex AI -> Google AI Studio
+        // Priority: AIMLAPI -> Vertex AI -> Google AI Studio
 
         const loopPromptRequest = `You are crafting a prompt for a SEAMLESS LOOPING VIDEO that will be generated from a still image.
 
@@ -2540,35 +2863,43 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
         let loopPrompt: string | undefined;
 
-        if (isVertexAIConfigured()) {
-          console.log('[LoopVideo] Using Vertex AI for prompt crafting (Fast LLM)');
+        // PRIORITY 1: AIMLAPI.com for prompt crafting
+        if (aimlConfigured) {
+          console.log('[LoopVideo] Using AIMLAPI.com for prompt crafting (Fast LLM)');
           try {
-            const vertexClient = getVertexAIClient();
-            // Use Fast LLM (Gemini 2.5 Flash) for reliable, high-quota generation
-            const result = await vertexClient.generateContent(loopPromptRequest, 'fast-llm');
-            loopPrompt = result.text.trim();
+            const aimlClient = new AimlApiClient();
+            const result = await aimlClient.chatCompletion(
+              [{ role: 'user', content: loopPromptRequest }],
+              AIMLAPI_MODEL_MAP['fast-llm'],
+              { temperature: 0.7, max_tokens: 500 }
+            );
+            loopPrompt = result.content.trim();
           } catch (e: any) {
-            console.error('[LoopVideo] Vertex AI Prompt Crafting failed:', e);
-            // Don't throw yet, try fallback if key exists
-            if (!apiKey) throw e;
+            console.error('[LoopVideo] AIMLAPI Prompt Crafting failed:', e.message);
+            // Fall through to other providers
           }
         }
 
-        // Fallback to Google AI Studio if Vertex failed or not configured
-        if (!loopPrompt) {
-          if (!apiKey) {
-            throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+        // PRIORITY 2: Vertex AI for prompt crafting
+        if (!loopPrompt && isVertexAIConfigured()) {
+          console.log('[LoopVideo] Using Vertex AI for prompt crafting (Fast LLM)');
+          try {
+            const vertexClient = getVertexAIClient();
+            const result = await vertexClient.generateContent(loopPromptRequest, 'fast-llm');
+            loopPrompt = result.text.trim();
+          } catch (e: any) {
+            console.error('[LoopVideo] Vertex AI Prompt Crafting failed:', e.message);
           }
+        }
 
-          const adminSettings = getAdminSettings();
-          // Default to flash for reliability if falling back
-          let promptLLM = 'gemini-2.5-flash';
-
-          let llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${promptLLM}:generateContent?key=${apiKey}`;
+        // PRIORITY 3: Google AI Studio for prompt crafting
+        if (!loopPrompt && geminiApiKey) {
+          const promptLLM = 'gemini-2.5-flash';
+          const llmUrl = `https://generativelanguage.googleapis.com/v1beta/models/${promptLLM}:generateContent?key=${geminiApiKey}`;
 
           console.log(`[LoopVideo] Crafting prompt with AI Studio model: ${promptLLM}`);
 
-          let llmResponse = await fetch(llmUrl, {
+          const llmResponse = await fetch(llmUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2576,17 +2907,17 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             }),
           });
 
-          if (!llmResponse.ok) {
+          if (llmResponse.ok) {
+            const llmData = await llmResponse.json();
+            loopPrompt = llmData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          } else {
             const errText = await llmResponse.text();
-            throw new Error(`LLM prompt crafting failed (${promptLLM}): ${errText}`);
+            console.error(`[LoopVideo] AI Studio prompt crafting failed: ${errText}`);
           }
-
-          const llmData = await llmResponse.json();
-          loopPrompt = llmData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
         }
 
         if (!loopPrompt) {
-          throw new Error('Failed to craft loop video prompt');
+          throw new Error('Failed to craft loop video prompt - all providers failed');
         }
 
         console.log('[LoopVideo] Crafted loop prompt:', loopPrompt.substring(0, 150));
@@ -2631,36 +2962,31 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         });
 
         // =================================================================================
-        // ATTEMPT 1: Vertex AI (Preferred)
+        // PRIORITY 1: Vertex AI for video generation (AIMLAPI queue is backed up)
         // =================================================================================
-        // PERMANENT FIX (2025-12-08): Explicitly disabling Vertex AI for Veo Video.
-        // Reason: Vertex API consistently returns 400 "Invalid resource field" for Veo, 
-        // while Gemini API (AI Studio) works reliably. Protocol ALWAYS_READ.md mandates Gemini for Video.
-        const useVertexForVideo = false; // Force disabled
-
-        if (useVertexForVideo && isVertexAIConfigured()) {
+        if (!success && isVertexAIConfigured()) {
           console.log('[LoopVideo] Using Vertex AI for video generation');
           try {
             const vertexClient = getVertexAIClient();
 
-            // 1. Generate
+            // Ensure we still have image data
+            if (!imageBase64) {
+              throw new Error('Image data was released - cannot use Vertex fallback');
+            }
+
             const result = await vertexClient.generateVideo(loopPrompt, {
-              startFrameBase64: imageBase64!,
+              startFrameBase64: imageBase64,
               startFrameMimeType: imageMimeType,
-              endFrameBase64: imageBase64!, // Same image for seamless loop
+              endFrameBase64: imageBase64, // Same image for seamless loop
               endFrameMimeType: imageMimeType,
               aspectRatio: '16:9',
               loopMode: true,
             });
 
             console.log('[LoopVideo] Vertex AI video generation started, operation:', result.operationName);
+            videoModel = 'veo-3.1-generate-preview';
 
-            // MEMORY FIX: Null the heavy image buffer immediately after the request is sent,
-            // BEFORE entering the long polling loop.
-            imageBase64 = null;
-            if (global.gc) global.gc();
-
-            // 2. Poll
+            // Poll
             console.log('[LoopVideo] Polling Vertex AI for completion...');
             const pollResult = await vertexClient.pollVideoOperation(
               result.operationName,
@@ -2676,36 +3002,35 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               }
             );
 
-            // 3. Save
+            // Save
             await fs.promises.writeFile(videoPath, Buffer.from(pollResult.videoBase64, 'base64'));
             console.log('[LoopVideo] Vertex AI video generation complete!');
             success = true;
 
+            // MEMORY FIX: Only release after success
+            imageBase64 = null;
+            if (global.gc) global.gc();
+
           } catch (vertexErr: any) {
-            console.error('[LoopVideo] Vertex AI failed (Gen or Poll), switching to AI Studio fallback:', vertexErr.message);
-            // Fall through to AI Studio
+            console.error('[LoopVideo] Vertex AI failed:', vertexErr.message);
+            // Fall through to AI Studio (imageBase64 still available)
           }
         }
 
         // =================================================================================
-        // ATTEMPT 2: Google AI Studio (Fallback)
+        // PRIORITY 2: Google AI Studio (Fallback)
         // =================================================================================
-        if (!success) {
+        if (!success && geminiApiKey) {
           console.log('[LoopVideo] Starting AI Studio Fallback...');
 
-          if (!apiKey) {
-            throw new Error('No AI provider configured. Set up Vertex AI or Google AI Studio.');
+          // Ensure we still have image data
+          if (!imageBase64) {
+            throw new Error('Image data was released - cannot use AI Studio fallback');
           }
 
           // Use stable Veo model
           videoModel = 'veo-3.0-generate-001';
-          const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${apiKey}`;
-
-          // Ensure imageBase64 is available (Vertex might have failed mid-way, but we didn't null it yet)
-          if (!imageBase64) {
-            // Should not happen as we removed the premature nulling, but strict check
-            throw new Error('Image data lost during fallback');
-          }
+          const videoUrl = `https://generativelanguage.googleapis.com/v1beta/models/${videoModel}:predictLongRunning?key=${geminiApiKey}`;
 
           // Build instance
           const instance: any = {
@@ -2714,7 +3039,6 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               bytesBase64Encoded: imageBase64,
               mimeType: imageMimeType,
             },
-            // Note: lastFrame removed to avoid INVALID_ARGUMENT in AI Studio
           };
 
           const parameters: any = {
@@ -2749,7 +3073,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           console.log('[LoopVideo] AI Studio video generation started, operation:', operationName);
 
           // Poll AI Studio
-          const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
+          const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${geminiApiKey}`;
           const maxAttempts = 60;
 
           // Release memory now that request is sent
@@ -2795,7 +3119,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               // Stream the video directly to disk
               console.log('[LoopVideo] Streaming video to disk:', videoPath);
               const downloadResponse = await fetch(videoUri, {
-                headers: { 'x-goog-api-key': apiKey },
+                headers: { 'x-goog-api-key': geminiApiKey },
                 redirect: 'follow',
               });
 
@@ -2815,6 +3139,11 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           if (!success) {
             throw new Error('AI Studio video generation timed out');
           }
+        }
+
+        // If all providers failed
+        if (!success) {
+          throw new Error('Video generation failed - all providers exhausted');
         }
 
         console.log('[LoopVideo] Saved video to:', videoPath);
@@ -3125,6 +3454,62 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     }
   });
 
+  // List AIMLAPI models
+  ipcMain.handle('list-aimlapi-models', async () => {
+    try {
+      const { aimlApiClient } = await import('./aimlapi');
+      const models = await aimlApiClient.listModels();
+      // Transform to standardized ModelInfo format
+      return models.map((m: any) => ({
+        name: m.id,
+        displayName: m.name || m.id,
+        description: m.description || 'AIMLAPI Model',
+        provider: 'aimlapi'
+      }));
+    } catch (error) {
+      console.error('Error listing AIMLAPI models:', error);
+      return [];
+    }
+  });
+
+  // Chat with AIMLAPI (OpenAI Compatible)
+  ipcMain.handle(
+    'chat-with-aimlapi',
+    async (
+      _event,
+      {
+        message,
+        history,
+        model,
+        attachments,
+      }: {
+        message: string;
+        history: { role: string; content: string }[];
+        model: string;
+        attachments?: { mimeType: string; data: string }[];
+      },
+    ) => {
+      try {
+        const { aimlApiClient } = await import('./aimlapi');
+        
+        // Construct messages array
+        const messages = history.map(h => ({ role: h.role, content: h.content }));
+        
+        // Add current message
+        // Note: AIMLAPI might not support inline images via OpenAI format for all models yet
+        // For now, we'll just send text.
+        // TODO: Check if AIMLAPI supports vision via standard OpenAI vision format
+        messages.push({ role: 'user', content: message });
+
+        const response = await aimlApiClient.chatCompletion(messages, model || 'gpt-4o');
+        return response.content;
+      } catch (error: any) {
+        console.error('AIMLAPI Chat Error:', error);
+        throw error;
+      }
+    },
+  );
+
   // Chat with Gemini
   ipcMain.handle(
     'chat-with-gemini',
@@ -3369,8 +3754,37 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             responseParts.forEach((part, index) => {
               const inline = part.inlineData;
               if (inline?.mimeType && inline?.data) {
-                const markdown = `![image ${index + 1}](data:${inline.mimeType};base64,${inline.data})`;
-                imageChunks.push(markdown);
+                try {
+                  const userDataDir = app.getPath('userData');
+                  const imagesDir = path.join(userDataDir, 'wormhole', 'chat-images');
+                  if (!fs.existsSync(imagesDir)) {
+                    fs.mkdirSync(imagesDir, { recursive: true });
+                  }
+
+                  const extFromMime = (mime: string) => {
+                    const map: Record<string, string> = {
+                      'image/png': 'png',
+                      'image/jpeg': 'jpg',
+                      'image/jpg': 'jpg',
+                      'image/webp': 'webp',
+                      'image/gif': 'gif',
+                    };
+                    return map[mime] || 'png';
+                  };
+
+                  const ext = extFromMime(inline.mimeType);
+                  const fileName = `chat-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index + 1}.${ext}`;
+                  const filePath = path.join(imagesDir, fileName);
+                  fs.writeFileSync(filePath, Buffer.from(inline.data, 'base64'));
+
+                  const normalized = filePath.replace(/\\/g, '/');
+                  const fileUrl = `file:///${normalized}`;
+                  const markdown = `![image ${index + 1}](${fileUrl})`;
+                  imageChunks.push(markdown);
+                } catch (e) {
+                  console.error('[Gemini] Failed to persist inline image, omitting image from markdown');
+                  imageChunks.push(`[image ${index + 1} omitted: failed to persist inline image]`);
+                }
               }
             });
 
@@ -3641,17 +4055,21 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
                 throw new Error(`Failed to download generated video: ${downloadResponse.status}`);
               }
 
-              const videoBuffer = await downloadResponse.arrayBuffer();
-              const videoBase64 = Buffer.from(videoBuffer).toString('base64');
-
-              // Save to wormhole directory
+              // Save to wormhole directory (stream directly to disk to avoid large base64 in memory)
               const userDataDir = app.getPath('userData');
               const wormholeDir = path.join(userDataDir, 'wormhole');
               await fs.promises.mkdir(wormholeDir, { recursive: true });
 
               const videoFileName = `veo-${Date.now()}.mp4`;
               const videoPath = path.join(wormholeDir, videoFileName);
-              await fs.promises.writeFile(videoPath, Buffer.from(videoBuffer));
+
+              if (!downloadResponse.body) {
+                throw new Error('Download response had no body stream');
+              }
+
+              const fileStream = fs.createWriteStream(videoPath);
+              // @ts-ignore - Node fetch returns a WebStream, convert via Readable.fromWeb
+              await finished(Readable.fromWeb(downloadResponse.body).pipe(fileStream));
 
               // Broadcast completion
               if (win) {
@@ -3665,7 +4083,6 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               return {
                 success: true,
                 model: resolvedModel,
-                videoBase64,
                 videoPath,
                 videoFileName,
                 mimeType: 'video/mp4',

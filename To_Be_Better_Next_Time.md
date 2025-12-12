@@ -86,3 +86,68 @@ User saves message → createMessageCard() → card-library core
 - **Never guess** an ID or prop name.
 - If a search result says "X supports Y", verify it by finding Y in X's documentation.
 
+---
+
+## Retrospective 3: The `stdio: 'ignore'` Incident
+**Date:** 2025-12-11
+**Milestone:** Vertex AI Video Generation Debugging
+**Key Lesson:** Verify basic I/O before debugging complex logic
+
+### What Happened
+- Video generation via Vertex AI was timing out after 5 minutes of polling.
+- 3 AI models (across multiple sessions) spent hours debugging:
+  - Vertex AI API quirks (UUID operation IDs vs Long IDs)
+  - Discovered `fetchPredictOperation` endpoint (correct fix)
+  - Created standalone Python test scripts (worked perfectly)
+  - Updated polling logic multiple times
+- User asked: "What do the polling responses FROM vertex look like? There is no information."
+- User read the code and **immediately** found: `stdio: 'ignore'` in the spawn() call.
+- We were literally throwing away all Python bridge output.
+
+### The Root Cause
+```typescript
+const child = spawn('python', [scriptPath, configPath], {
+  detached: true,
+  stdio: 'ignore' // <-- THE PROBLEM
+});
+```
+
+The Python bridge was printing detailed JSON status messages. Node.js was configured to discard them all. We were debugging blind.
+
+### Why AI Models Missed It
+1. **Tunnel vision on the "interesting" problem** - Fascinated by Vertex AI API quirks, forgot to verify internal plumbing.
+2. **Assumption cascade** - Assumed Python was running (true), assumed output was captured (false), assumed timeout was API slowness (wrong).
+3. **Code reading without context** - Read spawn code, saw `stdio: 'ignore'`, but the comment ("We rely on file output") made it seem intentional.
+4. **Expertise blind spot** - Pattern-matched `stdio: 'ignore'` as "normal for daemons" rather than questioning appropriateness.
+5. **Wrong response to user question** - When user said "I don't see X", we checked if X was generated, not if X reached its destination.
+
+### Why User Found It Immediately
+- **No assumptions** about what "should" work
+- **End-to-end thinking**: "If Python prints, where does it go?"
+- **Fresh eyes** not biased by hours of API debugging
+- **The right question**: "Are we even getting responses?"
+
+### The Fix
+```typescript
+stdio: ['ignore', 'pipe', 'pipe'] // Capture stdout and stderr
+// + event handlers to log output
+```
+
+### Debugging Protocol Addition
+**Before debugging complex logic, verify basic I/O:**
+1. Can I see subprocess output?
+2. Are logs reaching the console?
+3. Is the network request actually being sent?
+4. Is the response being received and parsed?
+
+**When user says "I don't see X":**
+1. FIRST verify X reaches its destination
+2. THEN verify X is being generated
+
+**Treat comments with suspicion:**
+- Comments explain intent, not correctness
+- `// We rely on file output` doesn't mean file output is sufficient
+
+### Full Analysis
+See: `APPLES/AI_Debugging_Retrospective_2025-12-11.md`
+

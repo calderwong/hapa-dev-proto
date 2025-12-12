@@ -1,16 +1,25 @@
-import { initializeApp, getApps, deleteApp, type FirebaseApp } from 'firebase/app';
+import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 
 let firebaseApp: FirebaseApp | null = null;
 
 export const initFirebase = (configJson: string): boolean => {
     try {
         if (!configJson) return false;
-        const config = JSON.parse(configJson);
+        let config: any;
+        try {
+            config = JSON.parse(configJson);
+        } catch (e) {
+            console.error('Error initializing Firebase: invalid JSON config');
+            return false;
+        }
 
-        // If an app already exists, delete it to re-initialize (e.g. if config changed)
+        // If an app already exists, do not delete during startup (deleteApp is async and can cause
+        // unhandled promise behavior if not awaited). Reuse the existing app.
         const apps = getApps();
         if (apps.length > 0) {
-            apps.forEach(app => deleteApp(app));
+            firebaseApp = apps[0] as any;
+            console.log('Firebase already initialized');
+            return true;
         }
 
         firebaseApp = initializeApp(config);

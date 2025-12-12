@@ -93,6 +93,15 @@ export interface GenerateContentOptions {
   maxOutputTokens?: number;
   topP?: number;
   topK?: number;
+  thinkingConfig?: {
+    includeThoughts?: boolean; // For future SDK support or manual parsing
+    thinking_level?: "HIGH" | "MEDIUM" | "LOW"; // Only passed if supported by API
+  };
+  tools?: Array<any>; // Allow passing raw tool definitions (e.g., googleSearch)
+  safetySettings?: Array<{
+    category: string;
+    threshold: string;
+  }>;
 }
 
 export interface ImageGenerationOptions {
@@ -111,6 +120,11 @@ export interface VideoGenerationOptions {
   endFrameBase64?: string;
   endFrameMimeType?: string;
   loopMode?: boolean;
+  resolution?: '720p' | '1080p';
+  personGeneration?: 'allow_all' | 'allow_adult' | 'dont_allow';
+  addWatermark?: boolean;
+  includeRaiReason?: boolean;
+  generateAudio?: boolean;
 }
 
 // ============================================================================
@@ -119,29 +133,29 @@ export interface VideoGenerationOptions {
 
 export const MODEL_SHORTHAND_MAP: Record<string, string> = {
   // LLM Models
-  'smart-llm': 'gemini-3-pro-preview',  // Gemini 3 Pro Preview (latest)
-  'fast-llm': 'gemini-2.5-flash',     // Gemini 2.5 Flash (fast model)
+  'smart-llm': 'gemini-3-pro-preview',    // Gemini 3.0 Pro (Preview)
+  'fast-llm': 'gemini-2.5-flash',         // Gemini 2.5 Flash
 
-  // Image Models  
-  'pro-image': 'imagen-4.0-generate-001',  // Imagen 4 GA (best quality, quota limited)
-  'fast-image': 'imagen-4.0-fast-generate-001', // Imagen 4 Fast
-  'ultra-image': 'imagen-4.0-ultra-generate-001', // Imagen 4 Ultra
-  'common-image': 'gemini-2.0-flash-exp',  // Gemini Flash for quick image gen (no quota issues)
-  'gemini-image': 'gemini-2.0-flash-exp',  // Alias for Gemini-based image generation
+  // Image Models
+  'pro-image': 'imagen-4.0-generate-001',  // Imagen 4 (GA)
+  'fast-image': 'imagen-4.0-fast-generate-001',
+  'ultra-image': 'imagen-4.0-ultra-generate-001',
+  'common-image': 'gemini-2.5-flash',      // Use 2.5 Flash for lightweight image tasks
+  'gemini-image': 'gemini-2.5-flash',
 
   // Video Models
-  'video': 'veo-3.0-generate-001',         // Veo 3 (latest stable with audio)
+  'video': 'veo-3.1-generate-preview',     // Veo 3.1 Preview (per official docs)
 };
 
 export const MODEL_DISPLAY_NAMES: Record<string, string> = {
-  'smart-llm': 'Smart LLM (Gemini 3 Pro Preview)',
+  'smart-llm': 'Smart LLM (Gemini 3.0 Pro)',
   'fast-llm': 'Fast LLM (Gemini 2.5 Flash)',
   'pro-image': 'Pro Image (Imagen 4)',
   'fast-image': 'Fast Image (Imagen 4 Fast)',
   'ultra-image': 'Ultra Image (Imagen 4 Ultra)',
-  'common-image': 'Common Image (Gemini Flash)',
-  'gemini-image': 'Gemini Image (Gemini Flash)',
-  'video': 'Video (Veo 3)',
+  'common-image': 'Common Image (Gemini 2.5 Flash)',
+  'gemini-image': 'Gemini Image (Gemini 2.5 Flash)',
+  'video': 'Video (Veo 3.1)',
 };
 
 // Default settings
@@ -154,8 +168,8 @@ export const DEFAULT_VERTEX_SETTINGS: VertexAISettings = {
   defaultSmartLLM: 'gemini-3-pro-preview',
   defaultFastLLM: 'gemini-2.5-flash',
   defaultProImage: 'imagen-4.0-generate-001',
-  defaultCommonImage: 'imagen-4.0-generate-001',
-  defaultVideo: 'veo-3.0-generate-001',
+  defaultCommonImage: 'gemini-2.5-flash',
+  defaultVideo: 'veo-3.1-generate-preview',  // Per official Google docs
 };
 
 // Available regions
@@ -355,13 +369,28 @@ export class VertexAIClient {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
     };
 
-    if (options.responseMimeType || options.temperature || options.maxOutputTokens) {
+    if (options.responseMimeType || options.temperature || options.maxOutputTokens || options.topP || options.topK || options.thinkingConfig) {
       body.generationConfig = {};
       if (options.responseMimeType) body.generationConfig.responseMimeType = options.responseMimeType;
       if (options.temperature !== undefined) body.generationConfig.temperature = options.temperature;
       if (options.maxOutputTokens) body.generationConfig.maxOutputTokens = options.maxOutputTokens;
       if (options.topP !== undefined) body.generationConfig.topP = options.topP;
       if (options.topK !== undefined) body.generationConfig.topK = options.topK;
+      
+      // Add thinking config if present (Gemini 2.0/3.0 feature)
+      if (options.thinkingConfig?.thinking_level) {
+        body.generationConfig.thinkingConfig = {
+          thinking_level: options.thinkingConfig.thinking_level
+        };
+      }
+    }
+
+    if (options.tools) {
+      body.tools = options.tools;
+    }
+
+    if (options.safetySettings) {
+      body.safetySettings = options.safetySettings;
     }
 
     const response = await fetch(endpoint, {
@@ -399,11 +428,28 @@ export class VertexAIClient {
 
     const body: any = { contents };
 
-    if (options.responseMimeType || options.temperature || options.maxOutputTokens) {
+    if (options.responseMimeType || options.temperature || options.maxOutputTokens || options.topP || options.topK || options.thinkingConfig) {
       body.generationConfig = {};
       if (options.responseMimeType) body.generationConfig.responseMimeType = options.responseMimeType;
       if (options.temperature !== undefined) body.generationConfig.temperature = options.temperature;
       if (options.maxOutputTokens) body.generationConfig.maxOutputTokens = options.maxOutputTokens;
+      if (options.topP !== undefined) body.generationConfig.topP = options.topP;
+      if (options.topK !== undefined) body.generationConfig.topK = options.topK;
+
+      // Add thinking config if present
+      if (options.thinkingConfig?.thinking_level) {
+        body.generationConfig.thinkingConfig = {
+          thinking_level: options.thinkingConfig.thinking_level
+        };
+      }
+    }
+
+    if (options.tools) {
+      body.tools = options.tools;
+    }
+
+    if (options.safetySettings) {
+      body.safetySettings = options.safetySettings;
     }
 
     const response = await fetch(endpoint, {
@@ -439,10 +485,14 @@ export class VertexAIClient {
     const modelId = this.resolveModelName(modelShorthand);
     const endpoint = this.buildImagenEndpoint(modelId, 'predict');
 
-    console.log(`[VertexAI] Imagen request - Model: ${modelId}, Prompt: "${prompt.substring(0, 100)}..."`);
+    const promptStr = typeof prompt === 'string' ? prompt : String(prompt);
+    const promptHead = promptStr.length > 140 ? `${promptStr.slice(0, 140)}...` : promptStr;
+    const promptTail = promptStr.length > 220 ? `...${promptStr.slice(-80)}` : '';
+    console.log(`[VertexAI] Imagen request - Model: ${modelId}, Prompt length: ${promptStr.length}`);
+    console.log(`[VertexAI] Imagen prompt preview: "${promptHead}${promptTail}"`);
 
     const body = {
-      instances: [{ prompt }],
+      instances: [{ prompt: promptStr }],
       parameters: {
         sampleCount: options.sampleCount || 1,
         aspectRatio: options.aspectRatio || '1:1',
@@ -563,7 +613,8 @@ export class VertexAIClient {
     prompt: string,
     options: VideoGenerationOptions = {}
   ): Promise<{ operationName: string; raw: any }> {
-    const modelId = this.settings.defaultVideo || 'veo-3.0-generate-001';
+    // Use veo-3.1-generate-preview per official Google docs
+    const modelId = this.settings.defaultVideo || 'veo-3.1-generate-preview';
 
     // For Veo models, we use the Python Bridge to bypass Node.js SDK limitations
     if (modelId.includes('veo')) {
@@ -598,6 +649,11 @@ export class VertexAIClient {
         durationSeconds: options.durationSeconds || 5,
         sampleCount: options.sampleCount || 1,
         ...(options.loopMode && { loopMode: true }),
+        ...(options.resolution && { resolution: options.resolution }),
+        ...(options.personGeneration && { personGeneration: options.personGeneration }),
+        ...(options.addWatermark !== undefined && { addWatermark: options.addWatermark }),
+        ...(options.includeRaiReason !== undefined && { includeRaiReason: options.includeRaiReason }),
+        ...(options.generateAudio !== undefined && { generateAudio: options.generateAudio }),
       },
     };
 
@@ -646,8 +702,14 @@ export class VertexAIClient {
       prompt: prompt,
       model_id: modelId,
       output_file: path.join(tempDir, `${jobId}.mp4`),
+      error_file: path.join(tempDir, `${jobId}.error.json`),
       aspect_ratio: options.aspectRatio || '16:9',
       duration_seconds: options.durationSeconds,
+      resolution: options.resolution,
+      person_generation: options.personGeneration,
+      add_watermark: options.addWatermark,
+      include_rai_reason: options.includeRaiReason,
+      generate_audio: options.generateAudio,
     };
 
     const configPath = path.join(tempDir, `${jobId}.json`);
@@ -656,18 +718,38 @@ export class VertexAIClient {
     // Determine python script path
     const scriptPath = path.join(process.cwd(), 'scripts', 'veo_bridge.py');
 
-    // Spawn python process detached
+    // Spawn python process and capture output for logging
     console.log(`[VertexAI] Spawning python script: ${scriptPath} with config ${configPath}`);
     const child = spawn('python', [scriptPath, configPath], {
       detached: true,
-      stdio: 'ignore' // We rely on file output, but maybe we should log to a file?
+      stdio: ['ignore', 'pipe', 'pipe'] // Capture stdout and stderr
+    });
+
+    // Log Python bridge output for debugging
+    child.stdout?.on('data', (data: Buffer) => {
+      const lines = data.toString().trim().split('\n');
+      for (const line of lines) {
+        console.log(`[VertexAI-Python] ${line}`);
+      }
+    });
+
+    child.stderr?.on('data', (data: Buffer) => {
+      console.error(`[VertexAI-Python-ERR] ${data.toString().trim()}`);
+    });
+
+    child.on('error', (err) => {
+      console.error(`[VertexAI-Python] Process error: ${err.message}`);
+    });
+
+    child.on('exit', (code) => {
+      console.log(`[VertexAI-Python] Process exited with code: ${code}`);
     });
 
     child.unref(); // Allow Node to exit independent of child (though Electron keeps running)
 
     // Return the fake operation name
-    // Format: python-ops::<jobId>::<outputFilePath>
-    const operationName = `python-ops::${jobId}::${config.output_file}`;
+    // Format: python-ops::<jobId>::<outputFilePath>::<errorFilePath>
+    const operationName = `python-ops::${jobId}::${config.output_file}::${config.error_file}`;
 
     return {
       operationName,
@@ -818,12 +900,13 @@ export class VertexAIClient {
     intervalMs: number,
     onProgress?: (attempt: number, maxAttempts: number) => void
   ): Promise<{ videoBase64: string; mimeType: string; raw: any }> {
-    // Parse operation string: python-ops::<jobId>::<outputFilePath>
+    // Parse operation string: python-ops::<jobId>::<outputFilePath>::<errorFilePath>
     const parts = operationString.split('::');
-    if (parts.length !== 3) {
+    if (parts.length !== 3 && parts.length !== 4) {
       throw new Error('Invalid python operation string');
     }
     const outputFile = parts[2];
+    const errorFile = parts.length === 4 ? parts[3] : `${outputFile}.error.json`;
 
     console.log(`[VertexAI] Polling local Python job for file: ${outputFile}`);
 
@@ -831,6 +914,19 @@ export class VertexAIClient {
       if (onProgress) onProgress(attempt, maxAttempts);
 
       await new Promise(resolve => setTimeout(resolve, intervalMs));
+
+      // Fail fast if the bridge reported an error
+      if (fs.existsSync(errorFile)) {
+        const raw = fs.readFileSync(errorFile, 'utf-8');
+        try {
+          const parsed = JSON.parse(raw);
+          const error = parsed?.error ? String(parsed.error) : 'Video generation failed (Python Bridge)';
+          const detail = parsed?.detail ? String(parsed.detail) : undefined;
+          throw new Error(detail ? `${error}: ${detail}` : error);
+        } catch {
+          throw new Error(`Video generation failed (Python Bridge): ${raw.slice(0, 500)}`);
+        }
+      }
 
       // Check if file exists
       if (fs.existsSync(outputFile)) {

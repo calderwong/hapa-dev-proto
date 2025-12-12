@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAPA AI - Volumetric Ops Terminal</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap');
+        
+        body {
+            background-color: #030304;
+            color: #e0e0e0;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; 
+        }
+
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+        /* Neon Glow Utilities */
+        .neon-blue-text { text-shadow: 0 0 8px rgba(59, 130, 246, 0.6); }
+        .neon-red-text { text-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+        .neon-purple-text { text-shadow: 0 0 8px rgba(168, 85, 247, 0.6); }
+        
+        /* 3D Canvas Layer */
+        #canvas-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through by default */
+            transition: opacity 0.5s ease;
+        }
+        
+        #canvas-layer.interactive {
+            pointer-events: auto; /* Catch clicks when interacting with 3D */
+        }
+
+        /* Glassmorphism Panels */
+        .glass-panel {
+            background: rgba(8, 8, 10, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        
+        /* Grid Background Pattern for 2D UI */
+        .bg-grid-pattern {
+            background-size: 40px 40px;
+            background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+
+        /* Log Entry Animation */
+        @keyframes fadeInSlide {
+            from { opacity: 0; transform: translateX(10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        .log-entry {
+            animation: fadeInSlide 0.3s ease-out forwards;
+        }
+
+        /* Tarot Input Glow */
+        .tarot-focus:focus-within {
+            box-shadow: 0 0 15px rgba(168, 85, 247, 0.3);
+            border-color: rgba(168, 85, 247, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+// --- AUDIO ENGINE (Browser Native Synth) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+const playSound = (type) => {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    
+    osc.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'hover') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.exponentialRampToValueAtTime(600, now + 0.05);
+        gainNode.gain.setValueAtTime(0.05, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+    } 
+    else if (type === 'summon') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(100, now);
+        osc.frequency.linearRampToValueAtTime(300, now + 1.5);
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.2, now + 0.5);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+        osc.start(now);
+        osc.stop(now + 2.0);
+    }
+    else if (type === 'impact') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.3);
+        gainNode.gain.setValueAtTime(0.3, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        osc.start(now);
+        osc.stop(now + 0.3);
+    }
+    else if (type === 'complete') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(500, now);
+        osc.frequency.exponentialRampToValueAtTime(1000, now + 0.1);
+        gainNode.gain.setValueAtTime(0.1, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        osc.start(now);
+        osc.stop(now + 0.5);
+    }
+    else if (type === 'error') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.linearRampToValueAtTime(100, now + 0.3);
+        gainNode.gain.setValueAtTime(0.2, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+    }
+};
+
+// --- GEMINI & IMAGEN API INTEGRATION ---
+const apiKey = ""; // Provided by environment
+
+const callGemini = async (prompt, systemPrompt = "", isJson = false) => {
+    const delays = [1000, 2000];
+    for (let i = 0; i < delays.length; i++) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+            };
+            
+            if (isJson) {
+                payload.generationConfig = { responseMimeType: "application/json" };
+            }
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            
+            if (!text) throw new Error("No text returned");
+            
+            return isJson ? JSON.parse(text) : text;
+
+        } catch (error) {
+            console.error(`Gemini attempt ${i + 1} failed:`, error);
+            if (i === delays.length - 1) return null;
+            await new Promise(resolve => setTimeout(resolve, delays[i]));
+        }
+    }
+};
+
+const callImagen = async (prompt) => {
+    const delays = [1000, 2000, 4000];
+    for (let i = 0; i < delays.length; i++) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
+            const payload = {
+                instances: [{ prompt: prompt }],
+                parameters: { sampleCount: 1 }
+            };
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error(`Imagen error! status: ${response.status}`);
+            const data = await response.json();
+            
+            if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
+                return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+            }
+            throw new Error("Invalid image response structure");
+
+        } catch (error) {
+            console.error(`Imagen attempt ${i + 1} failed:`, error);
+            if (i === delays.length - 1) return null;
+            await new Promise(resolve => setTimeout(resolve, delays[i]));
+        }
+    }
+};
+
+// --- UTILS: Texture Generation ---
+const createCardTexture = (card, loadedImage = null) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; 
+    canvas.height = 768;
+    const ctx = canvas.getContext('2d');
+    
+    // Background
+    const gradient = ctx.createLinearGradient(0, 0, 512, 768);
+    gradient.addColorStop(0, '#0f172a');
+    gradient.addColorStop(1, '#020617');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 512, 768);
+
+    // If we have a generated image, draw it
+    if (loadedImage) {
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        const scale = Math.max(512 / loadedImage.width, 768 / loadedImage.height);
+        const x = (512 - loadedImage.width * scale) / 2;
+        const y = (768 - loadedImage.height * scale) / 2;
+        ctx.drawImage(loadedImage, x, y, loadedImage.width * scale, loadedImage.height * scale);
+        ctx.restore();
+    }
+
+    // Grid Overlay
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 2;
+    for(let i=0; i<512; i+=40) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 768); ctx.stroke(); }
+    for(let i=0; i<768; i+=40) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke(); }
+
+    // --- STATUS OVERLAYS (Visual Feedback when waiting/error) ---
+    if (!loadedImage) {
+        if (card.imageStatus === 'loading') {
+            ctx.fillStyle = "rgba(255, 255, 0, 0.1)"; // Yellow tint
+            ctx.fillRect(40, 150, 432, 400);
+            
+            ctx.strokeStyle = "#fbbf24";
+            ctx.lineWidth = 4;
+            ctx.setLineDash([10, 10]);
+            ctx.strokeRect(40, 150, 432, 400);
+            ctx.setLineDash([]);
+
+            ctx.font = 'bold 24px Courier New';
+            ctx.fillStyle = '#fbbf24';
+            ctx.textAlign = 'center';
+            ctx.fillText("DATA UPLINK PENDING...", 256, 350);
+            ctx.font = '16px Courier New';
+            ctx.fillText("AWAITING VISUAL STREAM", 256, 380);
+        } else if (card.imageStatus === 'error') {
+            ctx.fillStyle = "rgba(255, 0, 0, 0.1)"; // Red tint
+            ctx.fillRect(40, 150, 432, 400);
+            
+            ctx.strokeStyle = "#ef4444";
+            ctx.lineWidth = 4;
+            ctx.strokeRect(40, 150, 432, 400);
+
+            ctx.font = 'bold 30px Courier New';
+            ctx.fillStyle = '#ef4444';
+            ctx.textAlign = 'center';
+            ctx.fillText("SIGNAL LOST", 256, 350);
+            ctx.font = '16px Courier New';
+            ctx.fillText("CONNECTION TIMEOUT", 256, 380);
+        }
+    }
+
+    if (card.isTarot) {
+        // --- TAROT STYLE ---
+        ctx.strokeStyle = card.color;
+        ctx.lineWidth = 15;
+        ctx.strokeRect(20, 20, 472, 728);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(35, 35, 442, 698);
+
+        ctx.beginPath();
+        ctx.arc(256, 300, 100, 0, 2 * Math.PI);
+        ctx.strokeStyle = card.color;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        
+        ctx.fillStyle = card.color;
+        ctx.font = 'bold 45px Courier New';
+        ctx.textAlign = 'center';
+        ctx.shadowColor = "black";
+        ctx.shadowBlur = 10;
+        ctx.fillText(card.title.toUpperCase(), 256, 500);
+        ctx.shadowBlur = 0;
+
+        ctx.font = '20px serif';
+        ctx.fillStyle = card.color;
+        ctx.fillText('ARCANA • MAJOR', 256, 700);
+
+    } else {
+        // --- STANDARD TECH STYLE ---
+        ctx.strokeStyle = card.color;
+        ctx.lineWidth = 8;
+        ctx.strokeRect(10, 10, 492, 748);
+        ctx.fillStyle = card.color;
+        ctx.fillRect(0, 0, 40, 10);
+        ctx.fillRect(0, 0, 10, 40);
+        ctx.fillRect(472, 758, 40, 10);
+        ctx.fillRect(502, 728, 10, 40);
+
+        if (!loadedImage && card.imageStatus !== 'loading' && card.imageStatus !== 'error') {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.fillRect(20, 20, 472, 100);
+        }
+        
+        ctx.fillStyle = card.color;
+        ctx.font = 'bold 40px Courier New'; 
+        ctx.textAlign = 'left';
+        ctx.shadowColor = "black";
+        ctx.shadowBlur = 15;
+        ctx.fillText(card.title.toUpperCase().substring(0, 15), 40, 85);
+        ctx.shadowBlur = 0;
+        
+        ctx.font = '30px Arial';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(`ID: ${Math.floor(Math.random()*10000).toString(16).toUpperCase()}`, 40, 720);
+    }
+
+    return new THREE.CanvasTexture(canvas);
+};
+
+// --- COMPONENT: 3D ENGINE ---
+const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattleImpact }) => {
+    const mountRef = useRef(null);
+    const sceneRef = useRef(null);
+    const cameraRef = useRef(null);
+    const rendererRef = useRef(null);
+    
+    const cardsRef = useRef({}); 
+    const particlesRef = useRef([]); 
+    const projectilesRef = useRef([]);
+    const frameIdRef = useRef(null);
+    const modeRef = useRef(mode);
+    const focusedCardIdRef = useRef(focusedCardId);
+    const onBattleImpactRef = useRef(onBattleImpact);
+
+    useEffect(() => { modeRef.current = mode; }, [mode]);
+    useEffect(() => { focusedCardIdRef.current = focusedCardId; }, [focusedCardId]);
+    useEffect(() => { onBattleImpactRef.current = onBattleImpact; }, [onBattleImpact]);
+
+    // --- INIT SCENE ---
+    useEffect(() => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const scene = new THREE.Scene();
+        sceneRef.current = scene;
+
+        const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+        camera.position.set(0, 0, 14);
+        cameraRef.current = camera;
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(width, height);
+        renderer.setClearColor(0x000000, 0);
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        mountRef.current.appendChild(renderer.domElement);
+        rendererRef.current = renderer;
+
+        // Environment
+        const gridHelper = new THREE.GridHelper(40, 40, 0x333333, 0x111111);
+        gridHelper.position.y = -6; 
+        scene.add(gridHelper);
+
+        const polarGrid = new THREE.PolarGridHelper(20, 16, 8, 64, 0x111111, 0x111111);
+        polarGrid.position.y = -6;
+        scene.add(polarGrid);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        const keyLight = new THREE.DirectionalLight(0x4f46e5, 1.5);
+        keyLight.position.set(10, 10, 10);
+        scene.add(keyLight);
+        const rimLight = new THREE.PointLight(0xff00ff, 1);
+        rimLight.position.set(-10, 5, -10);
+        scene.add(rimLight);
+
+        // Interaction
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        const handleResize = () => {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            renderer.setSize(w, h);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+        };
+
+        const onClick = (e) => {
+            if (modeRef.current === 'ui') return;
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(scene.children, true); // true for recursive (hit child meshes)
+            
+            if (intersects.length > 0) {
+                // Find parent group or mesh with userData
+                let hit = intersects.find(obj => obj.object.userData.id || (obj.object.parent && obj.object.parent.userData.id));
+                if (hit) {
+                    const id = hit.object.userData.id || hit.object.parent.userData.id;
+                    setFocusedCardId(id);
+                    playSound('hover');
+                } else {
+                    setFocusedCardId(null);
+                }
+            }
+        };
+
+        const onMouseMove = (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            Object.values(cardsRef.current).forEach(mesh => {
+                const targetRotX = mouse.y * 0.3;
+                const targetRotY = mouse.x * 0.3;
+                mesh.rotation.x += (targetRotX - mesh.rotation.x) * 0.1;
+                mesh.rotation.y += (targetRotY - mesh.rotation.y) * 0.1;
+            });
+        };
+
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('click', onClick);
+        window.addEventListener('mousemove', onMouseMove);
+
+        // --- ANIMATION LOOP ---
+        const animate = () => {
+            frameIdRef.current = requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+            const currentFocus = focusedCardIdRef.current;
+
+            // 1. Animate Cards
+            Object.values(cardsRef.current).forEach(mesh => {
+                const isFocused = mesh.userData.id === currentFocus;
+                const isTarot = mesh.userData.isTarot;
+                const status = mesh.userData.imageStatus; // loading, error, loaded
+
+                // Bobbing Motion
+                const yOffset = Math.sin(time + mesh.userData.seed) * 0.15;
+                const targetY = mesh.userData.baseY + yOffset;
+                mesh.position.y += (targetY - mesh.position.y) * 0.1;
+
+                // Focus Highlight Scale
+                let targetScale = isFocused ? 1.15 : 1.0;
+                
+                if (mesh.userData.entranceTime && (time - mesh.userData.entranceTime < 1.0)) {
+                    const progress = time - mesh.userData.entranceTime;
+                    mesh.rotation.y += 0.2; 
+                    targetScale *= Math.min(progress * 1.5, 1);
+                }
+
+                mesh.scale.setScalar(THREE.MathUtils.lerp(mesh.scale.x, targetScale, 0.1));
+
+                // --- STATUS LIGHT ANIMATION ---
+                const lightMesh = mesh.children.find(c => c.userData.type === 'statusLight');
+                if (lightMesh) {
+                    if (status === 'loading') {
+                        lightMesh.visible = true;
+                        // Blink Yellow
+                        lightMesh.material.color.setHex(0xffaa00);
+                        const blink = (Math.sin(time * 10) + 1) * 0.5; // Fast blink
+                        lightMesh.material.opacity = 0.5 + (blink * 0.5);
+                        lightMesh.scale.setScalar(1.0 + blink * 0.3);
+                    } else if (status === 'error') {
+                        lightMesh.visible = true;
+                        // Solid Red
+                        lightMesh.material.color.setHex(0xff0000);
+                        lightMesh.material.opacity = 1.0;
+                        lightMesh.scale.setScalar(1.0);
+                    } else if (status === 'loaded') {
+                        // Brief Green Flash then hide
+                        if (!mesh.userData.loadHandled) {
+                            lightMesh.material.color.setHex(0x00ff00);
+                            lightMesh.scale.setScalar(1.5);
+                            mesh.userData.loadHandled = true; // Mark as done
+                            setTimeout(() => { 
+                                if(lightMesh) lightMesh.visible = false; 
+                            }, 1000);
+                        }
+                    } else {
+                        lightMesh.visible = false;
+                    }
+                }
+
+                // TAROT PULSE
+                if (isTarot) {
+                    const pulse = (Math.sin(time * 3) + 1) * 0.5; 
+                    if (!isFocused) mesh.scale.multiplyScalar(1 + (pulse * 0.005));
+                }
+
+                if (isFocused) {
+                    mesh.rotation.z = Math.sin(time * 2) * 0.02; 
+                } else {
+                    mesh.rotation.z = THREE.MathUtils.lerp(mesh.rotation.z, 0, 0.1);
+                }
+            });
+
+            // 2. Animate Projectiles
+            for (let i = projectilesRef.current.length - 1; i >= 0; i--) {
+                const p = projectilesRef.current[i];
+                const age = time - p.createdAt;
+
+                if (age > p.flightTime) {
+                    createExplosion(p.mesh.position, p.color);
+                    scene.remove(p.mesh);
+                    projectilesRef.current.splice(i, 1);
+                    playSound('impact');
+                    if (onBattleImpactRef.current) {
+                        onBattleImpactRef.current(p.fromId, p.toId);
+                    }
+                    continue;
+                }
+
+                const tx = p.start.x + p.velocity.x * age;
+                const ty = p.start.y + p.velocity.y * age - 0.5 * 9.8 * age * age;
+                const tz = p.start.z + p.velocity.z * age;
+                
+                p.mesh.position.set(tx, ty, tz);
+                p.mesh.rotation.x += 0.2;
+                p.mesh.rotation.y += 0.2;
+            }
+
+            // 3. Animate Particles
+            for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+                const p = particlesRef.current[i];
+                p.life -= 0.02; 
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    particlesRef.current.splice(i, 1);
+                    continue;
+                }
+                p.mesh.position.add(p.velocity);
+                p.mesh.scale.setScalar(p.life);
+                p.mesh.material.opacity = p.life;
+            }
+
+            // 4. Camera Logic
+            if (modeRef.current === 'pov' && currentFocus && cardsRef.current[currentFocus]) {
+                const target = cardsRef.current[currentFocus];
+                const targetPos = target.position.clone().add(new THREE.Vector3(0, 0, 0.5));
+                camera.position.lerp(targetPos, 0.05);
+                const lookAt = target.position.clone().add(new THREE.Vector3(0, 0, 20)); 
+                camera.lookAt(lookAt);
+            } else {
+                const defaultPos = new THREE.Vector3(0, 0, 14);
+                camera.position.lerp(defaultPos, 0.05);
+                camera.lookAt(0, 0, 0);
+            }
+
+            renderer.render(scene, camera);
+        };
+        animate();
+
+        // Helper to spawn explosion
+        const createExplosion = (position, colorHex) => {
+            const particleCount = 12;
+            const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: colorHex, 
+                transparent: true 
+            });
+
+            for(let k=0; k<particleCount; k++) {
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.copy(position);
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.3,
+                    (Math.random() - 0.5) * 0.3,
+                    (Math.random() - 0.5) * 0.3
+                );
+                scene.add(mesh);
+                particlesRef.current.push({ mesh, velocity, life: 1.0 });
+            }
+        };
+        sceneRef.current.createExplosion = createExplosion;
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            window.removeEventListener('click', onClick);
+            window.removeEventListener('mousemove', onMouseMove);
+            cancelAnimationFrame(frameIdRef.current);
+            if(mountRef.current && renderer.domElement) {
+                mountRef.current.removeChild(renderer.domElement);
+            }
+        };
+    }, []);
+
+    // --- MANAGE CARDS & UPDATE TEXTURES ---
+    useEffect(() => {
+        if(!sceneRef.current) return;
+        cards.forEach(card => {
+            let mesh = cardsRef.current[card.id];
+
+            // 1. Create Mesh if it doesn't exist
+            if (!mesh && card.isFloating) {
+                const geometry = new THREE.BoxGeometry(2.2, 3.2, 0.05); 
+                const texture = createCardTexture(card);
+                const faceMat = new THREE.MeshBasicMaterial({ map: texture });
+                const edgeMat = new THREE.MeshBasicMaterial({ color: card.color }); 
+                const backMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+                const materials = [edgeMat, edgeMat, edgeMat, edgeMat, faceMat, backMat];
+
+                mesh = new THREE.Mesh(geometry, materials);
+                mesh.position.set(card.x, card.y, card.z);
+                
+                // Add Status Light (Child Mesh)
+                const lightGeo = new THREE.SphereGeometry(0.15, 16, 16);
+                const lightMat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true });
+                const statusLight = new THREE.Mesh(lightGeo, lightMat);
+                statusLight.position.set(0.9, 1.4, 0.1); // Top Right corner
+                statusLight.userData = { type: 'statusLight' };
+                statusLight.visible = false; // Hidden by default
+                mesh.add(statusLight);
+
+                const entranceTime = Date.now() * 0.001;
+                if (card.isTarot) playSound('summon');
+
+                mesh.userData = { 
+                    id: card.id, 
+                    seed: Math.random() * 100, 
+                    baseY: card.y, 
+                    color: card.color,
+                    isTarot: card.isTarot,
+                    entranceTime: entranceTime,
+                    hasImage: false,
+                    imageStatus: card.imageStatus // Sync prop to userdata
+                };
+
+                sceneRef.current.add(mesh);
+                cardsRef.current[card.id] = mesh;
+            }
+
+            // 2. State & Texture Updates
+            if (mesh) {
+                // Update mesh userData state
+                mesh.userData.imageStatus = card.imageStatus;
+
+                // Case A: Image Loaded Successfully
+                if (card.imageUrl && !mesh.userData.hasImage && card.imageStatus === 'loaded') {
+                    const img = new Image();
+                    img.crossOrigin = "Anonymous";
+                    img.src = card.imageUrl;
+                    img.onload = () => {
+                        const newTexture = createCardTexture(card, img);
+                        if (mesh.material[4].map) mesh.material[4].map.dispose();
+                        mesh.material[4].map = newTexture;
+                        mesh.material[4].needsUpdate = true;
+                        mesh.userData.hasImage = true;
+                        mesh.scale.set(1.5, 1.5, 1.5);
+                        playSound('complete');
+                    };
+                }
+                
+                // Case B: State Changed (Loading -> Error or Loading -> Pending Texture)
+                // We need to redraw the texture if we are in 'loading' or 'error' to show the text overlay
+                if (card.imageStatus !== mesh.userData.renderedStatus) {
+                    if (card.imageStatus === 'loading' || card.imageStatus === 'error') {
+                        const statusTexture = createCardTexture(card);
+                        if (mesh.material[4].map) mesh.material[4].map.dispose();
+                        mesh.material[4].map = statusTexture;
+                        mesh.material[4].needsUpdate = true;
+                    }
+                    mesh.userData.renderedStatus = card.imageStatus;
+                }
+            }
+        });
+    }, [cards]);
+
+    // --- EXTERNAL TRIGGER: FIRE ---
+    useEffect(() => {
+        window.triggerBattle = (targetId) => {
+            const currentFocus = focusedCardIdRef.current;
+            if (!currentFocus || targetId === currentFocus) return;
+
+            const fromMesh = cardsRef.current[currentFocus];
+            const toMesh = cardsRef.current[targetId];
+            if (!fromMesh || !toMesh) return;
+
+            const geo = new THREE.SphereGeometry(0.15, 8, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: fromMesh.userData.color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(fromMesh.position);
+            sceneRef.current.add(mesh);
+
+            const T = 1.2; 
+            const start = fromMesh.position;
+            const end = toMesh.position;
+            const vx = (end.x - start.x) / T;
+            const vz = (end.z - start.z) / T;
+            const dy = end.y - start.y;
+            const vy = (dy + 0.5 * 9.8 * T * T) / T; 
+
+            projectilesRef.current.push({
+                mesh,
+                start: start.clone(),
+                velocity: new THREE.Vector3(vx, vy, vz),
+                createdAt: Date.now() * 0.001,
+                flightTime: T,
+                color: fromMesh.userData.color,
+                fromId: currentFocus,
+                toId: targetId
+            });
+        };
+    }, []);
+
+    return <div ref={mountRef} id="canvas-layer" className={mode !== 'ui' ? 'interactive' : 'opacity-50'} />;
+};
+
+// --- ICONS (Consolidated) ---
+const Icon = ({ path, size=20, className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        {path}
+    </svg>
+);
+const Icons = {
+    Hexagon: <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />,
+    Activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
+    Layers: <><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>,
+    Zap: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
+    Database: <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>,
+    Message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+    Shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+    Settings: <circle cx="12" cy="12" r="3" />,
+    Search: <><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>,
+    Crosshair: <><circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" /><line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" /><line x1="12" y1="22" x2="12" y2="18" /></>,
+    Eye: <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>,
+    Command: <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z" />,
+    Moon: <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+};
+
+// --- APP COMPONENT ---
+const App = () => {
+    const [mode, setMode] = useState('ui'); 
+    const [focusedCardId, setFocusedCardId] = useState(null);
+    const [isForging, setIsForging] = useState(false);
+    const [forgingStep, setForgingStep] = useState(""); // "" | "Forging..." | "Dreaming..." | "Minting..."
+    const [tarotTheme, setTarotTheme] = useState("");
+    const [systemLogs, setSystemLogs] = useState([
+        { id: 1, text: "System initialized. Waiting for input...", time: new Date().toLocaleTimeString() }
+    ]);
+    const [cards, setCards] = useState([
+        { id: 'c1', title: 'Genesis Core', color: '#60a5fa', x: -4, y: 2, z: 0, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c2', title: 'Deep Logic', color: '#a78bfa', x: 0, y: 1, z: -2, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c3', title: 'Firewall', color: '#f87171', x: 4, y: 2, z: 0, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c4', title: 'Archive', color: '#34d399', x: -2, y: -2, z: 1, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c5', title: 'Nexus', color: '#fbbf24', x: 3, y: -2, z: -1, isFloating: true, imageStatus: 'loaded' },
+    ]);
+
+    const addLog = (text) => {
+        setSystemLogs(prev => [...prev.slice(-4), { id: Date.now(), text, time: new Date().toLocaleTimeString() }]);
+    };
+
+    const handleSummon = async () => {
+        if (isForging) return;
+        setIsForging(true);
+        setForgingStep("Forging...");
+        addLog("Initiating Node Forge Protocol...");
+        playSound('hover');
+
+        // 1. Generate Name
+        const namePrompt = "Generate a cool, abstract, two-word Sci-Fi tech name for a data node (e.g. 'Obsidian Protocol', 'Null Void', 'Echo Static'). Just return the name.";
+        let newTitle = await callGemini(namePrompt);
+        if (!newTitle || newTitle.length > 20) newTitle = `Node ${Math.floor(Math.random()*99)}`;
+        newTitle = newTitle.replace(/"/g, '').trim();
+
+        // Place the card immediately with "loading" status
+        const colors = ['#60a5fa', '#a78bfa', '#f87171', '#34d399', '#fbbf24', '#e879f9', '#22d3ee'];
+        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+        const id = `c${Date.now()}`;
+        const angle = cards.length * 0.8;
+        const radius = 3 + (cards.length * 0.2);
+        
+        const newCard = {
+            id,
+            title: newTitle,
+            color: randomColor,
+            x: Math.cos(angle) * radius,
+            y: (Math.random() - 0.5) * 4,
+            z: Math.sin(angle) * radius * 0.5,
+            isFloating: true,
+            isTarot: false,
+            imageUrl: null,
+            imageStatus: 'loading' // INIT STATUS: LOADING
+        };
+        
+        setCards(prev => [...prev, newCard]);
+        addLog(`Forged new entity: [${newTitle}]`);
+
+        try {
+            // 2. Generate Image Prompt
+            setForgingStep("Dreaming...");
+            const imagePromptPrompt = `Generate a detailed Stable Diffusion style prompt for an image of a character named "Nano Banana". It is a high-tech, cyberpunk, sentient banana warrior or avatar. Context: The image should conceptually represent the abstract tech concept: "${newTitle}". Style: Neon-Noir, 3D Render, Glowing, Cinematic.`;
+            const generatedImagePrompt = await callGemini(imagePromptPrompt);
+            
+            if (generatedImagePrompt) {
+                // 3. Mint Image
+                setForgingStep("Minting...");
+                addLog(`Dreaming of [${newTitle}] visual data...`);
+                const imageUrl = await callImagen(generatedImagePrompt);
+                
+                if (imageUrl) {
+                    // 4. Update Card with Image -> LOADED
+                    setCards(prev => prev.map(c => 
+                        c.id === id ? { ...c, imageUrl: imageUrl, imageStatus: 'loaded' } : c
+                    ));
+                    addLog(`Visual Data Minted for [${newTitle}].`);
+                } else {
+                    throw new Error("Minting returned no data");
+                }
+            } else {
+                throw new Error("Prompt generation failed");
+            }
+        } catch (e) {
+            // 5. Error Handler -> ERROR
+            addLog(`Visual Uplink Failed for [${newTitle}].`);
+            setCards(prev => prev.map(c => 
+                c.id === id ? { ...c, imageStatus: 'error' } : c
+            ));
+            playSound('error');
+        }
+
+        setIsForging(false);
+        setForgingStep("");
+    };
+
+    const handleMintTarot = async () => {
+        if (isForging) return;
+        setIsForging(true);
+        setForgingStep("Minting...");
+        const theme = tarotTheme || "Cyberpunk Future";
+        addLog(`Minting Tarot Set. Theme: "${theme}"...`);
+        playSound('summon');
+
+        const prompt = `Generate 3 unique Cyberpunk/Sci-Fi Tarot Cards based on the theme "${theme}". Return ONLY a JSON array with objects: { "title": "string", "color": "hex code", "meaning": "short phrase" }. Example title: "The Neural Hermit" or "The Glitch".`;
+        
+        const newCardsData = await callGemini(prompt, "", true);
+        
+        if (Array.isArray(newCardsData)) {
+            const newTarotCards = newCardsData.map((data, index) => {
+                const angle = (cards.length + index) * 0.8;
+                const radius = 4; 
+                return {
+                    id: `tarot-${Date.now()}-${index}`,
+                    title: data.title,
+                    color: data.color || '#a855f7',
+                    meaning: data.meaning,
+                    x: Math.cos(angle) * radius,
+                    y: (Math.random() - 0.5) * 2,
+                    z: Math.sin(angle) * radius * 0.5,
+                    isFloating: true,
+                    isTarot: true,
+                    imageStatus: 'loaded' // Tarot are purely procedural for now
+                };
+            });
+            setCards(prev => [...prev, ...newTarotCards]);
+            addLog(`Success. ${newCardsData.length} Arcana materialized.`);
+        } else {
+            addLog("Minting failed. Data corruption.");
+        }
+        setIsForging(false);
+        setForgingStep("");
+    }
+
+    const handleFire = () => {
+        if (!focusedCardId) return;
+        const others = cards.filter(c => c.id !== focusedCardId);
+        if (others.length === 0) return;
+        const target = others[Math.floor(Math.random() * others.length)];
+        
+        if (window.triggerBattle) {
+            window.triggerBattle(target.id);
+        }
+    };
+
+    const handleBattleImpact = useCallback(async (fromId, toId) => {
+        const fromCard = cards.find(c => c.id === fromId);
+        const toCard = cards.find(c => c.id === toId);
+        if(!fromCard || !toCard) return;
+
+        addLog(`IMPACT DETECTED: ${fromCard.title} -> ${toCard.title}`);
+        
+        const prompt = `Write a very short (max 10 words) sci-fi combat log message describing a data projectile hitting a target. Context: ${fromCard.title} attacked ${toCard.title}. Use techno-babble.`;
+        const flavorText = await callGemini(prompt);
+        if (flavorText) {
+            addLog(`> ${flavorText.replace(/"/g, '')}`);
+        }
+    }, [cards]);
+
+    return (
+        <div className="relative w-full h-screen bg-gray-950 flex overflow-hidden font-sans">
+            
+            {/* 3D LAYER */}
+            <VolumetricLayer 
+                cards={cards} 
+                mode={mode} 
+                focusedCardId={focusedCardId}
+                setFocusedCardId={setFocusedCardId}
+                onBattleImpact={handleBattleImpact}
+            />
+
+            {/* LEFT SIDEBAR */}
+            <div id="ui-layer" className="w-64 glass-panel flex flex-col h-full border-r border-gray-800 z-20">
+                <div className="p-6 border-b border-gray-800">
+                    <div className="flex items-center gap-3">
+                        <Icon path={Icons.Hexagon} size={28} className="text-blue-500" />
+                        <div>
+                            <h1 className="text-lg font-bold tracking-wider text-white leading-none">HAPA AI</h1>
+                            <div className="text-[10px] text-blue-400 tracking-[0.2em] font-mono mt-1">OPS TERMINAL</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto py-6 space-y-1">
+                    <div className="px-6 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">System</div>
+                    <NavRow icon={Icons.Activity} label="Dashboard" active />
+                    <NavRow icon={Icons.Layers} label="Card Library" />
+                    <NavRow icon={Icons.Zap} label="Forge" />
+                    <NavRow icon={Icons.Database} label="Hypercores" />
+                    
+                    <div className="mt-8 px-6 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Network</div>
+                    <NavRow icon={Icons.Message} label="Comms" />
+                    <NavRow icon={Icons.Shield} label="Sanctuary" />
+                </div>
+
+                <div className="p-4 border-t border-gray-800 bg-black/20">
+                     <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-900 to-slate-900 border border-blue-500/50 flex items-center justify-center">
+                            <span className="text-blue-400 font-bold text-xs">NB</span>
+                        </div>
+                        <div>
+                            <div className="text-xs font-bold text-white">Nano Banana</div>
+                            <div className="text-[10px] text-emerald-500">Online • Lvl 42</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* MAIN AREA */}
+            <div id="ui-layer" className="flex-1 flex flex-col h-full relative z-10 pointer-events-none">
+                
+                {/* HEADER */}
+                <div className="h-16 border-b border-gray-800 flex items-center justify-between px-8 bg-black/60 backdrop-blur-md pointer-events-auto">
+                    <div className="flex items-center gap-4 w-96">
+                        <div className="relative w-full group">
+                            <div className="absolute left-3 top-2.5 text-gray-500 group-focus-within:text-blue-400 transition-colors">
+                                <Icon path={Icons.Search} size={16} />
+                            </div>
+                            <input type="text" placeholder="Search memory matrix..." 
+                                className="w-full bg-black/40 border border-gray-800 rounded-md py-2 pl-10 pr-4 text-sm text-gray-300 focus:outline-none focus:border-blue-500 focus:bg-black/60 transition-all placeholder-gray-600 font-mono" />
+                        </div>
+                    </div>
+                    <div className="flex gap-3">
+                        <StatusBadge label="NET: ONLINE" color="blue" />
+                        <StatusBadge label="SYS: NOMINAL" color="emerald" />
+                    </div>
+                </div>
+
+                {/* SYSTEM LOGS PANEL (BOTTOM RIGHT) */}
+                <div className="absolute bottom-8 right-8 w-80 pointer-events-auto">
+                     <div className="glass-panel rounded-lg overflow-hidden flex flex-col">
+                        <div className="bg-black/40 p-2 px-3 border-b border-white/10 flex justify-between items-center">
+                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                System Log
+                             </span>
+                             <Icon path={Icons.Activity} size={12} className="text-gray-600" />
+                        </div>
+                        <div className="p-3 h-32 overflow-y-auto font-mono text-[10px] space-y-2 bg-black/20">
+                            {systemLogs.map((log) => (
+                                <div key={log.id} className="log-entry text-gray-300 border-l-2 border-blue-500/30 pl-2">
+                                    <span className="text-gray-600 mr-2">[{log.time}]</span>
+                                    {log.text}
+                                </div>
+                            ))}
+                        </div>
+                     </div>
+                </div>
+
+                {/* CONTROLS HUD */}
+                <div className="absolute top-24 right-8 pointer-events-auto flex flex-col items-end gap-4">
+                    <div className="glass-panel p-4 rounded-xl w-72 border-t-2 border-t-blue-500/50">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Spatial Controls</h3>
+                            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                        </div>
+                        
+                        <div className="grid grid-cols-3 gap-2 mb-4">
+                            <CtrlBtn active={mode==='ui'} onClick={()=>setMode('ui')} icon={Icons.Layers} label="2D Grid" />
+                            <CtrlBtn active={mode==='battle'} onClick={()=>setMode('battle')} icon={Icons.Crosshair} label="Battle" />
+                            <CtrlBtn active={mode==='pov'} onClick={()=>setMode('pov')} icon={Icons.Eye} label="POV" />
+                        </div>
+
+                        <div className="space-y-3">
+                            {/* STANDARD SUMMON */}
+                            <button 
+                                onClick={handleSummon} 
+                                disabled={isForging}
+                                className={`w-full flex items-center justify-center gap-2 text-xs font-bold py-2.5 rounded border transition-all 
+                                ${isForging ? 'bg-blue-500/20 text-blue-300 border-blue-500/50 cursor-wait' : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 hover:border-slate-500'}`}
+                            >
+                                <Icon path={isForging ? Icons.Activity : Icons.Command} size={14} className={isForging ? "animate-spin" : ""} /> 
+                                {forgingStep || "SUMMON NODE"}
+                            </button>
+
+                            {/* TAROT MINTING */}
+                            <div className="bg-black/30 p-2 rounded border border-purple-500/20">
+                                <h4 className="text-[10px] text-purple-400 uppercase font-bold mb-2">Cyber-Tarot Protocol</h4>
+                                <input 
+                                    type="text" 
+                                    value={tarotTheme}
+                                    onChange={(e) => setTarotTheme(e.target.value)}
+                                    placeholder="Enter Theme (e.g. Mars)"
+                                    className="w-full bg-black/50 border border-purple-500/30 rounded px-2 py-1 text-xs text-purple-200 mb-2 focus:outline-none focus:border-purple-500 tarot-focus"
+                                />
+                                <button 
+                                    onClick={handleMintTarot}
+                                    disabled={isForging}
+                                    className={`w-full flex items-center justify-center gap-2 text-xs font-bold py-2 rounded transition-all
+                                    ${isForging ? 'bg-purple-900/30 text-purple-600' : 'bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_10px_rgba(168,85,247,0.4)]'}`}
+                                >
+                                    <Icon path={Icons.Moon} size={12} />
+                                    MINT TAROT SET
+                                </button>
+                            </div>
+                            
+                            {mode === 'battle' && (
+                                <button onClick={handleFire} disabled={!focusedCardId} 
+                                    className={`w-full flex items-center justify-center gap-2 text-xs font-bold py-3 rounded border transition-all duration-300
+                                    ${focusedCardId 
+                                        ? 'bg-red-500/10 border-red-500 text-red-500 hover:bg-red-500 hover:text-white shadow-[0_0_20px_rgba(239,68,68,0.3)]' 
+                                        : 'bg-gray-800/50 border-gray-800 text-gray-600 cursor-not-allowed'}`}>
+                                    <Icon path={Icons.Zap} size={14} /> 
+                                    {focusedCardId ? 'INITIATE STRIKE' : 'SELECT TARGET'}
+                                </button>
+                            )}
+                        </div>
+
+                        {focusedCardId && (
+                            <div className="mt-4 p-3 bg-blue-500/5 rounded border border-blue-500/20">
+                                <div className="text-[10px] text-blue-400 uppercase font-bold mb-1">Active Target</div>
+                                <div className="font-mono text-sm text-white truncate">{focusedCardId}</div>
+                                <div className="h-1 w-full bg-gray-800 rounded-full mt-2 overflow-hidden">
+                                    <div className="h-full bg-blue-500 w-3/4"></div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* BACKGROUND DECORATION (The 2D Grid) */}
+                <div className="flex-1 p-8 bg-grid-pattern opacity-20 pointer-events-none"></div>
+
+            </div>
+        </div>
+    );
+};
+
+// --- SUBCOMPONENTS ---
+
+const NavRow = ({ icon, label, active }) => (
+    <div className={`px-6 py-2.5 flex items-center gap-3 cursor-pointer border-l-2 transition-all group ${active ? 'border-blue-500 bg-blue-500/10' : 'border-transparent hover:bg-white/5'}`}>
+        <div className={`${active ? 'text-blue-400' : 'text-gray-500 group-hover:text-gray-300'}`}>
+            <Icon path={icon} size={18} />
+        </div>
+        <span className={`text-sm font-medium ${active ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>{label}</span>
+    </div>
+);
+
+const StatusBadge = ({ label, color }) => {
+    const colors = {
+        blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+        emerald: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+    };
+    return (
+        <div className={`px-3 py-1.5 rounded-md border text-[10px] font-bold tracking-wider font-mono ${colors[color]}`}>
+            {label}
+        </div>
+    );
+}
+
+const CtrlBtn = ({ active, onClick, icon, label }) => (
+    <button onClick={onClick}
+        className={`flex flex-col items-center justify-center py-3 rounded-lg border transition-all duration-200
+        ${active 
+            ? 'bg-blue-600 text-white border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.4)] scale-105' 
+            : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'
+        }`}
+    >
+        <Icon path={icon} size={20} />
+        <span className="text-[10px] font-bold mt-1.5">{label}</span>
+    </button>
+);
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+
+</script>
+</body>
+</html>

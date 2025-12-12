@@ -9,7 +9,14 @@ export enum PetState {
     Chase = 'chase',
     IdleWithBall = 'idle-with-ball',
     Custom = 'custom',
-    Special = 'special' // Triggered by click or command
+    Special = 'special', // Triggered by click or command
+    
+    // Agentic States
+    Listening = 'listening',
+    Requesting = 'requesting',
+    Waiting = 'waiting',
+    Communicating = 'communicating',
+    Responding = 'responding'
 }
 
 // Pet location zones
@@ -54,6 +61,24 @@ export interface PetBehavior {
     playfulness?: number;        // Activity level (0-1)
 }
 
+// Pet capability configuration
+export interface PetCapability {
+    id: string;
+    name: string;
+    provider: 'aimlapi' | 'vertex' | 'openai' | 'anthropic';
+    modelId: string;
+    config: {
+        temperature?: number;
+        maxTokens?: number;
+        topP?: number;
+        frequencyPenalty?: number;
+        presencePenalty?: number;
+        responseFormat?: 'text' | 'json_object';
+    };
+    systemPrompt?: string;
+    appendPrompt?: string;
+}
+
 // Full Pet Card schema for Hypercore storage
 export interface PetCard {
     // Card Identity
@@ -61,6 +86,19 @@ export interface PetCard {
     id: string;                    // Unique identifier
     coreName: string;              // Hypercore name for this pet
     
+    // Capabilities
+    capabilities?: PetCapability[];
+    activeCapabilityId?: string;
+    
+    // Agentic Animation States (Camp Refactor)
+    agentStateAnimations?: {
+        listening?: string;         // "Listen to User's request"
+        requesting?: string;        // "Going out and requesting inference"
+        waiting?: string;           // "Waiting for Inference"
+        communicating?: string;     // "Communicating with other Phamiliars"
+        responding?: string;        // "Request returned to user"
+    };
+
     // Display
     name: string;
     species: string;               // 'dog', 'cat', 'custom', etc.
@@ -118,6 +156,7 @@ export interface PetConfig {
     speed: number;
     size: number; // Scale factor, e.g., 1.0
     assets?: Record<string, string>; // Map of action name to URL (e.g., 'idle' -> '...', 'dance' -> '...')
+    agentStateAnimations?: Record<string, string>; // Map of agent state to URL
     modules?: Record<string, ModuleConfig>; // Module configurations from Pet Forge
 }
 

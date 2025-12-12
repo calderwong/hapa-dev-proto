@@ -12,18 +12,19 @@ const USE_PROGRESSIVE_LOADING = true;
 
 // Lazy load 3D viewer for performance
 const Card3DViewer = lazy(() => import('../components/Card3DViewer/Card3DViewer').then(m => ({ default: m.Card3DViewer })));
-import { 
-    calculateCardQuality, 
-    getCardType, 
+import {
+    calculateCardQuality,
+    getCardType,
     getTierBadge,
     getAllTiers,
     getAllCardTypes,
     type CardQualityTier,
-    type CardType 
+    type CardType
 } from '../utils/cardQuality';
 import { calculateAllLineage, type LineageInfo } from '../utils/cardLineage';
 import { LineageBadgePair } from '../components/cards/LineageBadge';
 import { useHand } from '../contexts/HandContext';
+import { useMediaDownload } from '../hooks/useMediaDownload';
 
 interface CardIndexEntry {
     cardId: string;
@@ -89,13 +90,13 @@ interface CardContentProps {
     lineageMap: Map<string, any>;
 }
 
-const CardContent: React.FC<CardContentProps> = ({ 
-    card, quality, isSetCard, isMergedSet, containedCount, renderThumbnail, lineageMap 
+const CardContent: React.FC<CardContentProps> = ({
+    card, quality, isSetCard, isMergedSet, containedCount, renderThumbnail, lineageMap
 }) => {
     const lineage = lineageMap?.get(card.cardId);
     const hasAncestor = lineage?.ancestors && lineage.ancestors.length > 0;
     const hasDescendant = lineage?.descendants && lineage.descendants.length > 0;
-    
+
     // Count affixes
     const children = card.cardRecord?.children || card.raw?.children || [];
     const hasLoopVideo = children.some((c: any) => c.type === 'loop-video');
@@ -124,12 +125,12 @@ const CardContent: React.FC<CardContentProps> = ({
                     {quality.tierLabel}
                 </div>
             )}
-            
+
             {/* Thumbnail */}
             <div className="relative w-full aspect-[4/3] bg-black/40 overflow-hidden">
                 {renderThumbnail(card)}
             </div>
-            
+
             {/* Card Info Footer */}
             <div className="p-2 flex flex-col gap-1 flex-1 bg-gradient-to-t from-black/60 to-transparent">
                 <div className="text-[10px] text-gray-300 font-medium line-clamp-2 leading-tight">
@@ -138,7 +139,7 @@ const CardContent: React.FC<CardContentProps> = ({
                 <div className="flex items-center gap-1 flex-wrap mt-auto">
                     {/* Lineage badges */}
                     {(hasAncestor || hasDescendant) && (
-                        <LineageBadgePair 
+                        <LineageBadgePair
                             cardId={card.cardId}
                             lineageMap={lineageMap}
                             size="xs"
@@ -161,20 +162,20 @@ const CardContent: React.FC<CardContentProps> = ({
                         </div>
                     )}
                     {card.mediaKind && (
-                        <rux-icon 
+                        <rux-icon
                             icon={
-                                card.mediaKind === 'video' ? 'videocam' : 
-                                card.mediaKind === 'audio' ? 'audiotrack' : 
-                                card.mediaKind === 'message' ? 'chat' : 
-                                card.mediaKind === 'pet' ? 'pets' : 'image'
-                            } 
-                            size="extra-small" 
+                                card.mediaKind === 'video' ? 'videocam' :
+                                    card.mediaKind === 'audio' ? 'audiotrack' :
+                                        card.mediaKind === 'message' ? 'chat' :
+                                            card.mediaKind === 'pet' ? 'pets' : 'image'
+                            }
+                            size="extra-small"
                             className={card.mediaKind === 'message' ? 'text-purple-500' : 'text-gray-600'}
                         ></rux-icon>
                     )}
                 </div>
             </div>
-        </> 
+        </>
     );
 };
 
@@ -206,7 +207,7 @@ const CardLibrary: React.FC = () => {
     const [filterTiers, setFilterTiers] = useState<CardQualityTier[]>([]);
     const [filterTypes, setFilterTypes] = useState<CardType[]>([]);
     const [showFilters, setShowFilters] = useState(false);
-    
+
     // Card Sets State
     const [searchParams, setSearchParams] = useSearchParams();
     const [cardSets, setCardSets] = useState<any[]>([]);
@@ -217,12 +218,12 @@ const CardLibrary: React.FC = () => {
     // Extraction State
     const [extracting, setExtracting] = useState<{ [key: string]: boolean }>({});
     const [extractedChildren, setExtractedChildren] = useState<{ [cardId: string]: string[] }>({});
-    
+
     // Scroll Attachment State
     const [showScrollPicker, setShowScrollPicker] = useState(false);
     const [availableScrollCards, setAvailableScrollCards] = useState<{ cardId: string; name: string; mediaType: string }[]>([]);
     const [scrollAttaching, setScrollAttaching] = useState(false);
-    
+
     // Image Generation State
     const [imageGenState, setImageGenState] = useState<'idle' | 'crafting' | 'generating' | 'complete' | 'error'>('idle');
     const [imageGenError, setImageGenError] = useState<string | null>(null);
@@ -231,10 +232,14 @@ const CardLibrary: React.FC = () => {
 
     // Lightbox State (for full-screen image view)
     const [showLightbox, setShowLightbox] = useState(false);
-    
+
+    // Media download/export hook
+    const { downloadMedia, exportMedia } = useMediaDownload();
+    const [exportingMedia, setExportingMedia] = useState(false);
+
     // Grid ref (used for legacy rendering or measurements)
     const cardGridRef = useRef<HTMLDivElement>(null);
-    
+
     // Video Generation State for Hell Week cards
     const [hwVideoGenStatus, setHwVideoGenStatus] = useState<'idle' | 'generating' | 'complete' | 'error'>('idle');
     const [inspectorVideoPath, setInspectorVideoPath] = useState<string | null>(null);
@@ -262,11 +267,11 @@ const CardLibrary: React.FC = () => {
         const interval = setInterval(checkStatus, 5000);
         return () => clearInterval(interval);
     }, []);
-    
+
     // Loop Video State
     const [loopGenStatus, setLoopGenStatus] = useState<{ [imageId: string]: { status: string; progress?: number; message?: string } }>({});
     const [hoveredImageId, setHoveredImageId] = useState<string | null>(null);
-    
+
     // Global Mute State (persisted to localStorage)
     const [globalMuted, setGlobalMuted] = useState<boolean>(() => {
         if (typeof window !== 'undefined') {
@@ -274,12 +279,12 @@ const CardLibrary: React.FC = () => {
         }
         return true; // Default muted
     });
-    
+
     // Persist mute state
     useEffect(() => {
         localStorage.setItem('globalMuted', String(globalMuted));
     }, [globalMuted]);
-    
+
     // Load Card Sets and handle URL param
     useEffect(() => {
         const loadCardSets = async () => {
@@ -296,7 +301,7 @@ const CardLibrary: React.FC = () => {
         };
         loadCardSets();
     }, []);
-    
+
     // Handle setId from URL params
     useEffect(() => {
         const setIdFromUrl = searchParams.get('setId');
@@ -304,7 +309,7 @@ const CardLibrary: React.FC = () => {
             setActiveSetId(setIdFromUrl);
         }
     }, [searchParams]);
-    
+
     // Load card IDs for active set
     useEffect(() => {
         const loadSetCardIds = async () => {
@@ -322,23 +327,23 @@ const CardLibrary: React.FC = () => {
         };
         loadSetCardIds();
     }, [activeSetId]);
-    
+
     // Helper to clear set filter
     const clearSetFilter = () => {
         setActiveSetId(null);
         setActiveSetCardIds([]);
         setSearchParams({});
     };
-    
+
     // Get active set info
     const activeSet = useMemo(() => {
         return cardSets.find(s => s.setId === activeSetId || s.mergedSetId === activeSetId);
     }, [cardSets, activeSetId]);
-    
+
     // Navigation Animation State
     const [navAnimation, setNavAnimation] = useState<'none' | 'zoom-to-child' | 'zoom-to-parent' | 'slide-left' | 'slide-right'>('none');
     const [pendingCard, setPendingCard] = useState<CardIndexEntry | null>(null);
-    
+
     // 3D Viewer State
     const [show3DViewer, setShow3DViewer] = useState(false);
 
@@ -381,7 +386,7 @@ const CardLibrary: React.FC = () => {
                             }
                             // Accept various card types: traditional cards, pets, AND new media cards (videos, images)
                             if (parsed && (
-                                parsed.type === 'card' || 
+                                parsed.type === 'card' ||
                                 parsed.type === 'pet' ||
                                 parsed.mediaKind ||  // NEW: loop videos and generated images
                                 parsed.cardId        // NEW: any record with cardId
@@ -457,7 +462,7 @@ const CardLibrary: React.FC = () => {
                         mediaPrompts: cardRecord.mediaPrompts || entry.cardRecord?.mediaPrompts,
                         truthAnalysis: cardRecord.truthAnalysis || entry.cardRecord?.truthAnalysis,
                     };
-                    
+
                     return {
                         ...entry,
                         mediaKind,
@@ -613,11 +618,11 @@ const CardLibrary: React.FC = () => {
 
         loadGeminiModels();
     }, []);
-    
+
     // Listen for loop video generation progress
     useEffect(() => {
         if (!window.electronAPI?.onLoopVideoProgress) return;
-        
+
         const cleanup = window.electronAPI.onLoopVideoProgress((payload: any) => {
             console.log('[CardLibrary] Loop video progress:', payload);
             if (payload.imageId) {
@@ -629,7 +634,7 @@ const CardLibrary: React.FC = () => {
                         message: payload.message,
                     },
                 }));
-                
+
                 // Update Hell Week video status if this is the selected card
                 if (selected && payload.imageId === selected.cardId) {
                     if (payload.status === 'complete') {
@@ -642,7 +647,7 @@ const CardLibrary: React.FC = () => {
                         setHwVideoGenStatus('generating');
                     }
                 }
-                
+
                 // If complete, reload cards to get updated data including the new video card
                 if (payload.status === 'complete') {
                     // Delay slightly to let backend finish saving
@@ -657,7 +662,7 @@ const CardLibrary: React.FC = () => {
                 }
             }
         });
-        
+
         return cleanup;
     }, [selected]);
 
@@ -883,7 +888,7 @@ const CardLibrary: React.FC = () => {
         const baseClassName = large
             ? "w-full h-full object-cover"
             : "w-full h-40 object-cover rounded-t-lg bg-black/40 group-hover:opacity-90 transition-opacity";
-        
+
         // Only add pointer-events-none for non-video thumbnails (to prevent drag interference)
         const className = baseClassName;
 
@@ -894,7 +899,7 @@ const CardLibrary: React.FC = () => {
             // Get video path if exists
             const videoPath = getCardVideoPath(card);
             const videoSrc = videoPath ? toFileUrl(videoPath) : null;
-            
+
             if (!large) {
                 return (
                     <HoverVideoThumbnail
@@ -907,13 +912,13 @@ const CardLibrary: React.FC = () => {
                     />
                 );
             }
-            
+
             // Large view - AUTO-PLAY looping video if child video exists
             if (videoSrc) {
                 return (
                     <div className="w-full h-full relative">
-                        <video 
-                            src={videoSrc} 
+                        <video
+                            src={videoSrc}
                             className="absolute inset-0 w-full h-full object-cover"
                             autoPlay
                             loop
@@ -933,8 +938,8 @@ const CardLibrary: React.FC = () => {
                             title={globalMuted ? 'Unmute' : 'Mute'}
                             aria-label={globalMuted ? 'Unmute' : 'Mute'}
                         >
-                            <rux-icon 
-                                icon={globalMuted ? 'volume-off' : 'volume-up'} 
+                            <rux-icon
+                                icon={globalMuted ? 'volume-off' : 'volume-up'}
                                 size="small"
                                 className="text-white"
                             ></rux-icon>
@@ -942,7 +947,7 @@ const CardLibrary: React.FC = () => {
                     </div>
                 );
             }
-            
+
             // No video yet - show image with hover effect for lightbox
             return (
                 <div className="w-full h-full relative cursor-pointer group/hwimg" onClick={() => setShowLightbox(true)}>
@@ -960,7 +965,7 @@ const CardLibrary: React.FC = () => {
                 // Get video path from card (new taxonomy children or legacy)
                 const videoPath = getCardVideoPath(card);
                 const videoSrc = videoPath ? toFileUrl(videoPath) : null;
-                
+
                 // For card grid (small thumbnails) - use modular HoverVideoThumbnail
                 if (!large) {
                     return (
@@ -974,14 +979,14 @@ const CardLibrary: React.FC = () => {
                         />
                     );
                 }
-                
+
                 // For detail view (large=true) - AUTO-PLAY looping video if child video exists
                 if (videoSrc) {
                     // Has loop video - auto-play it
                     return (
                         <div className="w-full h-full relative">
-                            <video 
-                                src={videoSrc} 
+                            <video
+                                src={videoSrc}
                                 className="absolute inset-0 w-full h-full object-cover"
                                 autoPlay
                                 loop
@@ -1001,8 +1006,8 @@ const CardLibrary: React.FC = () => {
                                 title={globalMuted ? 'Unmute' : 'Mute'}
                                 aria-label={globalMuted ? 'Unmute' : 'Mute'}
                             >
-                                <rux-icon 
-                                    icon={globalMuted ? 'volume-off' : 'volume-up'} 
+                                <rux-icon
+                                    icon={globalMuted ? 'volume-off' : 'volume-up'}
                                     size="small"
                                     className="text-white"
                                 ></rux-icon>
@@ -1010,11 +1015,11 @@ const CardLibrary: React.FC = () => {
                         </div>
                     );
                 }
-                
+
                 // No loop video - show create button overlay
                 const loopStatus = loopGenStatus[card.cardId];
                 const isGenerating = loopStatus?.status === 'generating';
-                
+
                 return (
                     <div className="w-full h-full relative group/imagethumb">
                         <img src={imageSrc} alt={card.cardId} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
@@ -1047,21 +1052,21 @@ const CardLibrary: React.FC = () => {
 
         if (card.mediaKind === 'video') {
             // Get video source - check multiple possible locations
-            const rawVideoPath = card.mediaLocalPath || 
-                                card.cardRecord?.mediaLocalPath ||
-                                card.cardRecord?.video?.localPath;
+            const rawVideoPath = card.mediaLocalPath ||
+                card.cardRecord?.mediaLocalPath ||
+                card.cardRecord?.video?.localPath;
             const videoSrc = rawVideoPath ? toFileUrl(rawVideoPath) : card.mediaRemoteUrl;
-            
+
             console.log('[renderThumbnail] Video card:', card.cardId, 'videoSrc:', videoSrc, 'raw:', rawVideoPath);
-            
+
             if (videoSrc) {
                 // For grid view (small) - hover to play with thumbnail
                 if (!large) {
                     // Get thumbnail - use sourceImage, thumbnail, or generate from video
-                    const thumbSrc = card.thumbnail || 
-                                    (card.cardRecord?.sourceImage?.localPath ? toFileUrl(card.cardRecord.sourceImage.localPath) : null) ||
-                                    card.cardRecord?.thumbnail;
-                    
+                    const thumbSrc = card.thumbnail ||
+                        (card.cardRecord?.sourceImage?.localPath ? toFileUrl(card.cardRecord.sourceImage.localPath) : null) ||
+                        card.cardRecord?.thumbnail;
+
                     if (thumbSrc) {
                         return (
                             <HoverVideoThumbnail
@@ -1074,7 +1079,7 @@ const CardLibrary: React.FC = () => {
                             />
                         );
                     }
-                    
+
                     // No thumbnail - just show video directly with poster frame
                     return (
                         <HoverVideoThumbnail
@@ -1087,12 +1092,12 @@ const CardLibrary: React.FC = () => {
                         />
                     );
                 }
-                
+
                 // For detail view (large) - full video player
                 return (
                     <div className="w-full h-full relative">
-                        <video 
-                            src={videoSrc} 
+                        <video
+                            src={videoSrc}
                             className="absolute inset-0 w-full h-full object-cover"
                             autoPlay={large}
                             loop={large}
@@ -1109,8 +1114,8 @@ const CardLibrary: React.FC = () => {
                                 title={globalMuted ? 'Unmute' : 'Mute'}
                                 aria-label={globalMuted ? 'Unmute' : 'Mute'}
                             >
-                                <rux-icon 
-                                    icon={globalMuted ? 'volume-off' : 'volume-up'} 
+                                <rux-icon
+                                    icon={globalMuted ? 'volume-off' : 'volume-up'}
                                     size="small"
                                     className="text-white"
                                 ></rux-icon>
@@ -1136,10 +1141,10 @@ const CardLibrary: React.FC = () => {
             if (card.thumbnail || card.mediaRemoteUrl) {
                 return (
                     <div className={large ? "w-full h-full relative" : `${className} relative`}>
-                        <img 
-                            src={card.thumbnail || card.mediaRemoteUrl} 
-                            alt={card.cardId} 
-                            className={large ? "absolute inset-0 w-full h-full object-cover" : "w-full h-full object-cover"} 
+                        <img
+                            src={card.thumbnail || card.mediaRemoteUrl}
+                            alt={card.cardId}
+                            className={large ? "absolute inset-0 w-full h-full object-cover" : "w-full h-full object-cover"}
                         />
                         {/* Message badge overlay */}
                         <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 bg-black/70 rounded text-xs">
@@ -1182,12 +1187,12 @@ const CardLibrary: React.FC = () => {
             const videoPath = card.cardRecord?.video?.localPath || card.raw?.video?.localPath;
             if (videoPath) {
                 return (
-                    <video 
-                        src={toFileUrl(videoPath)} 
+                    <video
+                        src={toFileUrl(videoPath)}
                         className={className}
-                        autoPlay 
-                        muted 
-                        loop 
+                        autoPlay
+                        muted
+                        loop
                         playsInline
                         preload="metadata"
                     />
@@ -1205,12 +1210,12 @@ const CardLibrary: React.FC = () => {
         const videoPath = card.cardRecord?.video?.localPath || card.raw?.video?.localPath;
         if (videoPath) {
             return (
-                <video 
-                    src={toFileUrl(videoPath)} 
+                <video
+                    src={toFileUrl(videoPath)}
                     className={className}
-                    autoPlay 
-                    muted 
-                    loop 
+                    autoPlay
+                    muted
+                    loop
                     playsInline
                     preload="metadata"
                 />
@@ -1231,14 +1236,14 @@ const CardLibrary: React.FC = () => {
     // Calculate lineage (ancestors/descendants) for all cards
     const lineageMap = useMemo(() => {
         if (cards.length === 0) return new Map<string, LineageInfo>();
-        
+
         // Build lineage entries from cards
         const lineageEntries = cards.map(c => ({
             cardId: c.cardId,
             parentCardId: c.cardRecord?.parentCardId || c.parentCardId || null,
             children: c.cardRecord?.children || [],
         }));
-        
+
         return calculateAllLineage(lineageEntries);
     }, [cards]);
 
@@ -1325,20 +1330,20 @@ const CardLibrary: React.FC = () => {
 
     // Helper to find related cards
     const findCardById = (cardId: string) => cards.find(c => c.cardId === cardId);
-    
+
     const getParentCard = (card: CardIndexEntry) => {
         const parentId = card.cardRecord?.parentCardId;
         return parentId ? findCardById(parentId) : null;
     };
-    
+
     const getChildCards = (card: CardIndexEntry) => {
         // Search for children by their parentCardId reference (more robust)
-        return cards.filter(c => 
-            c.cardRecord?.parentCardId === card.cardId || 
+        return cards.filter(c =>
+            c.cardRecord?.parentCardId === card.cardId ||
             c.parentCardId === card.cardId
         );
     };
-    
+
     const getSiblingCards = (card: CardIndexEntry) => {
         const parent = getParentCard(card);
         if (!parent) return [];
@@ -1352,10 +1357,10 @@ const CardLibrary: React.FC = () => {
             child: 'zoom-to-child',
             sibling: 'slide-left'
         } as const;
-        
+
         setNavAnimation(animMap[relationship]);
         setPendingCard(toCard);
-        
+
         setTimeout(() => {
             setSelected(toCard);
             setNavAnimation('none');
@@ -1367,31 +1372,31 @@ const CardLibrary: React.FC = () => {
     const handleExtract = async (extractType: 'first-frame' | 'last-frame' | 'audio') => {
         if (!selected || !selected.mediaLocalPath || selected.mediaKind !== 'video') return;
         if (!window.electronAPI) return;
-        
+
         const extractKey = `${selected.cardId}-${extractType}`;
         if (extracting[extractKey]) return;
-        
+
         setExtracting(prev => ({ ...prev, [extractKey]: true }));
-        
+
         try {
             let result: any;
             if (extractType === 'audio') {
                 result = await window.electronAPI.extractVideoAudio({ videoPath: selected.mediaLocalPath });
             } else {
                 const frameType = extractType === 'first-frame' ? 'first' : 'last';
-                result = await window.electronAPI.extractVideoFrame({ 
-                    videoPath: selected.mediaLocalPath, 
-                    frameType 
+                result = await window.electronAPI.extractVideoFrame({
+                    videoPath: selected.mediaLocalPath,
+                    frameType
                 });
             }
-            
+
             // Create new card
             const childCoreName = `card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             const isAudio = extractType === 'audio';
-            const dataUrl = isAudio 
+            const dataUrl = isAudio
                 ? `data:${result.mimeType};base64,${result.audioBase64}`
                 : `data:${result.mimeType};base64,${result.imageBase64}`;
-            
+
             const childRecord = {
                 type: 'card',
                 id: childCoreName,
@@ -1408,11 +1413,11 @@ const CardLibrary: React.FC = () => {
                 tags: ['extracted', isAudio ? 'audio' : 'frame', extractType],
                 createdAt: new Date().toISOString(),
             };
-            
+
             // Save child card
             await window.electronAPI.p2pCreateCore(childCoreName);
             await window.electronAPI.p2pAppend({ name: childCoreName, data: JSON.stringify(childRecord) });
-            
+
             // Update parent card with child reference
             const existingChildIds = selected.cardRecord?.childCardIds || [];
             const updatedParentRecord = {
@@ -1420,34 +1425,36 @@ const CardLibrary: React.FC = () => {
                 childCardIds: [...existingChildIds, childCoreName]
             };
             await window.electronAPI.p2pAppend({ name: selected.coreName, data: JSON.stringify(updatedParentRecord) });
-            
+
             // Add to library index
             await window.electronAPI.p2pCreateCore('card-library');
-            await window.electronAPI.p2pAppend({ name: 'card-library', data: JSON.stringify({
-                type: 'card-index',
-                cardId: childCoreName,
-                coreName: childCoreName,
-                name: childRecord.title,
-                createdAt: childRecord.createdAt,
-                parentCardId: selected.cardId,
-            })});
-            
+            await window.electronAPI.p2pAppend({
+                name: 'card-library', data: JSON.stringify({
+                    type: 'card-index',
+                    cardId: childCoreName,
+                    coreName: childCoreName,
+                    name: childRecord.title,
+                    createdAt: childRecord.createdAt,
+                    parentCardId: selected.cardId,
+                })
+            });
+
             // Track locally
             setExtractedChildren(prev => ({
                 ...prev,
                 [selected.cardId]: [...(prev[selected.cardId] || []), childCoreName]
             }));
-            
+
             // Refresh cards
             await loadCards(selected.cardId);
-            
+
         } catch (err) {
             console.error('Extraction failed:', err);
         } finally {
             setExtracting(prev => ({ ...prev, [extractKey]: false }));
         }
     };
-    
+
     // Check if extraction type already exists
     const hasExtractionChild = (card: CardIndexEntry, extractType: 'first-frame' | 'last-frame' | 'audio') => {
         const childIds = card.cardRecord?.childCardIds || [];
@@ -1458,14 +1465,14 @@ const CardLibrary: React.FC = () => {
     };
 
     // ========== HELL WEEK CARD HELPERS ==========
-    
+
     // Check if card has Hell Week data (from pipeline)
     const isHellWeekCard = (card: CardIndexEntry): boolean => {
         const rec = card.cardRecord || {};
         // Check for Hell Week fields (lore, skills, stats are at top level after merge)
         return !!(rec.lore || rec.skills || rec.stats || rec.truthAnalysis || rec.mediaPrompts || rec.state);
     };
-    
+
     // Get rarity based on card type (matches CardDetails.tsx)
     const getHellWeekRarity = (type?: string): { name: string; color: string; stars: number; bgColor: string } => {
         const rarities: Record<string, { name: string; color: string; stars: number; bgColor: string }> = {
@@ -1477,7 +1484,7 @@ const CardLibrary: React.FC = () => {
         };
         return rarities[type || ''] || rarities['Concept'];
     };
-    
+
     // Generate pseudo-random stats based on card name (for visual interest)
     const generateHellWeekStats = (name?: string) => {
         const generateStat = (seed: string, base: number = 50) => {
@@ -1496,14 +1503,14 @@ const CardLibrary: React.FC = () => {
             magic: generateStat(cardName + 'magic', 45),
         };
     };
-    
+
     // Handle video generation for Hell Week cards
     const handleHellWeekVideoGenerate = async () => {
         if (!selected) return;
         const rec = selected.cardRecord || {};
         const imagePath = rec.mediaPrompts?.generated_image_local || selected.mediaLocalPath || selected.thumbnail;
         if (!imagePath || !window.electronAPI?.createLoopVideoForImage) return;
-        
+
         // Clean path for backend (remove file protocol, fix slashes for Windows)
         let cleanPath = imagePath;
         if (cleanPath.startsWith('file://')) {
@@ -1545,7 +1552,7 @@ const CardLibrary: React.FC = () => {
     // Get the image set from a card (supports NEW children[] and LEGACY imageSet)
     const getImageSet = (card: CardIndexEntry): { images: any[]; heroIndex: number; displayOrder: number[]; isNewTaxonomy: boolean } => {
         const rec = card.cardRecord || {};
-        
+
         // NEW TAXONOMY: Check for image children first
         const imageChildren = (rec.children || []).filter((c: any) => c.type === 'image');
         if (imageChildren.length > 0) {
@@ -1566,12 +1573,12 @@ const CardLibrary: React.FC = () => {
                 isNewTaxonomy: true,
             };
         }
-        
+
         // LEGACY: Check for imageSet
         if (rec.imageSet) {
             return { ...rec.imageSet, isNewTaxonomy: false };
         }
-        
+
         // LEGACY: Single image field
         if (rec.image?.localPath) {
             return {
@@ -1589,7 +1596,7 @@ const CardLibrary: React.FC = () => {
                 isNewTaxonomy: false,
             };
         }
-        
+
         return { images: [], heroIndex: 0, displayOrder: [], isNewTaxonomy: false };
     };
 
@@ -1598,15 +1605,15 @@ const CardLibrary: React.FC = () => {
         const names: string[] = [];
         const summaries: string[] = [];
         const tags: string[] = [];
-        
+
         let currentParentId = card.cardRecord?.parentCardId || card.parentCardId;
         let depth = 0;
         const maxDepth = 5; // Limit traversal depth
-        
+
         while (currentParentId && depth < maxDepth) {
             // Try to find parent in loaded cards first
             let parentCard = cards.find(c => c.cardId === currentParentId);
-            
+
             // If not found, try to load from Hypercore
             if (!parentCard && window.electronAPI?.p2pRead) {
                 try {
@@ -1624,7 +1631,7 @@ const CardLibrary: React.FC = () => {
                     }
                 } catch { /* skip */ }
             }
-            
+
             if (parentCard) {
                 const pRec = parentCard.cardRecord || {};
                 if (parentCard.name || pRec.name) names.push(parentCard.name || pRec.name);
@@ -1640,23 +1647,23 @@ const CardLibrary: React.FC = () => {
                 break;
             }
         }
-        
+
         return { names, summaries, tags };
     };
 
     // Generate image for card using AI (supports series continuation)
     const handleGenerateImage = async () => {
         if (!selected || !window.electronAPI?.generateImageForCard) return;
-        
+
         // Extract context from the card - ENHANCED to handle wormhole documents
         const rec = selected.cardRecord || selected.raw || {};
-        
+
         // Collect parent context for child cards (like video cards)
         const parentContext = await collectParentContext(selected);
-        
+
         // 1. Try direct text fields
         let textContent = rec.text || rec.content || rec.description || rec.bio || '';
-        
+
         // 2. Extract from summaries (most valuable for wormhole docs)
         if (!textContent && rec.summaries?.length > 0) {
             textContent = rec.summaries
@@ -1665,7 +1672,7 @@ const CardLibrary: React.FC = () => {
                 .slice(0, 3) // Limit to first 3 summaries
                 .join('\n\n');
         }
-        
+
         // 3. Extract key terms and add to tags
         let tags = Array.isArray(rec.tags) ? [...rec.tags] : [];
         if (rec.keyTerms?.length > 0) {
@@ -1675,19 +1682,19 @@ const CardLibrary: React.FC = () => {
                 .slice(0, 20); // Limit to 20 key terms
             tags = [...tags, ...terms];
         }
-        
+
         // 4. Card title/name
         const name = selected.name || rec.name || rec.title || 'Untitled';
-        
+
         // 5. Message content for chat cards
         const messageContent = rec.message?.content || selected.messageContent || '';
-        
+
         // 6. Get card kind for context
         const mediaKind = selected.mediaKind || rec.kind || 'unknown';
-        
+
         // 7. For video cards, include the loop prompt as context
         const loopVideoContext = rec.generationParams?.loopPrompt || rec.sourceImage?.craftedPrompt || '';
-        
+
         // 8. Merge parent context into tags and text
         const combinedTags = [...new Set([...tags, ...parentContext.tags])];
         const combinedText = [
@@ -1695,10 +1702,10 @@ const CardLibrary: React.FC = () => {
             ...parentContext.summaries,
             loopVideoContext,
         ].filter(Boolean).join('\n\n');
-        const combinedName = parentContext.names.length > 0 
+        const combinedName = parentContext.names.length > 0
             ? `${name} (from ${parentContext.names[0]})`
             : name;
-        
+
         const cardContext = {
             name: combinedName,
             mediaKind,
@@ -1706,68 +1713,68 @@ const CardLibrary: React.FC = () => {
             tags: combinedTags,
             messageContent,
         };
-        
+
         // Check if there's enough context - RELAXED: name + any other content is enough
         const hasContent = cardContext.text || cardContext.messageContent || cardContext.tags.length > 0;
         const hasName = cardContext.name && cardContext.name !== 'Untitled';
-        
+
         if (!hasContent && !hasName) {
             setImageGenError('Not enough context to generate an image. Add some text, tags, or a title.');
             setImageGenState('error');
             setTimeout(() => setImageGenState('idle'), 3000);
             return;
         }
-        
+
         // Get existing image set for series continuation
         const currentImageSet = getImageSet(selected);
         const imageNumber = currentImageSet.images.length + 1;
         const lastImage = currentImageSet.images[currentImageSet.images.length - 1];
-        
+
         // Build series context if this is a continuation
         const seriesContext = imageNumber > 1 && lastImage ? {
             imageNumber,
             previousPrompt: lastImage.craftedPrompt,
             previousImagePath: lastImage.localPath,
         } : undefined;
-        
+
         try {
             setImageGenState('crafting');
             setImageGenError(null);
-            
+
             // Small delay for UX - show "crafting" state
             await new Promise(r => setTimeout(r, 500));
             setImageGenState('generating');
-            
+
             console.log('[ImageGen] Generating image #', imageNumber, seriesContext ? '(series continuation)' : '(first image)');
-            
-            const result = await window.electronAPI.generateImageForCard({ 
-                cardContext, 
+
+            const result = await window.electronAPI.generateImageForCard({
+                cardContext,
                 seriesContext,
-                provider: imageProvider 
+                provider: imageProvider
             });
-            
+
             if (result.success && result.localPath) {
                 // ============================================================
                 // NEW TAXONOMY: Create a separate Image Card for each generated image
                 // ============================================================
-                
+
                 const imageCardId = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
                 const now = new Date().toISOString();
-                
+
                 // 1. Create Image Card record
                 const imageCardRecord = {
                     id: imageCardId,
                     type: 'card',
                     mediaType: 'image',
                     subType: 'generated',
-                    
+
                     // Relationships
                     parentId: selected.cardId,
                     children: [], // Can have loop videos, upscaled versions, etc.
-                    
+
                     // Content
                     title: `${cardContext.name} - Image #${imageNumber}`,
-                    
+
                     // File storage
                     wormhole: {
                         ingest: {
@@ -1775,7 +1782,7 @@ const CardLibrary: React.FC = () => {
                             mimeType: result.mimeType,
                         }
                     },
-                    
+
                     // Generation metadata
                     generationPrompt: result.craftedPrompt,
                     generationModel: imageProvider,
@@ -1784,15 +1791,15 @@ const CardLibrary: React.FC = () => {
                         previousPrompt: seriesContext.previousPrompt,
                         continuationOf: lastImage?.id,
                     } : undefined,
-                    
+
                     // Standard fields
                     tags: ['generated', 'ai-image', ...(cardContext.tags?.slice(0, 5) || [])],
                     createdAt: now,
                     updatedAt: now,
                 };
-                
+
                 console.log('[ImageGen] Creating Image Card:', imageCardId);
-                
+
                 // 2. Create Hypercore for the Image Card
                 try {
                     await window.electronAPI.p2pCreateCore(imageCardId);
@@ -1804,11 +1811,11 @@ const CardLibrary: React.FC = () => {
                 } catch (err) {
                     console.error('[ImageGen] Failed to create Image Card Hypercore:', err);
                 }
-                
+
                 // 3. Update PARENT card's children array
                 const parentCoreName = selected.coreName || selected.cardId;
                 const existingChildren = selected.cardRecord?.children || [];
-                
+
                 // Read latest parent record
                 let parentLatest = selected.cardRecord || {};
                 try {
@@ -1820,7 +1827,7 @@ const CardLibrary: React.FC = () => {
                         } catch { }
                     }
                 } catch { }
-                
+
                 const updatedParentRecord = {
                     ...parentLatest,
                     children: [
@@ -1837,7 +1844,7 @@ const CardLibrary: React.FC = () => {
                     // Set first image as thumbnail if none exists
                     thumbnail: parentLatest.thumbnail || `file:///${result.localPath.replace(/\\/g, '/')}`,
                 };
-                
+
                 try {
                     await window.electronAPI.p2pAppend({
                         name: parentCoreName,
@@ -1847,7 +1854,7 @@ const CardLibrary: React.FC = () => {
                 } catch (err) {
                     console.error('[ImageGen] Failed to update parent card:', err);
                 }
-                
+
                 // 4. Add Image Card to library index
                 try {
                     await window.electronAPI.p2pCreateCore(CARD_LIBRARY_CORE_NAME);
@@ -1869,12 +1876,12 @@ const CardLibrary: React.FC = () => {
                 } catch (err) {
                     console.error('[ImageGen] Failed to add to library index:', err);
                 }
-                
+
                 setImageGenState('complete');
-                
+
                 // Reload cards to show the new image card
                 await loadCards(selected.cardId);
-                
+
                 setTimeout(() => setImageGenState('idle'), 2000);
             }
         } catch (err: any) {
@@ -1884,19 +1891,19 @@ const CardLibrary: React.FC = () => {
             setTimeout(() => setImageGenState('idle'), 4000);
         }
     };
-    
+
     // Set hero image for a card
     const handleSetHeroImage = async (imageIndex: number) => {
         if (!selected) return;
-        
+
         const currentImageSet = getImageSet(selected);
         if (imageIndex < 0 || imageIndex >= currentImageSet.images.length) return;
-        
+
         const updatedImageSet = {
             ...currentImageSet,
             heroIndex: imageIndex,
         };
-        
+
         const heroImage = currentImageSet.images[imageIndex];
         const updatedRecord = {
             ...selected.cardRecord,
@@ -1910,13 +1917,13 @@ const CardLibrary: React.FC = () => {
                 generatedAt: heroImage?.generatedAt,
             },
         };
-        
+
         const coreToUse = selected.coreName || selected.cardId;
         if (window.electronAPI?.p2pAppend && coreToUse) {
             try {
-                await window.electronAPI.p2pAppend({ 
-                    name: coreToUse, 
-                    data: JSON.stringify(updatedRecord) 
+                await window.electronAPI.p2pAppend({
+                    name: coreToUse,
+                    data: JSON.stringify(updatedRecord)
                 });
                 await loadCards(selected.cardId);
             } catch (err) {
@@ -1924,22 +1931,22 @@ const CardLibrary: React.FC = () => {
             }
         }
     };
-    
+
     // Move image in display order
     const handleMoveImage = async (imageIndex: number, direction: 'up' | 'down') => {
         if (!selected) return;
-        
+
         const currentImageSet = getImageSet(selected);
         const displayOrder = [...currentImageSet.displayOrder];
         const currentPos = displayOrder.indexOf(imageIndex);
-        
+
         if (currentPos === -1) return;
         const newPos = direction === 'up' ? currentPos - 1 : currentPos + 1;
         if (newPos < 0 || newPos >= displayOrder.length) return;
-        
+
         // Swap positions
         [displayOrder[currentPos], displayOrder[newPos]] = [displayOrder[newPos], displayOrder[currentPos]];
-        
+
         const updatedRecord = {
             ...selected.cardRecord,
             updatedAt: new Date().toISOString(),
@@ -1948,13 +1955,13 @@ const CardLibrary: React.FC = () => {
                 displayOrder,
             },
         };
-        
+
         const coreToUse = selected.coreName || selected.cardId;
         if (window.electronAPI?.p2pAppend && coreToUse) {
             try {
-                await window.electronAPI.p2pAppend({ 
-                    name: coreToUse, 
-                    data: JSON.stringify(updatedRecord) 
+                await window.electronAPI.p2pAppend({
+                    name: coreToUse,
+                    data: JSON.stringify(updatedRecord)
                 });
                 await loadCards(selected.cardId);
             } catch (err) {
@@ -1962,37 +1969,37 @@ const CardLibrary: React.FC = () => {
             }
         }
     };
-    
+
     // Check if card has any images
     const cardHasImage = (card: CardIndexEntry): boolean => {
         const imageSet = getImageSet(card);
         return imageSet.images.length > 0 || !!(card.thumbnail || card.mediaLocalPath);
     };
-    
+
     // Get image count for a card
     const getImageCount = (card: CardIndexEntry): number => {
         return getImageSet(card).images.length;
     };
-    
+
     // Create looping video from an image
     const handleCreateLoopVideo = async (imgIdx: number) => {
         if (!selected || !window.electronAPI?.createLoopVideoForImage) return;
-        
+
         const imageSet = getImageSet(selected);
         const img = imageSet.images[imgIdx];
         if (!img) return;
-        
+
         // Set generating status
         setLoopGenStatus(prev => ({
             ...prev,
             [img.id]: { status: 'generating', message: 'Starting loop generation...' },
         }));
-        
+
         try {
             // NEW TAXONOMY: If image is a card, use its cardId as parent
             // The loop video's parent should be the IMAGE card, not the source document
             const loopParentCardId = img.isCard && img.cardId ? img.cardId : selected.cardId;
-            
+
             const result = await window.electronAPI.createLoopVideoForImage({
                 parentCardId: loopParentCardId,
                 imageId: img.id,
@@ -2001,10 +2008,10 @@ const CardLibrary: React.FC = () => {
                 cardName: img.isCard ? (img.label || `Image #${img.creationOrder + 1}`) : (selected.name || 'Untitled'),
                 imageOrder: img.creationOrder,
             });
-            
+
             if (result.success) {
                 const now = new Date().toISOString();
-                
+
                 // NEW TAXONOMY: Update the IMAGE card's children array
                 if (img.isCard && img.cardId) {
                     try {
@@ -2017,7 +2024,7 @@ const CardLibrary: React.FC = () => {
                                 if (parsed) imageCardLatest = parsed;
                             } catch { }
                         }
-                        
+
                         // Update with loop video child
                         const updatedImageCard = {
                             ...imageCardLatest,
@@ -2032,7 +2039,7 @@ const CardLibrary: React.FC = () => {
                             ],
                             updatedAt: now,
                         };
-                        
+
                         await window.electronAPI.p2pAppend({
                             name: img.cardId,
                             data: JSON.stringify(updatedImageCard),
@@ -2042,7 +2049,7 @@ const CardLibrary: React.FC = () => {
                         console.error('[LoopVideo] Failed to update Image Card:', err);
                     }
                 }
-                
+
                 // LEGACY: Update the source card's imageSet
                 else {
                     const updatedImages = [...imageSet.images];
@@ -2055,7 +2062,7 @@ const CardLibrary: React.FC = () => {
                             status: 'complete' as const,
                         },
                     };
-                    
+
                     const updatedRecord = {
                         ...selected.cardRecord,
                         updatedAt: now,
@@ -2064,7 +2071,7 @@ const CardLibrary: React.FC = () => {
                             images: updatedImages,
                         },
                     };
-                    
+
                     // Save to Hypercore
                     const coreToUse = selected.coreName || selected.cardId;
                     if (window.electronAPI?.p2pAppend && coreToUse) {
@@ -2074,10 +2081,10 @@ const CardLibrary: React.FC = () => {
                         });
                     }
                 }
-                
+
                 // Reload cards
                 await loadCards(selected.cardId);
-                
+
                 setLoopGenStatus(prev => ({
                     ...prev,
                     [img.id]: { status: 'complete', message: 'Loop video created!' },
@@ -2091,27 +2098,27 @@ const CardLibrary: React.FC = () => {
             }));
         }
     };
-    
+
     // Create loop video directly from an Image Card (new taxonomy)
     const handleCreateLoopVideoFromImageCard = async (imageCard: CardIndexEntry) => {
         if (!window.electronAPI?.createLoopVideoForImage) return;
-        
+
         const imageId = imageCard.cardId;
         const imagePath = imageCard.cardRecord?.wormhole?.ingest?.originalPath || imageCard.mediaLocalPath || '';
         const imagePrompt = imageCard.cardRecord?.generationPrompt || '';
         const imageName = imageCard.name || imageCard.cardRecord?.title || 'Image';
-        
+
         if (!imagePath) {
             console.error('[LoopVideo] No image path found for Image Card:', imageId);
             return;
         }
-        
+
         // Set generating status
         setLoopGenStatus(prev => ({
             ...prev,
             [imageId]: { status: 'generating', message: 'Starting loop generation...' },
         }));
-        
+
         try {
             const result = await window.electronAPI.createLoopVideoForImage({
                 parentCardId: imageId, // Parent is the IMAGE card itself
@@ -2121,10 +2128,10 @@ const CardLibrary: React.FC = () => {
                 cardName: imageName,
                 imageOrder: imageCard.cardRecord?.generationIndex || 0,
             });
-            
+
             if (result.success) {
                 const now = new Date().toISOString();
-                
+
                 // Update the Image Card's children array with loop video
                 try {
                     const imageCardRecords = await window.electronAPI.p2pRead(imageId);
@@ -2135,7 +2142,7 @@ const CardLibrary: React.FC = () => {
                             if (parsed) imageCardLatest = parsed;
                         } catch { }
                     }
-                    
+
                     const updatedImageCard = {
                         ...imageCardLatest,
                         children: [
@@ -2150,7 +2157,7 @@ const CardLibrary: React.FC = () => {
                         ],
                         updatedAt: now,
                     };
-                    
+
                     await window.electronAPI.p2pAppend({
                         name: imageId,
                         data: JSON.stringify(updatedImageCard),
@@ -2159,10 +2166,10 @@ const CardLibrary: React.FC = () => {
                 } catch (err) {
                     console.error('[LoopVideo] Failed to update Image Card:', err);
                 }
-                
+
                 // Reload to show the new video
                 await loadCards(imageId);
-                
+
                 setLoopGenStatus(prev => ({
                     ...prev,
                     [imageId]: { status: 'complete', message: 'Loop video created!' },
@@ -2180,7 +2187,7 @@ const CardLibrary: React.FC = () => {
     // Navigate to a loop video's card page
     const handleNavigateToLoopVideo = async (loopVideoCardId: string) => {
         console.log('[LoopVideo] Navigating to video card:', loopVideoCardId);
-        
+
         // First check if already in current cards
         const videoCard = cards.find(c => c.cardId === loopVideoCardId);
         if (videoCard) {
@@ -2188,10 +2195,10 @@ const CardLibrary: React.FC = () => {
             setSelected(videoCard);
             return;
         }
-        
+
         // Card not in current list - need to reload and find it
         console.log('[LoopVideo] Video card not in current list, reloading...');
-        
+
         // Try to load the card directly from its core
         if (window.electronAPI?.p2pRead) {
             try {
@@ -2208,7 +2215,7 @@ const CardLibrary: React.FC = () => {
                             }
                         } catch { /* skip */ }
                     }
-                    
+
                     if (cardRecord) {
                         console.log('[LoopVideo] Loaded video card record directly:', cardRecord);
                         const videoEntry: CardIndexEntry = {
@@ -2230,7 +2237,7 @@ const CardLibrary: React.FC = () => {
                 console.error('[LoopVideo] Failed to load video card directly:', err);
             }
         }
-        
+
         // Fallback: reload all cards with preference
         loadCards(loopVideoCardId);
     };
@@ -2343,7 +2350,7 @@ const CardLibrary: React.FC = () => {
                                         try {
                                             const p = JSON.parse(r);
                                             if (p.type === 'card') latest = p;
-                                        } catch {}
+                                        } catch { }
                                     }
                                     setActiveWorkspaceCard(prev => prev ? ({ ...prev, cardRecord: latest }) : null);
                                     loadCards(); // Refresh grid as well
@@ -2358,273 +2365,271 @@ const CardLibrary: React.FC = () => {
 
     return (
         <>
-        <div className="flex flex-col h-full bg-gray-900 text-white overflow-hidden">
-            {/* Status Header Bar */}
-            <div className="flex-none px-6 py-3 bg-gray-900/80 backdrop-blur border-b border-gray-700 flex items-center justify-between z-10">
-                <div className="flex items-center gap-4">
+            <div className="flex flex-col h-full bg-gray-900 text-white overflow-hidden">
+                {/* Status Header Bar */}
+                <div className="flex-none px-6 py-3 bg-gray-900/80 backdrop-blur border-b border-gray-700 flex items-center justify-between z-10">
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center border border-purple-500/30">
+                                <rux-icon icon="photo-library" size="small" className="text-purple-400"></rux-icon>
+                            </div>
+                            <div className="flex flex-col">
+                                <h2 className="text-sm font-bold text-white tracking-widest uppercase leading-none">Card Library</h2>
+                                <span className="text-[10px] text-purple-400/80 font-mono tracking-wider">MEMORY CORE</span>
+                            </div>
+                        </div>
+
+                        <div className="h-6 w-px bg-gray-700 mx-2"></div>
+
+                        <div className="flex items-center gap-2">
+                            <rux-status status={loading ? 'caution' : 'standby'} className="mt-1"></rux-status>
+                            <span className="text-xs text-gray-400 font-mono uppercase">
+                                {loading ? 'Syncing...' : `${cards.length} Cards`}
+                            </span>
+                        </div>
+                    </div>
+
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded bg-purple-500/10 flex items-center justify-center border border-purple-500/30">
-                            <rux-icon icon="photo-library" size="small" className="text-purple-400"></rux-icon>
-                        </div>
-                        <div className="flex flex-col">
-                            <h2 className="text-sm font-bold text-white tracking-widest uppercase leading-none">Card Library</h2>
-                            <span className="text-[10px] text-purple-400/80 font-mono tracking-wider">MEMORY CORE</span>
-                        </div>
-                    </div>
-
-                    <div className="h-6 w-px bg-gray-700 mx-2"></div>
-
-                    <div className="flex items-center gap-2">
-                        <rux-status status={loading ? 'caution' : 'standby'} className="mt-1"></rux-status>
-                        <span className="text-xs text-gray-400 font-mono uppercase">
-                            {loading ? 'Syncing...' : `${cards.length} Cards`}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    <div className="relative group">
-                        <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
-                        <rux-input
-                            type="text"
-                            value={search}
-                            onInput={(e: any) => setSearch(e.target.value)}
-                            placeholder="Search cards..."
-                            className="relative min-w-[200px]"
-                        >
-                            <rux-icon slot="prefix" icon="search" size="small"></rux-icon>
-                        </rux-input>
-                    </div>
-                    <rux-button
-                        onClick={() => setShowFilters(!showFilters)}
-                        icon="filter-list"
-                        secondary
-                        size="small"
-                        className={filterTiers.length > 0 || filterTypes.length > 0 ? 'ring-2 ring-purple-500' : ''}
-                    >
-                        Filter
-                    </rux-button>
-                    <rux-button
-                        onClick={() => loadCards(selected?.cardId || null)}
-                        disabled={loading}
-                        icon="refresh"
-                        secondary
-                        size="small"
-                    >
-                        Sync
-                    </rux-button>
-                    <rux-button
-                        onClick={async () => {
-                            if (!window.electronAPI?.pipelineRecoverCards) return;
-                            try {
-                                setLoading(true);
-                                // Run orphaned card recovery
-                                const result = await window.electronAPI.pipelineRecoverCards();
-                                console.log('[Recovery]', result);
-                                
-                                // Also run parent repair for Hell Week cards
-                                let repairResult = { repaired: 0, errors: [] };
-                                if (window.electronAPI?.repairHellWeekParents) {
-                                    repairResult = await window.electronAPI.repairHellWeekParents();
-                                    console.log('[Repair]', repairResult);
-                                }
-                                
-                                if (result.recovered > 0 || repairResult.repaired > 0) {
-                                    await loadCards();
-                                }
-                                
-                                // Show result message
-                                const msg = `Recovered ${result.recovered} cards. Fixed ${repairResult.repaired} parent relationships.`;
-                                console.log(msg);
-                            } catch (err) {
-                                console.error('Recovery failed:', err);
-                            } finally {
-                                setLoading(false);
-                            }
-                        }}
-                        disabled={loading}
-                        icon="history"
-                        secondary
-                        size="small"
-                        title="Recover orphaned cards and fix parent relationships"
-                    >
-                        Recover
-                    </rux-button>
-                    <rux-button
-                        onClick={() => setShow3DViewer(true)}
-                        disabled={cards.length === 0}
-                        icon="view-in-ar"
-                        size="small"
-                        className="bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/50"
-                    >
-                        3D Nexus
-                    </rux-button>
-                </div>
-            </div>
-
-            {/* Active Set Filter Indicator */}
-            {activeSet && (
-                <div className="flex-none px-6 py-2 bg-gradient-to-r from-purple-900/30 to-cyan-900/30 border-b border-purple-700/50 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <rux-icon icon="folder-special" size="small" className="text-purple-400"></rux-icon>
-                        <div>
-                            <span className="text-xs text-purple-400 uppercase font-bold">Viewing Set:</span>
-                            <span className="ml-2 text-sm text-white font-medium">{activeSet.name}</span>
-                        </div>
-                        <span className="text-xs text-gray-500">
-                            ({activeSetCardIds.length} cards{activeSetCardIds.length !== filteredCards.length ? `, showing ${filteredCards.length}` : ''})
-                        </span>
-                    </div>
-                    <rux-button 
-                        size="small" 
-                        secondary 
-                        icon="close" 
-                        onClick={clearSetFilter}
-                    >
-                        Clear Filter
-                    </rux-button>
-                </div>
-            )}
-
-            {/* Card Sets Selector (when no set active) */}
-            {!activeSet && cardSets.length > 0 && (
-                <div className="flex-none px-6 py-2 bg-gray-800/30 border-b border-gray-700/50">
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                        <span className="text-xs text-gray-500 uppercase font-mono flex-shrink-0">Sets:</span>
-                        {cardSets.slice(0, 5).map((set) => (
-                            <button
-                                key={set.setId || set.mergedSetId}
-                                onClick={() => {
-                                    const id = set.setId || set.mergedSetId;
-                                    setActiveSetId(id);
-                                    setSearchParams({ setId: id });
-                                }}
-                                className="flex-shrink-0 px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-purple-500/50 rounded text-xs text-gray-300 hover:text-white transition-all flex items-center gap-2"
+                        <div className="relative group">
+                            <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
+                            <rux-input
+                                type="text"
+                                value={search}
+                                onInput={(e: any) => setSearch(e.target.value)}
+                                placeholder="Search cards..."
+                                className="relative min-w-[200px]"
                             >
-                                <rux-icon icon={set.type === 'merged-set' ? 'folder' : 'style'} size="extra-small"></rux-icon>
-                                <span className="max-w-[120px] truncate">{set.name}</span>
-                                <span className="text-gray-500">{set.cardCount || set.cardIds?.length || '?'}</span>
-                            </button>
-                        ))}
-                        {cardSets.length > 5 && (
-                            <span className="text-xs text-gray-500">+{cardSets.length - 5} more</span>
-                        )}
+                                <rux-icon slot="prefix" icon="search" size="small"></rux-icon>
+                            </rux-input>
+                        </div>
+                        <rux-button
+                            onClick={() => setShowFilters(!showFilters)}
+                            icon="filter-list"
+                            secondary
+                            size="small"
+                            className={filterTiers.length > 0 || filterTypes.length > 0 ? 'ring-2 ring-purple-500' : ''}
+                        >
+                            Filter
+                        </rux-button>
+                        <rux-button
+                            onClick={() => loadCards(selected?.cardId || null)}
+                            disabled={loading}
+                            icon="refresh"
+                            secondary
+                            size="small"
+                        >
+                            Sync
+                        </rux-button>
+                        <rux-button
+                            onClick={async () => {
+                                if (!window.electronAPI?.pipelineRecoverCards) return;
+                                try {
+                                    setLoading(true);
+                                    // Run orphaned card recovery
+                                    const result = await window.electronAPI.pipelineRecoverCards();
+                                    console.log('[Recovery]', result);
+
+                                    // Also run parent repair for Hell Week cards
+                                    let repairResult = { repaired: 0, errors: [] };
+                                    if (window.electronAPI?.repairHellWeekParents) {
+                                        repairResult = await window.electronAPI.repairHellWeekParents();
+                                        console.log('[Repair]', repairResult);
+                                    }
+
+                                    if (result.recovered > 0 || repairResult.repaired > 0) {
+                                        await loadCards();
+                                    }
+
+                                    // Show result message
+                                    const msg = `Recovered ${result.recovered} cards. Fixed ${repairResult.repaired} parent relationships.`;
+                                    console.log(msg);
+                                } catch (err) {
+                                    console.error('Recovery failed:', err);
+                                } finally {
+                                    setLoading(false);
+                                }
+                            }}
+                            disabled={loading}
+                            icon="history"
+                            secondary
+                            size="small"
+                            title="Recover orphaned cards and fix parent relationships"
+                        >
+                            Recover
+                        </rux-button>
+                        <rux-button
+                            onClick={() => setShow3DViewer(true)}
+                            disabled={cards.length === 0}
+                            icon="view-in-ar"
+                            size="small"
+                            className="bg-purple-500/20 hover:bg-purple-500/30 border-purple-500/50"
+                        >
+                            3D Nexus
+                        </rux-button>
                     </div>
                 </div>
-            )}
 
-            {/* Filter & Sort Panel */}
-            {showFilters && (
-                <div className="flex-none px-6 py-3 bg-gray-800/50 border-b border-gray-700/50 flex flex-wrap items-center gap-4">
-                    {/* Sort By */}
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Sort:</span>
-                        <select 
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as any)}
-                            className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
-                            title="Sort order"
+                {/* Active Set Filter Indicator */}
+                {activeSet && (
+                    <div className="flex-none px-6 py-2 bg-gradient-to-r from-purple-900/30 to-cyan-900/30 border-b border-purple-700/50 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <rux-icon icon="folder-special" size="small" className="text-purple-400"></rux-icon>
+                            <div>
+                                <span className="text-xs text-purple-400 uppercase font-bold">Viewing Set:</span>
+                                <span className="ml-2 text-sm text-white font-medium">{activeSet.name}</span>
+                            </div>
+                            <span className="text-xs text-gray-500">
+                                ({activeSetCardIds.length} cards{activeSetCardIds.length !== filteredCards.length ? `, showing ${filteredCards.length}` : ''})
+                            </span>
+                        </div>
+                        <rux-button
+                            size="small"
+                            secondary
+                            icon="close"
+                            onClick={clearSetFilter}
                         >
-                            <option value="newest">Newest First</option>
-                            <option value="oldest">Oldest First</option>
-                            <option value="quality-high">Quality ↓</option>
-                            <option value="quality-low">Quality ↑</option>
-                            <option value="name-az">Name A-Z</option>
-                            <option value="name-za">Name Z-A</option>
-                        </select>
+                            Clear Filter
+                        </rux-button>
                     </div>
+                )}
 
-                    <div className="h-4 w-px bg-gray-700"></div>
-
-                    {/* Tier Filter */}
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Tier:</span>
-                        <div className="flex gap-1">
-                            {[
-                                { value: 'common' as CardQualityTier, label: 'Common', activeClass: 'bg-gray-500/30 text-gray-400 ring-1 ring-gray-500' },
-                                { value: 'uncommon' as CardQualityTier, label: 'Uncommon', activeClass: 'bg-emerald-500/30 text-emerald-400 ring-1 ring-emerald-500' },
-                                { value: 'rare' as CardQualityTier, label: 'Rare', activeClass: 'bg-blue-500/30 text-blue-400 ring-1 ring-blue-500' },
-                                { value: 'epic' as CardQualityTier, label: 'Epic', activeClass: 'bg-purple-500/30 text-purple-400 ring-1 ring-purple-500' },
-                                { value: 'legendary' as CardQualityTier, label: 'Legendary', activeClass: 'bg-orange-500/30 text-orange-400 ring-1 ring-orange-500' },
-                                { value: 'mythic' as CardQualityTier, label: 'Mythic', activeClass: 'bg-rose-500/30 text-rose-400 ring-1 ring-rose-500' },
-                            ].map(tier => (
+                {/* Card Sets Selector (when no set active) */}
+                {!activeSet && cardSets.length > 0 && (
+                    <div className="flex-none px-6 py-2 bg-gray-800/30 border-b border-gray-700/50">
+                        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                            <span className="text-xs text-gray-500 uppercase font-mono flex-shrink-0">Sets:</span>
+                            {cardSets.slice(0, 5).map((set) => (
                                 <button
-                                    key={tier.value}
+                                    key={set.setId || set.mergedSetId}
                                     onClick={() => {
-                                        setFilterTiers(prev => 
-                                            prev.includes(tier.value) 
-                                                ? prev.filter(t => t !== tier.value)
-                                                : [...prev, tier.value]
-                                        );
+                                        const id = set.setId || set.mergedSetId;
+                                        setActiveSetId(id);
+                                        setSearchParams({ setId: id });
                                     }}
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all ${
-                                        filterTiers.includes(tier.value)
+                                    className="flex-shrink-0 px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-purple-500/50 rounded text-xs text-gray-300 hover:text-white transition-all flex items-center gap-2"
+                                >
+                                    <rux-icon icon={set.type === 'merged-set' ? 'folder' : 'style'} size="extra-small"></rux-icon>
+                                    <span className="max-w-[120px] truncate">{set.name}</span>
+                                    <span className="text-gray-500">{set.cardCount || set.cardIds?.length || '?'}</span>
+                                </button>
+                            ))}
+                            {cardSets.length > 5 && (
+                                <span className="text-xs text-gray-500">+{cardSets.length - 5} more</span>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Filter & Sort Panel */}
+                {showFilters && (
+                    <div className="flex-none px-6 py-3 bg-gray-800/50 border-b border-gray-700/50 flex flex-wrap items-center gap-4">
+                        {/* Sort By */}
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Sort:</span>
+                            <select
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value as any)}
+                                className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:border-purple-500 focus:outline-none"
+                                title="Sort order"
+                            >
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                                <option value="quality-high">Quality ↓</option>
+                                <option value="quality-low">Quality ↑</option>
+                                <option value="name-az">Name A-Z</option>
+                                <option value="name-za">Name Z-A</option>
+                            </select>
+                        </div>
+
+                        <div className="h-4 w-px bg-gray-700"></div>
+
+                        {/* Tier Filter */}
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Tier:</span>
+                            <div className="flex gap-1">
+                                {[
+                                    { value: 'common' as CardQualityTier, label: 'Common', activeClass: 'bg-gray-500/30 text-gray-400 ring-1 ring-gray-500' },
+                                    { value: 'uncommon' as CardQualityTier, label: 'Uncommon', activeClass: 'bg-emerald-500/30 text-emerald-400 ring-1 ring-emerald-500' },
+                                    { value: 'rare' as CardQualityTier, label: 'Rare', activeClass: 'bg-blue-500/30 text-blue-400 ring-1 ring-blue-500' },
+                                    { value: 'epic' as CardQualityTier, label: 'Epic', activeClass: 'bg-purple-500/30 text-purple-400 ring-1 ring-purple-500' },
+                                    { value: 'legendary' as CardQualityTier, label: 'Legendary', activeClass: 'bg-orange-500/30 text-orange-400 ring-1 ring-orange-500' },
+                                    { value: 'mythic' as CardQualityTier, label: 'Mythic', activeClass: 'bg-rose-500/30 text-rose-400 ring-1 ring-rose-500' },
+                                ].map(tier => (
+                                    <button
+                                        key={tier.value}
+                                        onClick={() => {
+                                            setFilterTiers(prev =>
+                                                prev.includes(tier.value)
+                                                    ? prev.filter(t => t !== tier.value)
+                                                    : [...prev, tier.value]
+                                            );
+                                        }}
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all ${filterTiers.includes(tier.value)
                                             ? tier.activeClass
                                             : 'bg-gray-800 text-gray-500 hover:text-gray-300'
-                                    }`}
-                                    data-tooltip={`${tier.label} (${tierStats[tier.value]} cards)`}
-                                    data-tooltip-tier={tier.value}
-                                >
-                                    {getTierBadge(tier.value)} <span className="opacity-60">{tierStats[tier.value]}</span>
-                                </button>
-                            ))}
+                                            }`}
+                                        data-tooltip={`${tier.label} (${tierStats[tier.value]} cards)`}
+                                        data-tooltip-tier={tier.value}
+                                    >
+                                        {getTierBadge(tier.value)} <span className="opacity-60">{tierStats[tier.value]}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="h-4 w-px bg-gray-700"></div>
+                        <div className="h-4 w-px bg-gray-700"></div>
 
-                    {/* Type Filter */}
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Type:</span>
-                        <div className="flex gap-1">
-                            {getAllCardTypes().map(type => (
-                                <button
-                                    key={type.value}
-                                    onClick={() => {
-                                        setFilterTypes(prev => 
-                                            prev.includes(type.value) 
-                                                ? prev.filter(t => t !== type.value)
-                                                : [...prev, type.value]
-                                        );
-                                    }}
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all flex items-center gap-1 ${
-                                        filterTypes.includes(type.value)
+                        {/* Type Filter */}
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Type:</span>
+                            <div className="flex gap-1">
+                                {getAllCardTypes().map(type => (
+                                    <button
+                                        key={type.value}
+                                        onClick={() => {
+                                            setFilterTypes(prev =>
+                                                prev.includes(type.value)
+                                                    ? prev.filter(t => t !== type.value)
+                                                    : [...prev, type.value]
+                                            );
+                                        }}
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all flex items-center gap-1 ${filterTypes.includes(type.value)
                                             ? 'bg-purple-500/30 text-purple-400 ring-1 ring-purple-500'
                                             : 'bg-gray-800 text-gray-500 hover:text-gray-300'
-                                    }`}
-                                    data-tooltip={type.label}
+                                            }`}
+                                        data-tooltip={type.label}
+                                    >
+                                        <rux-icon icon={type.icon} size="extra-small"></rux-icon>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Clear Filters */}
+                        {(filterTiers.length > 0 || filterTypes.length > 0) && (
+                            <>
+                                <div className="h-4 w-px bg-gray-700"></div>
+                                <button
+                                    onClick={() => {
+                                        setFilterTiers([]);
+                                        setFilterTypes([]);
+                                    }}
+                                    className="text-[10px] uppercase tracking-wider text-red-400 hover:text-red-300 font-bold"
                                 >
-                                    <rux-icon icon={type.icon} size="extra-small"></rux-icon>
+                                    Clear Filters
                                 </button>
-                            ))}
+                            </>
+                        )}
+
+                        {/* Results Count */}
+                        <div className="ml-auto text-[10px] text-gray-500 font-mono">
+                            Showing {filteredCards.length} of {cards.length}
                         </div>
                     </div>
+                )}
 
-                    {/* Clear Filters */}
-                    {(filterTiers.length > 0 || filterTypes.length > 0) && (
-                        <>
-                            <div className="h-4 w-px bg-gray-700"></div>
-                            <button
-                                onClick={() => {
-                                    setFilterTiers([]);
-                                    setFilterTypes([]);
-                                }}
-                                className="text-[10px] uppercase tracking-wider text-red-400 hover:text-red-300 font-bold"
-                            >
-                                Clear Filters
-                            </button>
-                        </>
-                    )}
-
-                    {/* Results Count */}
-                    <div className="ml-auto text-[10px] text-gray-500 font-mono">
-                        Showing {filteredCards.length} of {cards.length}
-                    </div>
-                </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto p-6">
-            <style>{`
+                <div className="flex-1 overflow-y-auto p-6">
+                    <style>{`
                 .card-grid {
                     display: grid;
                     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -2655,240 +2660,240 @@ const CardLibrary: React.FC = () => {
                 }
             `}</style>
 
-            <div className="w-full text-white h-full flex flex-col max-w-[1800px] mx-auto relative">
-                {error && (
-                    <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg flex items-center gap-3 text-red-300">
-                        <rux-icon icon="warning" size="small"></rux-icon>
-                        <span className="font-mono text-sm">{error}</span>
-                    </div>
-                )}
-
-                {loading && cards.length === 0 && (
-                    <div className="flex-1 overflow-hidden pb-10">
-                        {/* Loading status */}
-                        <div className="flex items-center justify-center gap-3 py-4">
-                            <rux-progress type="circular" className="w-4 h-4"></rux-progress>
-                            <span className="font-mono text-sm text-cyan-400 animate-pulse">INITIALIZING MEMORY MATRIX...</span>
-                        </div>
-                        {/* Skeleton Grid */}
-                        <div className="card-grid">
-                            {Array.from({ length: 12 }).map((_, i) => (
-                                <div 
-                                    key={i}
-                                    className="card-skeleton rounded-lg aspect-[3/4]"
-                                >
-                                    {/* Card shape placeholder */}
-                                    <div className="h-full flex flex-col">
-                                        <div className="flex-1 bg-gray-800/50"></div>
-                                        <div className="p-2 space-y-2">
-                                            <div className="h-2 bg-gray-700/50 rounded w-3/4"></div>
-                                            <div className="h-2 bg-gray-700/50 rounded w-1/2"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {!loading && cards.length === 0 && !error && (
-                    <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
-                        <rux-icon icon="sd-card-alert" size="large" className="opacity-20"></rux-icon>
-                        <div className="text-center">
-                            <div className="text-lg font-medium text-gray-300">Memory Core Empty</div>
-                            <div className="text-sm text-gray-500 mt-1">
-                                No cards detected. Generate artifacts in Chat to populate the library.
+                    <div className="w-full text-white h-full flex flex-col max-w-[1800px] mx-auto relative">
+                        {error && (
+                            <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg flex items-center gap-3 text-red-300">
+                                <rux-icon icon="warning" size="small"></rux-icon>
+                                <span className="font-mono text-sm">{error}</span>
                             </div>
-                        </div>
-                    </div>
-                )}
+                        )}
 
-                {/* Progressive Loading Grid (new) */}
-                {USE_PROGRESSIVE_LOADING && filteredCards.length > 0 && (
-                    <VirtualCardGrid
-                        cards={filteredCards}
-                        onCardClick={(card, e) => handleCardClick(card, e)}
-                        onCardDragStart={(e, card) => handleDragStart(e, card)}
-                        selectedCardId={selected?.cardId}
-                        className="flex-1 pb-10"
-                        renderCard={(card) => {
-                            const quality = calculateCardQuality(card);
-                            const isSetCard = card.cardType === 'set';
-                            const isMergedSet = card.cardType === 'merged-set';
-                            const containedCount = card.containedCardCount || card.containedCards?.length || 0;
-                            return (
-                                <CardContent 
-                                    card={card} 
-                                    quality={quality} 
-                                    isSetCard={isSetCard} 
-                                    isMergedSet={isMergedSet}
-                                    containedCount={containedCount}
-                                    renderThumbnail={renderThumbnail}
-                                    lineageMap={lineageMap}
-                                />
-                            );
-                        }}
-                    />
-                )}
-
-                {/* Legacy Grid (fallback when progressive loading disabled) */}
-                {!USE_PROGRESSIVE_LOADING && (
-                <div className="flex-1 overflow-y-auto custom-scrollbar pb-10 relative" ref={cardGridRef}>
-                    <div className="card-grid pb-32">
-                        {filteredCards.map((card) => {
-                            const quality = calculateCardQuality(card);
-                            const isSetCard = card.cardType === 'set';
-                            const isMergedSet = card.cardType === 'merged-set';
-                            const containedCount = card.containedCardCount || card.containedCards?.length || 0;
-                            
-                            // Set Cards get special styling
-                            const setCardClasses = isSetCard 
-                                ? 'border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.3)] ring-1 ring-amber-400/30' 
-                                : isMergedSet 
-                                    ? 'border-violet-500/60 shadow-[0_0_20px_rgba(139,92,246,0.3)] ring-1 ring-violet-400/30'
-                                    : '';
-                            
-                            return (
-                            <div
-                                key={card.cardId + card.createdAt}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, card)}
-                                onClick={(e) => handleCardClick(card, e)}
-                                className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${selected?.cardId === card.cardId ? 'card-selected' : ''} ${isSetCard || isMergedSet ? setCardClasses : `${quality.borderClass} ${quality.glowClass}`}`}
-                            >
-                                {/* Set Card Badge */}
-                                {isSetCard && (
-                                    <div 
-                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-amber-400/30 bg-gradient-to-r from-amber-900/80 via-amber-800/80 to-amber-900/80 text-amber-300"
-                                        data-tooltip={`Set Card • ${containedCount} cards`}
-                                        data-tooltip-pos="bottom"
-                                    >
-                                        <span>📦</span> SET CARD
-                                    </div>
-                                )}
-                                {/* Merged Set Badge */}
-                                {isMergedSet && (
-                                    <div 
-                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-violet-400/30 bg-gradient-to-r from-violet-900/80 via-violet-800/80 to-violet-900/80 text-violet-300"
-                                        data-tooltip="Merged Set"
-                                        data-tooltip-pos="bottom"
-                                    >
-                                        <span>🔮</span> MERGED SET
-                                    </div>
-                                )}
-                                {/* Standard Card Tier Badge (Quality Bar) */}
-                                {!isSetCard && !isMergedSet && (
-                                <div 
-                                    className={`absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-white/10 ${quality.badgeClass}`} 
-                                    data-tooltip={`${quality.tierLabel} • Score: ${quality.score}/13`}
-                                    data-tooltip-tier={quality.tier}
-                                    data-tooltip-pos="bottom"
-                                >
-                                    {quality.tierLabel}
+                        {loading && cards.length === 0 && (
+                            <div className="flex-1 overflow-hidden pb-10">
+                                {/* Loading status */}
+                                <div className="flex items-center justify-center gap-3 py-4">
+                                    <rux-progress type="circular" className="w-4 h-4"></rux-progress>
+                                    <span className="font-mono text-sm text-cyan-400 animate-pulse">INITIALIZING MEMORY MATRIX...</span>
                                 </div>
-                                )}
-                                {/* Contained Cards Count (Set Cards) */}
-                                {isSetCard && containedCount > 0 && (
-                                    <div 
-                                        className="absolute top-7 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold"
-                                        data-tooltip={`Contains ${containedCount} card${containedCount > 1 ? 's' : ''}`}
-                                    >
-                                        <rux-icon icon="folder" size="extra-small"></rux-icon>
-                                        {containedCount}
-                                    </div>
-                                )}
-                                {/* Lineage Badges - Ancestor (⬆) and Descendant (⬇) counts */}
-                                {!isSetCard && !isMergedSet && (() => {
-                                    const lineage = lineageMap.get(card.cardId);
-                                    if (!lineage) return null;
-                                    return <LineageBadgePair lineage={lineage} layout="corners" size="small" />;
-                                })()}
-                                
-                                {/* In-Hand Indicator */}
-                                {isInHand(card.cardId) && (
-                                    <div 
-                                        className="absolute bottom-2 left-2 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-500/30 border border-cyan-500/50 text-cyan-400"
-                                        data-tooltip="In your Hand"
-                                    >
-                                        <rux-icon icon="style" size="extra-small"></rux-icon>
-                                    </div>
-                                )}
-                                {renderThumbnail(card)}
-                                <div className="p-4 flex flex-col gap-1">
-                                    <div className="font-bold text-sm text-gray-200 truncate group-hover:text-purple-300 transition-colors">
-                                        {card.name || 'Untitled Card'}
-                                    </div>
-                                    <div className="text-[10px] font-mono text-gray-500 truncate">
-                                        {card.cardId}
-                                    </div>
-                                    <div className="mt-2 flex items-center justify-between">
-                                        <span className="text-[10px] uppercase tracking-wider text-gray-600 font-bold">
-                                            {card.provider || 'SYSTEM'}
-                                        </span>
-                                        <div className="flex items-center gap-2">
-                                            {/* Affix Badges */}
-                                            {(() => {
-                                                const summaryCount = card.cardRecord?.summaries?.length || 0;
-                                                const keyTermCount = card.cardRecord?.keyTerms?.length || 0;
-                                                const wikiCount = card.cardRecord?.wormhole?.wikiEntries?.length || 0;
-                                                const transcriptCount = card.cardRecord?.transcripts?.length || 0;
+                                {/* Skeleton Grid */}
+                                <div className="card-grid">
+                                    {Array.from({ length: 12 }).map((_, i) => (
+                                        <div
+                                            key={i}
+                                            className="card-skeleton rounded-lg aspect-[3/4]"
+                                        >
+                                            {/* Card shape placeholder */}
+                                            <div className="h-full flex flex-col">
+                                                <div className="flex-1 bg-gray-800/50"></div>
+                                                <div className="p-2 space-y-2">
+                                                    <div className="h-2 bg-gray-700/50 rounded w-3/4"></div>
+                                                    <div className="h-2 bg-gray-700/50 rounded w-1/2"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
-                                                if (summaryCount === 0 && keyTermCount === 0 && wikiCount === 0 && transcriptCount === 0 && !card.derivedGif && card.subType !== 'sprite-sheet') return null;
+                        {!loading && cards.length === 0 && !error && (
+                            <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
+                                <rux-icon icon="sd-card-alert" size="large" className="opacity-20"></rux-icon>
+                                <div className="text-center">
+                                    <div className="text-lg font-medium text-gray-300">Memory Core Empty</div>
+                                    <div className="text-sm text-gray-500 mt-1">
+                                        No cards detected. Generate artifacts in Chat to populate the library.
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
-                                                return (
-                                                    <div className="flex items-center gap-2 mr-2 border-r border-gray-700 pr-2">
-                                                        {(card.derivedGif || card.subType === 'sprite-sheet') && (
-                                                            <div className="flex items-center gap-1 text-pink-400" data-tooltip="Animated Loop">
-                                                                <rux-icon icon="animation" size="extra-small"></rux-icon>
-                                                            </div>
-                                                        )}
-                                                        {transcriptCount > 0 && (
-                                                            <div className="flex items-center gap-1 text-yellow-400" data-tooltip={`${transcriptCount} Transcript${transcriptCount > 1 ? 's' : ''}`}>
-                                                                <rux-icon icon="mic" size="extra-small"></rux-icon>
-                                                            </div>
-                                                        )}
-                                                        {summaryCount > 0 && (
-                                                            <div className="flex items-center gap-1 text-cyan-400" data-tooltip={`${summaryCount} Summar${summaryCount > 1 ? 'ies' : 'y'}`}>
-                                                                <rux-icon icon="subject" size="extra-small"></rux-icon>
-                                                            </div>
-                                                        )}
-                                                        {keyTermCount > 0 && (
-                                                            <div className="flex items-center gap-1 text-purple-400" data-tooltip={`${keyTermCount} Key Term Set${keyTermCount > 1 ? 's' : ''}`}>
-                                                                <rux-icon icon="local-offer" size="extra-small"></rux-icon>
-                                                            </div>
-                                                        )}
-                                                        {wikiCount > 0 && (
-                                                            <div className="flex items-center gap-1 text-emerald-400" data-tooltip={`${wikiCount} Wiki Entr${wikiCount > 1 ? 'ies' : 'y'}`}>
-                                                                <rux-icon icon="public" size="extra-small"></rux-icon>
-                                                            </div>
-                                                        )}
+                        {/* Progressive Loading Grid (new) */}
+                        {USE_PROGRESSIVE_LOADING && filteredCards.length > 0 && (
+                            <VirtualCardGrid
+                                cards={filteredCards}
+                                onCardClick={(card, e) => handleCardClick(card, e)}
+                                onCardDragStart={(e, card) => handleDragStart(e, card)}
+                                selectedCardId={selected?.cardId}
+                                className="flex-1 pb-10"
+                                renderCard={(card) => {
+                                    const quality = calculateCardQuality(card);
+                                    const isSetCard = card.cardType === 'set';
+                                    const isMergedSet = card.cardType === 'merged-set';
+                                    const containedCount = card.containedCardCount || card.containedCards?.length || 0;
+                                    return (
+                                        <CardContent
+                                            card={card}
+                                            quality={quality}
+                                            isSetCard={isSetCard}
+                                            isMergedSet={isMergedSet}
+                                            containedCount={containedCount}
+                                            renderThumbnail={renderThumbnail}
+                                            lineageMap={lineageMap}
+                                        />
+                                    );
+                                }}
+                            />
+                        )}
+
+                        {/* Legacy Grid (fallback when progressive loading disabled) */}
+                        {!USE_PROGRESSIVE_LOADING && (
+                            <div className="flex-1 overflow-y-auto custom-scrollbar pb-10 relative" ref={cardGridRef}>
+                                <div className="card-grid pb-32">
+                                    {filteredCards.map((card) => {
+                                        const quality = calculateCardQuality(card);
+                                        const isSetCard = card.cardType === 'set';
+                                        const isMergedSet = card.cardType === 'merged-set';
+                                        const containedCount = card.containedCardCount || card.containedCards?.length || 0;
+
+                                        // Set Cards get special styling
+                                        const setCardClasses = isSetCard
+                                            ? 'border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.3)] ring-1 ring-amber-400/30'
+                                            : isMergedSet
+                                                ? 'border-violet-500/60 shadow-[0_0_20px_rgba(139,92,246,0.3)] ring-1 ring-violet-400/30'
+                                                : '';
+
+                                        return (
+                                            <div
+                                                key={card.cardId + card.createdAt}
+                                                draggable
+                                                onDragStart={(e) => handleDragStart(e, card)}
+                                                onClick={(e) => handleCardClick(card, e)}
+                                                className={`group relative bg-gray-900/40 border-2 rounded-lg cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all duration-300 flex flex-col overflow-hidden ${selected?.cardId === card.cardId ? 'card-selected' : ''} ${isSetCard || isMergedSet ? setCardClasses : `${quality.borderClass} ${quality.glowClass}`}`}
+                                            >
+                                                {/* Set Card Badge */}
+                                                {isSetCard && (
+                                                    <div
+                                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-amber-400/30 bg-gradient-to-r from-amber-900/80 via-amber-800/80 to-amber-900/80 text-amber-300"
+                                                        data-tooltip={`Set Card • ${containedCount} cards`}
+                                                        data-tooltip-pos="bottom"
+                                                    >
+                                                        <span>📦</span> SET CARD
                                                     </div>
-                                                );
-                                            })()}
-                                            {card.mediaKind && (
-                                                <rux-icon 
-                                                    icon={
-                                                        card.mediaKind === 'video' ? 'videocam' : 
-                                                        card.mediaKind === 'audio' ? 'audiotrack' : 
-                                                        card.mediaKind === 'message' ? 'chat' : 
-                                                        card.mediaKind === 'pet' ? 'pets' : 'image'
-                                                    } 
-                                                    size="extra-small" 
-                                                    className={card.mediaKind === 'message' ? 'text-purple-500' : 'text-gray-600'}
-                                                ></rux-icon>
-                                            )}
-                                        </div>
-                                    </div>
+                                                )}
+                                                {/* Merged Set Badge */}
+                                                {isMergedSet && (
+                                                    <div
+                                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-violet-400/30 bg-gradient-to-r from-violet-900/80 via-violet-800/80 to-violet-900/80 text-violet-300"
+                                                        data-tooltip="Merged Set"
+                                                        data-tooltip-pos="bottom"
+                                                    >
+                                                        <span>🔮</span> MERGED SET
+                                                    </div>
+                                                )}
+                                                {/* Standard Card Tier Badge (Quality Bar) */}
+                                                {!isSetCard && !isMergedSet && (
+                                                    <div
+                                                        className={`absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-white/10 ${quality.badgeClass}`}
+                                                        data-tooltip={`${quality.tierLabel} • Score: ${quality.score}/13`}
+                                                        data-tooltip-tier={quality.tier}
+                                                        data-tooltip-pos="bottom"
+                                                    >
+                                                        {quality.tierLabel}
+                                                    </div>
+                                                )}
+                                                {/* Contained Cards Count (Set Cards) */}
+                                                {isSetCard && containedCount > 0 && (
+                                                    <div
+                                                        className="absolute top-7 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold"
+                                                        data-tooltip={`Contains ${containedCount} card${containedCount > 1 ? 's' : ''}`}
+                                                    >
+                                                        <rux-icon icon="folder" size="extra-small"></rux-icon>
+                                                        {containedCount}
+                                                    </div>
+                                                )}
+                                                {/* Lineage Badges - Ancestor (⬆) and Descendant (⬇) counts */}
+                                                {!isSetCard && !isMergedSet && (() => {
+                                                    const lineage = lineageMap.get(card.cardId);
+                                                    if (!lineage) return null;
+                                                    return <LineageBadgePair lineage={lineage} layout="corners" size="small" />;
+                                                })()}
+
+                                                {/* In-Hand Indicator */}
+                                                {isInHand(card.cardId) && (
+                                                    <div
+                                                        className="absolute bottom-2 left-2 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-500/30 border border-cyan-500/50 text-cyan-400"
+                                                        data-tooltip="In your Hand"
+                                                    >
+                                                        <rux-icon icon="style" size="extra-small"></rux-icon>
+                                                    </div>
+                                                )}
+                                                {renderThumbnail(card)}
+                                                <div className="p-4 flex flex-col gap-1">
+                                                    <div className="font-bold text-sm text-gray-200 truncate group-hover:text-purple-300 transition-colors">
+                                                        {card.name || 'Untitled Card'}
+                                                    </div>
+                                                    <div className="text-[10px] font-mono text-gray-500 truncate">
+                                                        {card.cardId}
+                                                    </div>
+                                                    <div className="mt-2 flex items-center justify-between">
+                                                        <span className="text-[10px] uppercase tracking-wider text-gray-600 font-bold">
+                                                            {card.provider || 'SYSTEM'}
+                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            {/* Affix Badges */}
+                                                            {(() => {
+                                                                const summaryCount = card.cardRecord?.summaries?.length || 0;
+                                                                const keyTermCount = card.cardRecord?.keyTerms?.length || 0;
+                                                                const wikiCount = card.cardRecord?.wormhole?.wikiEntries?.length || 0;
+                                                                const transcriptCount = card.cardRecord?.transcripts?.length || 0;
+
+                                                                if (summaryCount === 0 && keyTermCount === 0 && wikiCount === 0 && transcriptCount === 0 && !card.derivedGif && card.subType !== 'sprite-sheet') return null;
+
+                                                                return (
+                                                                    <div className="flex items-center gap-2 mr-2 border-r border-gray-700 pr-2">
+                                                                        {(card.derivedGif || card.subType === 'sprite-sheet') && (
+                                                                            <div className="flex items-center gap-1 text-pink-400" data-tooltip="Animated Loop">
+                                                                                <rux-icon icon="animation" size="extra-small"></rux-icon>
+                                                                            </div>
+                                                                        )}
+                                                                        {transcriptCount > 0 && (
+                                                                            <div className="flex items-center gap-1 text-yellow-400" data-tooltip={`${transcriptCount} Transcript${transcriptCount > 1 ? 's' : ''}`}>
+                                                                                <rux-icon icon="mic" size="extra-small"></rux-icon>
+                                                                            </div>
+                                                                        )}
+                                                                        {summaryCount > 0 && (
+                                                                            <div className="flex items-center gap-1 text-cyan-400" data-tooltip={`${summaryCount} Summar${summaryCount > 1 ? 'ies' : 'y'}`}>
+                                                                                <rux-icon icon="subject" size="extra-small"></rux-icon>
+                                                                            </div>
+                                                                        )}
+                                                                        {keyTermCount > 0 && (
+                                                                            <div className="flex items-center gap-1 text-purple-400" data-tooltip={`${keyTermCount} Key Term Set${keyTermCount > 1 ? 's' : ''}`}>
+                                                                                <rux-icon icon="local-offer" size="extra-small"></rux-icon>
+                                                                            </div>
+                                                                        )}
+                                                                        {wikiCount > 0 && (
+                                                                            <div className="flex items-center gap-1 text-emerald-400" data-tooltip={`${wikiCount} Wiki Entr${wikiCount > 1 ? 'ies' : 'y'}`}>
+                                                                                <rux-icon icon="public" size="extra-small"></rux-icon>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                            {card.mediaKind && (
+                                                                <rux-icon
+                                                                    icon={
+                                                                        card.mediaKind === 'video' ? 'videocam' :
+                                                                            card.mediaKind === 'audio' ? 'audiotrack' :
+                                                                                card.mediaKind === 'message' ? 'chat' :
+                                                                                    card.mediaKind === 'pet' ? 'pets' : 'image'
+                                                                    }
+                                                                    size="extra-small"
+                                                                    className={card.mediaKind === 'message' ? 'text-purple-500' : 'text-gray-600'}
+                                                                ></rux-icon>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
-                        );
-                        })}
-                    </div>
-                </div>
-                )}
+                        )}
 
-                {/* Drop Zone */}
-                {/* <div
+                        {/* Drop Zone */}
+                        {/* <div
                     className={`absolute bottom-8 right-8 w-64 h-48 rounded-2xl border-2 transition-all duration-300 flex flex-col items-center justify-center gap-2 backdrop-blur-md z-40 ${isOverDropZone
                         ? 'border-cyan-400 bg-cyan-900/40 shadow-[0_0_30px_rgba(34,211,238,0.4)] scale-105 drop-zone-active'
                         : draggedCard
@@ -2905,10 +2910,10 @@ const CardLibrary: React.FC = () => {
                     </span>
                 </div> */}
 
-                {/* Redesigned Card Inspector - The Neural Artifact Inspector */}
-                {selected && !activeWorkspaceCard && (
-                    <div className="absolute inset-0 z-50 flex justify-end animate-in slide-in-from-right duration-300 backdrop-blur-sm bg-black/20">
-                        <style>{`
+                        {/* Redesigned Card Inspector - The Neural Artifact Inspector */}
+                        {selected && !activeWorkspaceCard && (
+                            <div className="absolute inset-0 z-50 flex justify-end animate-in slide-in-from-right duration-300 backdrop-blur-sm bg-black/20">
+                                <style>{`
                             .scanline-bg {
                                 background: linear-gradient(to bottom, rgba(15, 23, 42, 0) 50%, rgba(0, 240, 255, 0.02) 50%);
                                 background-size: 100% 4px;
@@ -2948,1530 +2953,1622 @@ const CardLibrary: React.FC = () => {
                                 letter-spacing: 0.05em;
                             }
                         `}</style>
-                        
-                        <div className="w-full max-w-5xl h-full bg-[#050510] border-l border-cyan-900/50 flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.8)] relative overflow-hidden">
-                            {/* Background Elements */}
-                            <div className="absolute inset-0 scanline-bg pointer-events-none opacity-50"></div>
-                            
 
-                            {/* Header */}
-                            <div className="h-16 bg-gray-900/20 border-b border-cyan-900/30 p-4 flex items-center justify-between">
-                                <span className="text-cyan-400 font-bold tracking-widest">ARTIFACT ANALYSIS</span>
-                                <button
-                                    onClick={() => { setSelected(null); setShowLightbox(false); }}
-                                    className="p-2 text-cyan-600 hover:text-white"
-                                    title="Close Inspector"
-                                    aria-label="Close Inspector"
-                                >
-                                    <rux-icon icon="close" size="small"></rux-icon>
-                                </button>
-                            </div>
+                                <div className="w-full max-w-5xl h-full bg-[#050510] border-l border-cyan-900/50 flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.8)] relative overflow-hidden">
+                                    {/* Background Elements */}
+                                    <div className="absolute inset-0 scanline-bg pointer-events-none opacity-50"></div>
 
-                            {/* Content Grid */}
-                            <div className="flex-1 grid grid-cols-12 overflow-hidden">
-                                {/* Left Column: Visuals & Pipeline */}
-                                <div className="col-span-5 bg-gray-900/30 border-r border-cyan-900/30 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar relative">
-                                    {/* Holo Projector */}
-                                    <div className="relative group aspect-[3/4] bg-black/50 border border-cyan-900/50 rounded-lg overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-                                        <div className="absolute inset-0 z-0">
-                                            {renderThumbnail(selected, true)}
-                                        </div>
-                                        
-                                        {/* Overlays */}
-                                        <div className="absolute inset-0 scanline-sweep opacity-30"></div>
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div>
-                                        
-                                        {/* Holo Corners */}
-                                        <div className="holo-corner holo-tl"></div>
-                                        <div className="holo-corner holo-tr"></div>
-                                        <div className="holo-corner holo-bl"></div>
-                                        <div className="holo-corner holo-br"></div>
 
-                                        {/* Video Overlay */}
-                                        {inspectorVideoPath && (
-                                            <video 
-                                                src={inspectorVideoPath}
-                                                className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10"
-                                                muted 
-                                                loop 
-                                                playsInline
-                                                onMouseEnter={(e) => e.currentTarget.play()}
-                                                onMouseLeave={(e) => e.currentTarget.pause()}
-                                            />
-                                        )}
-
-                                        {/* Reveal Animation */}
-                                        {inspectorShowReveal && (
-                                            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-                                                <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
-                                                <rux-icon icon="movie" size="large" className="text-cyan-400 mb-2 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)] animate-bounce"></rux-icon>
-                                                <div className="text-xl font-bold text-white tracking-widest drop-shadow-lg animate-pulse">VIDEO UNLOCKED</div>
-                                            </div>
-                                        )}
+                                    {/* Header */}
+                                    <div className="h-16 bg-gray-900/20 border-b border-cyan-900/30 p-4 flex items-center justify-between">
+                                        <span className="text-cyan-400 font-bold tracking-widest">ARTIFACT ANALYSIS</span>
+                                        <button
+                                            onClick={() => { setSelected(null); setShowLightbox(false); }}
+                                            className="p-2 text-cyan-600 hover:text-white"
+                                            title="Close Inspector"
+                                            aria-label="Close Inspector"
+                                        >
+                                            <rux-icon icon="close" size="small"></rux-icon>
+                                        </button>
                                     </div>
 
-                                    {/* Evolution Pipeline */}
-                                    {(() => {
-                                        const rec = selected.cardRecord || {};
-                                        const hasImage = !!rec.mediaPrompts?.generated_image_local;
-                                        const state = rec.state || 'blob';
-                                        
-                                        return (
-                                            <div className="p-4 bg-gray-900/50 border border-cyan-900/30 rounded-lg">
-                                                <div className="text-[10px] text-cyan-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                                    <rux-icon icon="linear-scale" size="extra-small"></rux-icon>
-                                                    Evolution Pipeline
+                                    {/* Content Grid */}
+                                    <div className="flex-1 grid grid-cols-12 overflow-hidden">
+                                        {/* Left Column: Visuals & Pipeline */}
+                                        <div className="col-span-5 bg-gray-900/30 border-r border-cyan-900/30 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar relative">
+                                            {/* Holo Projector */}
+                                            <div className="relative group aspect-[3/4] bg-black/50 border border-cyan-900/50 rounded-lg overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+                                                <div className="absolute inset-0 z-0">
+                                                    {renderThumbnail(selected, true)}
                                                 </div>
-                                                
-                                                <div className="flex items-center justify-between relative">
-                                                    {/* Connecting Line */}
-                                                    <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-gray-800 -z-10"></div>
-                                                    <div className={`absolute top-1/2 left-0 h-0.5 bg-cyan-500 transition-all duration-500 -z-10`} style={{ width: hasImage ? '100%' : '50%' }}></div>
 
-                                                    {/* Nodes */}
-                                                    {[
-                                                        { label: 'BLOB', active: true },
-                                                        { label: 'SORT', active: state !== 'blob' },
-                                                        { label: 'VISUAL', active: hasImage },
-                                                        { label: 'LOOP', active: !!inspectorVideoPath || (rec.children || []).some((c: any) => c.type === 'loop-video') }
-                                                    ].map((step, i) => (
-                                                        <div key={i} className="flex flex-col items-center gap-2 group/node">
-                                                            <div className={`w-3 h-3 rounded-full border-2 transition-all duration-300 ${
-                                                                step.active ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)]' : 'bg-gray-900 border-gray-700'
-                                                            }`}></div>
-                                                            <span className={`text-[9px] font-mono transition-colors ${step.active ? 'text-cyan-300' : 'text-gray-600'}`}>{step.label}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        );
-                                    })()}
+                                                {/* Overlays */}
+                                                <div className="absolute inset-0 scanline-sweep opacity-30"></div>
+                                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div>
 
-                                    {/* Video Action */}
-                                    {(() => {
-                                        const rec = selected.cardRecord || {};
-                                        // Update: Allow loops for cards with ANY valid image source (including thumbnail)
-                                        const hasImage = !!(rec.mediaPrompts?.generated_image_local || selected.mediaLocalPath || selected.thumbnail);
-                                        if (hasImage) {
-                                            return (
-                                                <div className="flex flex-col gap-2">
-                                                <button
-                                                    onClick={handleHellWeekVideoGenerate}
-                                                    disabled={hwVideoGenStatus === 'generating'}
-                                                    className={`w-full py-4 relative overflow-hidden group border transition-all duration-300 ${
-                                                        hwVideoGenStatus === 'generating' ? 'border-purple-500/50 bg-purple-900/20' :
-                                                        hwVideoGenStatus === 'error' ? 'border-red-500/50 bg-red-900/20' :
-                                                        'border-cyan-500/50 bg-cyan-900/10 hover:bg-cyan-900/30 hover:border-cyan-400'
-                                                    }`}
-                                                >
-                                                    <div className="absolute inset-0 bg-scanline-bg opacity-20"></div>
-                                                    <div className="flex items-center justify-center gap-3 relative z-10">
-                                                        {hwVideoGenStatus === 'generating' ? (
-                                                            <>
-                                                                <rux-icon icon="autorenew" size="small" className="animate-spin text-purple-400"></rux-icon>
-                                                                <span className="text-purple-300 font-mono text-xs uppercase tracking-widest">Compiling Loop...</span>
-                                                            </>
-                                                        ) : hwVideoGenStatus === 'error' ? (
-                                                            <>
-                                                                <rux-icon icon="error" size="small" className="text-red-400"></rux-icon>
-                                                                <span className="text-red-300 font-mono text-xs uppercase tracking-widest">Generation Failed</span>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <rux-icon icon="movie" size="small" className="text-cyan-400 group-hover:animate-pulse"></rux-icon>
-                                                                <span className="text-cyan-300 font-mono text-xs uppercase tracking-widest">Initialize Loop Sequence</span>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </button>
-                                                {hwVideoGenStatus === 'error' && (
-                                                    <div className="text-[10px] text-red-400 font-mono px-2">
-                                                        Check console for details.
-                                                    </div>
+                                                {/* Holo Corners */}
+                                                <div className="holo-corner holo-tl"></div>
+                                                <div className="holo-corner holo-tr"></div>
+                                                <div className="holo-corner holo-bl"></div>
+                                                <div className="holo-corner holo-br"></div>
+
+                                                {/* Video Overlay */}
+                                                {inspectorVideoPath && (
+                                                    <video
+                                                        src={inspectorVideoPath}
+                                                        className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10"
+                                                        muted
+                                                        loop
+                                                        playsInline
+                                                        onMouseEnter={(e) => e.currentTarget.play()}
+                                                        onMouseLeave={(e) => e.currentTarget.pause()}
+                                                    />
                                                 )}
-                                                </div>
-                                            );
-                                        }
-                                        return null;
-                                    })()}
-                                </div>
 
-                                {/* Right Column: Data Matrix */}
-                                <div className="col-span-7 p-8 overflow-y-auto custom-scrollbar flex flex-col gap-8">
-                                    {/* Name & ID Block */}
-                                    <div className="flex flex-col gap-2">
-                                        <div className="text-[10px] text-gray-500 font-mono uppercase tracking-widest">Subject Identifier</div>
-                                        {isEditingName ? (
-                                            <div className="flex gap-2">
-                                                <rux-input
-                                                    value={editingName}
-                                                    onInput={(e: any) => setEditingName(e.target.value)}
-                                                    className="flex-1"
-                                                ></rux-input>
-                                                <rux-button icon="save" onClick={handleSaveName}></rux-button>
-                                            </div>
-                                        ) : (
-                                            <div className="group flex items-center gap-4">
-                                                <h1 className="text-3xl font-bold text-white tracking-tight drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]">{selected.name || 'UNKNOWN ENTITY'}</h1>
-                                                <button 
-                                                    onClick={() => setIsEditingName(true)} 
-                                                    className="opacity-0 group-hover:opacity-100 text-cyan-500 hover:text-cyan-300 transition-opacity"
-                                                    title="Edit Name"
-                                                    aria-label="Edit Name"
-                                                >
-                                                    <rux-icon icon="edit" size="small"></rux-icon>
-                                                </button>
-                                            </div>
-                                        )}
-                                        <div className="flex items-center gap-4 text-xs font-mono text-gray-500">
-                                            <span>ID: {selected.cardId.substring(0, 12)}...</span>
-                                            <span className="text-cyan-900">|</span>
-                                            <span>{new Date(selected.createdAt).toLocaleDateString()}</span>
-                                            <span className="text-cyan-900">|</span>
-                                            <span className="text-cyan-500">{selected.mediaKind || 'DATA'}</span>
-                                        </div>
-                                    </div>
-
-                                    {/* Stats Matrix (Hell Week Only) */}
-                                    {isHellWeekCard(selected) && (
-                                        <div>
-                                            <div className="bg-gray-900/30 border border-cyan-900/30 p-6 relative overflow-hidden">
-                                            {/* Corner Accents */}
-                                            <div className="absolute top-0 right-0 w-4 h-4 border-t border-r border-cyan-500/30"></div>
-                                            <div className="absolute bottom-0 left-0 w-4 h-4 border-b border-l border-cyan-500/30"></div>
-                                            
-
-                                            <div className="text-[10px] text-cyan-500 font-mono uppercase tracking-widest mb-4 flex items-center gap-2">
-                                                <rux-icon icon="bar-chart" size="extra-small"></rux-icon>
-                                                Power Matrix
-                                            </div>
-                                            
-
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const stats = generateHellWeekStats(rec.name || selected.name);
-                                                return (
-                                                    <div className="space-y-4">
-                                                        {[
-                                                            { label: 'PWR', fullLabel: 'POWER', value: stats.power, color: 'text-red-400' },
-                                                            { label: 'WIS', fullLabel: 'WISDOM', value: stats.wisdom, color: 'text-blue-400' },
-                                                            { label: 'SPD', fullLabel: 'SPEED', value: stats.speed, color: 'text-green-400' },
-                                                            { label: 'MAG', fullLabel: 'MAGIC', value: stats.magic, color: 'text-purple-400' },
-                                                        ].map(stat => (
-                                                            <div key={stat.label} className="group/stat">
-                                                                <div className="flex justify-between text-[10px] font-mono mb-1 text-gray-500">
-                                                                    <span>{stat.fullLabel}</span>
-                                                                    <span className={stat.color}>{stat.value}/100</span>
-                                                                </div>
-                                                                <div className="h-2 bg-gray-800/50 flex gap-0.5 overflow-hidden">
-                                                                    {[...Array(20)].map((_, i) => (
-                                                                        <div 
-                                                                            key={i} 
-                                                                            className={`flex-1 transition-all duration-300 ${
-                                                                                (i / 20) * 100 < stat.value 
-                                                                                    ? `${stat.color.replace('text', 'bg')} opacity-80 group-hover/stat:opacity-100 shadow-[0_0_5px_currentColor]` 
-                                                                                    : 'bg-transparent'
-                                                                            }`}
-                                                                        ></div>
-                                                                    ))}
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </div>
-
-                                        {/* ═══════════════════════════════════════════════════════════════
-                                            SKILLS MATRIX - RPG-Style Skill Cards with Neon Effects
-                                            ═══════════════════════════════════════════════════════════════ */}
-                                        {(() => {
-                                            const rec = selected.cardRecord || {};
-                                            const cardData = rec.cardData || {};
-                                            // Check multiple possible locations for skills data
-                                            const skills = cardData.skills || rec.skills || [];
-                                            if (skills.length === 0) return null;
-
-                                            return (
-                                                <div className="bg-gray-900/40 border border-cyan-900/30 p-5 relative overflow-hidden">
-                                                    {/* Animated Background Grid */}
-                                                    <div className="absolute inset-0 opacity-5">
-                                                        <div className="absolute inset-0" style={{
-                                                            backgroundImage: `linear-gradient(rgba(0,255,255,0.1) 1px, transparent 1px),
-                                                                             linear-gradient(90deg, rgba(0,255,255,0.1) 1px, transparent 1px)`,
-                                                            backgroundSize: '20px 20px',
-                                                            animation: 'pulse 4s ease-in-out infinite'
-                                                        }}></div>
-                                                    </div>
-                                                    
-                                                    {/* Corner Decorations */}
-                                                    <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-cyan-500/50"></div>
-                                                    <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-cyan-500/50"></div>
-                                                    <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-cyan-500/50"></div>
-                                                    <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-cyan-500/50"></div>
-
-                                                    {/* Section Header */}
-                                                    <div className="relative flex items-center gap-3 mb-5">
-                                                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
-                                                            <rux-icon icon="flash-on" size="small" className="text-white"></rux-icon>
-                                                        </div>
-                                                        <div>
-                                                            <h3 className="text-sm font-bold text-white uppercase tracking-wider">Combat Skills</h3>
-                                                            <p className="text-[10px] text-gray-500 font-mono">{skills.length} ABILITIES UNLOCKED</p>
-                                                        </div>
-                                                        <div className="ml-auto flex gap-2">
-                                                            <span className="px-2 py-0.5 text-[9px] font-bold bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/30">
-                                                                {skills.filter((s: any) => s.type === 'Passive').length} PASSIVE
-                                                            </span>
-                                                            <span className="px-2 py-0.5 text-[9px] font-bold bg-orange-500/20 text-orange-400 rounded border border-orange-500/30">
-                                                                {skills.filter((s: any) => s.type === 'Active').length} ACTIVE
-                                                            </span>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Skills Grid */}
-                                                    <div className="relative space-y-3">
-                                                        {skills.map((skill: any, idx: number) => {
-                                                            const isActive = skill.type === 'Active';
-                                                            const skillColor = isActive 
-                                                                ? { border: 'border-orange-500/40', bg: 'bg-orange-500', text: 'text-orange-400', glow: 'shadow-orange-500/30', accent: 'from-orange-600 to-amber-500' }
-                                                                : { border: 'border-emerald-500/40', bg: 'bg-emerald-500', text: 'text-emerald-400', glow: 'shadow-emerald-500/30', accent: 'from-emerald-600 to-teal-500' };
-                                                            
-                                                            return (
-                                                                <div 
-                                                                    key={idx}
-                                                                    className={`group relative bg-gray-900/60 rounded-lg border ${skillColor.border} overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:${skillColor.glow} hover:shadow-lg cursor-pointer`}
-                                                                >
-                                                                    {/* Skill Glow Effect on Hover */}
-                                                                    <div className={`absolute inset-0 bg-gradient-to-r ${skillColor.accent} opacity-0 group-hover:opacity-10 transition-opacity duration-300`}></div>
-                                                                    
-                                                                    {/* Scanning Line Animation */}
-                                                                    <div className="absolute inset-0 overflow-hidden opacity-0 group-hover:opacity-100">
-                                                                        <div className={`absolute top-0 left-0 w-full h-0.5 ${skillColor.bg} animate-[scan_2s_ease-in-out_infinite]`} 
-                                                                             style={{ animation: 'scan 2s ease-in-out infinite' }}></div>
-                                                                    </div>
-
-                                                                    <div className="relative p-4 flex gap-4">
-                                                                        {/* Skill Icon/Badge */}
-                                                                        <div className="flex-shrink-0">
-                                                                            <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${skillColor.accent} flex items-center justify-center shadow-lg ${skillColor.glow} relative overflow-hidden`}>
-                                                                                {/* Inner glow */}
-                                                                                <div className="absolute inset-0 bg-white/10 rounded-lg"></div>
-                                                                                {/* Icon */}
-                                                                                <span className="text-white text-lg font-black relative z-10">
-                                                                                    {isActive ? '⚔' : '🛡'}
-                                                                                </span>
-                                                                                {/* Level indicator */}
-                                                                                <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 bg-gray-900 rounded-full border-2 border-gray-800 flex items-center justify-center">
-                                                                                    <span className="text-[8px] font-bold text-white">{idx + 1}</span>
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        {/* Skill Info */}
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <div className="flex items-center gap-2 mb-1.5">
-                                                                                <h4 className={`font-bold text-sm ${skillColor.text} truncate`}>{skill.name}</h4>
-                                                                                <span className={`flex-shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase rounded ${
-                                                                                    isActive 
-                                                                                        ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' 
-                                                                                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                                                                }`}>
-                                                                                    {skill.type || 'PASSIVE'}
-                                                                                </span>
-                                                                            </div>
-                                                                            <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">{skill.description}</p>
-                                                                            
-                                                                            {/* Skill Stats Bar */}
-                                                                            <div className="mt-2 flex items-center gap-2">
-                                                                                <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
-                                                                                    <div 
-                                                                                        className={`h-full ${skillColor.bg} rounded-full transition-all duration-500 group-hover:animate-pulse`}
-                                                                                        style={{ width: `${Math.min(100, 40 + (skill.name?.length || 5) * 5)}%` }}
-                                                                                    ></div>
-                                                                                </div>
-                                                                                <span className="text-[9px] font-mono text-gray-500">
-                                                                                    PWR {Math.floor(40 + (skill.name?.length || 5) * 5)}
-                                                                                </span>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        {/* Activation Indicator */}
-                                                                        <div className="flex-shrink-0 flex flex-col items-center justify-center gap-1">
-                                                                            <div className={`w-2 h-2 rounded-full ${skillColor.bg} animate-pulse shadow-lg ${skillColor.glow}`}></div>
-                                                                            <span className="text-[8px] font-mono text-gray-600 uppercase">ready</span>
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Bottom Energy Bar */}
-                                                                    <div className="h-0.5 w-full bg-gray-800">
-                                                                        <div className={`h-full ${skillColor.bg} opacity-50 group-hover:opacity-100 transition-opacity`} style={{ width: '100%' }}></div>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-
-                                                    {/* Footer Stats */}
-                                                    <div className="relative mt-4 pt-3 border-t border-gray-800/50 flex justify-between text-[9px] font-mono text-gray-600">
-                                                        <span>SKILL TREE v2.1</span>
-                                                        <span>TOTAL PWR: {skills.reduce((acc: number, s: any) => acc + Math.floor(40 + (s.name?.length || 5) * 5), 0)}</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* Flavor Text */}
-                                        {(() => {
-                                            const rec = selected.cardRecord || {};
-                                            const flavorText = rec.flavorText || rec.lore;
-                                            
-                                            return (
-                                                <>
-                                                    <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-violet-400">
-                                                                <rux-icon icon="format-quote" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Flavor Text</h3>
-                                                            </div>
-                                                            <div className="bg-violet-900/10 rounded-lg p-4 border border-violet-500/20">
-                                                                <p className="text-sm text-gray-400 leading-relaxed italic font-light">"{flavorText}"</p>
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
-
-                                            {/* Card Classification (Type, Element, Rarity) */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const type = rec.type;
-                                                const element = rec.element;
-                                                const rarity = rec.rarity;
-                                                if (!type && !element && !rarity) return null;
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-teal-400">
-                                                                <rux-icon icon="label" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Classification</h3>
-                                                            </div>
-                                                            <div className="flex flex-wrap gap-2">
-                                                                {type && (
-                                                                    <span className="px-3 py-1.5 bg-gray-800/50 rounded-lg border border-gray-700/50 text-xs font-mono">
-                                                                        <span className="text-gray-500">Type: </span>
-                                                                        <span className="text-white">{type}</span>
-                                                                    </span>
-                                                                )}
-                                                                {element && (
-                                                                    <span className="px-3 py-1.5 bg-cyan-900/20 rounded-lg border border-cyan-500/30 text-xs font-mono">
-                                                                        <span className="text-cyan-500">Element: </span>
-                                                                        <span className="text-cyan-300">{element}</span>
-                                                                    </span>
-                                                                )}
-                                                                {rarity && (
-                                                                    <span className="px-3 py-1.5 bg-amber-900/20 rounded-lg border border-amber-500/30 text-xs font-mono">
-                                                                        <span className="text-amber-500">Rarity: </span>
-                                                                        <span className="text-amber-300">{rarity}</span>
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
-
-                                            {/* Abilities Section */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const abilities = rec.abilities || [];
-                                                if (abilities.length === 0) return null;
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-rose-400">
-                                                                <rux-icon icon="flash-on" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Abilities</h3>
-                                                            </div>
-                                                            <div className="space-y-2">
-                                                                {abilities.map((ability: any, i: number) => (
-                                                                    <div key={i} className="bg-rose-900/10 rounded-lg p-3 border border-rose-500/20">
-                                                                        <div className="text-sm font-bold text-rose-300 mb-1">{ability.name || ability}</div>
-                                                                        {ability.description && (
-                                                                            <p className="text-xs text-gray-400">{ability.description}</p>
-                                                                        )}
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
-
-                                            {/* Truth Analysis Section */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const truth = rec.truthAnalysis;
-                                                if (!truth || (!truth.facts?.length && !truth.desires?.length)) return null;
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-orange-400">
-                                                                <rux-icon icon="psychology" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Truth Analysis</h3>
-                                                            </div>
-                                                            <div className="grid grid-cols-2 gap-4">
-                                                                {/* Facts */}
-                                                                <div className="bg-blue-900/20 rounded-lg p-3 border border-blue-500/30">
-                                                                    <div className="text-[10px] uppercase font-bold text-blue-400 mb-2 tracking-wider">Facts</div>
-                                                                    <ul className="space-y-1">
-                                                                        {(truth.facts || []).slice(0, 4).map((fact: string, i: number) => (
-                                                                            <li key={i} className="text-xs text-gray-300 flex gap-2">
-                                                                                <span className="text-blue-400">•</span>
-                                                                                <span className="line-clamp-2">{fact}</span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                                {/* Desires */}
-                                                                <div className="bg-purple-900/20 rounded-lg p-3 border border-purple-500/30">
-                                                                    <div className="text-[10px] uppercase font-bold text-purple-400 mb-2 tracking-wider">Desires</div>
-                                                                    <ul className="space-y-1">
-                                                                        {(truth.desires || []).slice(0, 4).map((desire: string, i: number) => (
-                                                                            <li key={i} className="text-xs text-gray-300 flex gap-2">
-                                                                                <span className="text-purple-400">•</span>
-                                                                                <span className="line-clamp-2">{desire}</span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
-
-                                            {/* Provenance Section */}
-                                            {(() => {
-                                                const rec = selected.cardRecord || {};
-                                                const prov = rec.provenance;
-                                                if (!prov) return null;
-                                                
-                                                return (
-                                                    <>
-                                                        <div className="h-px bg-gray-800"></div>
-                                                        <div className="space-y-3">
-                                                            <div className="flex items-center gap-2 text-teal-400">
-                                                                <rux-icon icon="fingerprint" size="small"></rux-icon>
-                                                                <h3 className="font-bold uppercase tracking-wider text-sm">Provenance</h3>
-                                                            </div>
-                                                            <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50 space-y-2 text-xs">
-                                                                {prov.leo && (
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-gray-500">LEO</span>
-                                                                        <span className="text-gray-300 font-mono">{prov.leo.commonName || prov.leo.modelName}</span>
-                                                                    </div>
-                                                                )}
-                                                                {prov.thor && (
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-gray-500">THOR</span>
-                                                                        <span className="text-gray-300 font-mono">{prov.thor.commonName || prov.thor.modelName}</span>
-                                                                    </div>
-                                                                )}
-                                                                {prov.image && (
-                                                                    <div className="flex justify-between">
-                                                                        <span className="text-gray-500">IMAGE</span>
-                                                                        <span className="text-gray-300 font-mono">{prov.image.commonName || prov.image.modelName}</span>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </>
-                                                );
-                                            })()}
-                                        </div>
-                                    )}
-
-                                    {/* Loop Video Generation Details - Show for loop video cards */}
-                                    {selected.cardRecord?.generationParams?.loopMode && (
-                                        <>
-                                            <div className="h-px bg-gray-800"></div>
-                                            <div className="space-y-4">
-                                                <div className="flex items-center gap-2 text-purple-400">
-                                                    <rux-icon icon="loop" size="small"></rux-icon>
-                                                    <h3 className="font-bold uppercase tracking-wider text-sm">Loop Video Details</h3>
-                                                </div>
-                                                
-                                                {/* View Parent Image Card Button */}
-                                                {selected.cardRecord?.parentCardId && (
-                                                    <button
-                                                        onClick={() => {
-                                                            const parentCard = cards.find(c => c.cardId === selected.cardRecord?.parentCardId);
-                                                            if (parentCard) {
-                                                                setSelected(parentCard);
-                                                            } else {
-                                                                loadCards(selected.cardRecord?.parentCardId);
-                                                            }
-                                                        }}
-                                                        className="w-full py-2 px-4 bg-cyan-900/30 hover:bg-cyan-900/50 border border-cyan-500/50 rounded-lg flex items-center justify-center gap-2 text-cyan-300 transition-all"
-                                                    >
-                                                        <rux-icon icon="image" size="small"></rux-icon>
-                                                        <span className="font-bold text-sm">← View Source Image Card</span>
-                                                    </button>
-                                                )}
-                                                
-                                                {/* Loop Prompt */}
-                                                <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-4">
-                                                    <div className="text-[10px] uppercase font-bold text-purple-400 mb-2 tracking-wider">
-                                                        AI-Crafted Motion Prompt
-                                                    </div>
-                                                    <p className="text-gray-300 text-sm leading-relaxed">
-                                                        {selected.cardRecord?.generationParams?.loopPrompt || 'No prompt available'}
-                                                    </p>
-                                                </div>
-                                                
-                                                {/* Source Image Info */}
-                                                {selected.cardRecord?.sourceImage && (
-                                                    <div className="grid grid-cols-2 gap-4 text-xs">
-                                                        <div>
-                                                            <div className="text-gray-500 mb-1">Model</div>
-                                                            <div className="text-gray-300 font-mono">
-                                                                {selected.cardRecord?.generationParams?.model || 'Veo 3.1'}
-                                                            </div>
-                                                        </div>
-                                                        <div>
-                                                            <div className="text-gray-500 mb-1">Parent</div>
-                                                            <div className="text-gray-300 font-mono truncate" title={selected.cardRecord?.parentCardId}>
-                                                                {selected.cardRecord?.parentCardId?.slice(0, 20)}...
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                
-                                                {/* Original Image Prompt */}
-                                                {selected.cardRecord?.sourceImage?.craftedPrompt && (
-                                                    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                                                        <div className="text-[10px] uppercase font-bold text-gray-500 mb-2 tracking-wider">
-                                                            Original Image Prompt
-                                                        </div>
-                                                        <p className="text-gray-400 text-sm leading-relaxed">
-                                                            {selected.cardRecord?.sourceImage?.craftedPrompt}
-                                                        </p>
+                                                {/* Reveal Animation */}
+                                                {inspectorShowReveal && (
+                                                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                                                        <div className="absolute inset-0 bg-white/10 animate-pulse"></div>
+                                                        <rux-icon icon="movie" size="large" className="text-cyan-400 mb-2 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)] animate-bounce"></rux-icon>
+                                                        <div className="text-xl font-bold text-white tracking-widest drop-shadow-lg animate-pulse">VIDEO UNLOCKED</div>
                                                     </div>
                                                 )}
                                             </div>
-                                        </>
-                                    )}
 
-                                    {/* Image Card Details - Show for generated image cards */}
-                                    {selected.mediaKind === 'image' && selected.cardRecord?.subType === 'generated' && (
-                                        <>
-                                            <div className="h-px bg-gray-800"></div>
-                                            <div className="space-y-4">
-                                                <div className="flex items-center gap-2 text-cyan-400">
-                                                    <rux-icon icon="image" size="small"></rux-icon>
-                                                    <h3 className="font-bold uppercase tracking-wider text-sm">Image Details</h3>
-                                                </div>
-                                                
-                                                {/* Generation Prompt */}
-                                                {selected.cardRecord?.generationPrompt && (
-                                                    <div className="bg-cyan-900/20 border border-cyan-500/30 rounded-lg p-4">
-                                                        <div className="text-[10px] uppercase font-bold text-cyan-400 mb-2 tracking-wider">
-                                                            AI-Crafted Image Prompt
+                                            {/* Evolution Pipeline */}
+                                            {(() => {
+                                                const rec = selected.cardRecord || {};
+                                                const hasImage = !!rec.mediaPrompts?.generated_image_local;
+                                                const state = rec.state || 'blob';
+
+                                                return (
+                                                    <div className="p-4 bg-gray-900/50 border border-cyan-900/30 rounded-lg">
+                                                        <div className="text-[10px] text-cyan-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                                            <rux-icon icon="linear-scale" size="extra-small"></rux-icon>
+                                                            Evolution Pipeline
                                                         </div>
-                                                        <p className="text-gray-300 text-sm leading-relaxed">
-                                                            {selected.cardRecord?.generationPrompt}
-                                                        </p>
-                                                    </div>
-                                                )}
-                                                
-                                                {/* Generation Info */}
-                                                <div className="grid grid-cols-2 gap-4 text-xs">
-                                                    <div>
-                                                        <div className="text-gray-500 mb-1">Model</div>
-                                                        <div className="text-gray-300 font-mono">
-                                                            {selected.cardRecord?.generationModel || 'Unknown'}
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-gray-500 mb-1">Series #</div>
-                                                        <div className="text-gray-300 font-mono">
-                                                            #{selected.cardRecord?.generationIndex || 1}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                
-                                                {/* Create Loop Video Button / Status */}
-                                                {(() => {
-                                                    const hasLoopVideo = selected.cardRecord?.children?.some((c: any) => c.type === 'loop-video');
-                                                    const loopStatus = loopGenStatus[selected.cardId];
-                                                    const isGenerating = loopStatus?.status === 'generating';
-                                                    
-                                                    if (hasLoopVideo) {
-                                                        // Already has loop video - show success state
-                                                        return (
-                                                            <div className="pt-2">
-                                                                <div className="w-full py-3 px-4 bg-green-900/20 border border-green-500/30 rounded-lg flex items-center justify-center gap-2 text-green-400">
-                                                                    <rux-icon icon="check-circle" size="small"></rux-icon>
-                                                                    <span className="font-bold uppercase text-sm tracking-wider">Loop Video Created</span>
+
+                                                        <div className="flex items-center justify-between relative">
+                                                            {/* Connecting Line */}
+                                                            <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-gray-800 -z-10"></div>
+                                                            <div className={`absolute top-1/2 left-0 h-0.5 bg-cyan-500 transition-all duration-500 -z-10`} style={{ width: hasImage ? '100%' : '50%' }}></div>
+
+                                                            {/* Nodes */}
+                                                            {[
+                                                                { label: 'BLOB', active: true },
+                                                                { label: 'SORT', active: state !== 'blob' },
+                                                                { label: 'VISUAL', active: hasImage },
+                                                                { label: 'LOOP', active: !!inspectorVideoPath || (rec.children || []).some((c: any) => c.type === 'loop-video') }
+                                                            ].map((step, i) => (
+                                                                <div key={i} className="flex flex-col items-center gap-2 group/node">
+                                                                    <div className={`w-3 h-3 rounded-full border-2 transition-all duration-300 ${step.active ? 'bg-cyan-500 border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)]' : 'bg-gray-900 border-gray-700'
+                                                                        }`}></div>
+                                                                    <span className={`text-[9px] font-mono transition-colors ${step.active ? 'text-cyan-300' : 'text-gray-600'}`}>{step.label}</span>
                                                                 </div>
-                                                            </div>
-                                                        );
-                                                    }
-                                                    
-                                                    if (isGenerating) {
-                                                        // Currently generating
-                                                        return (
-                                                            <div className="pt-2">
-                                                                <div className="w-full py-3 px-4 bg-purple-900/40 border border-purple-500/50 rounded-lg flex items-center justify-center gap-2 text-purple-300 animate-pulse">
-                                                                    <rux-icon icon="autorenew" size="small" className="animate-spin"></rux-icon>
-                                                                    <span className="font-bold uppercase text-sm tracking-wider">Creating Loop Video...</span>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    }
-                                                    
-                                                    // Show create button
-                                                    return (
-                                                        <div className="pt-2">
-                                                            <button
-                                                                onClick={() => handleCreateLoopVideoFromImageCard(selected)}
-                                                                className="w-full py-3 px-4 bg-purple-900/30 hover:bg-purple-900/50 border border-purple-500/50 rounded-lg flex items-center justify-center gap-2 text-purple-300 transition-all hover:border-purple-400"
-                                                            >
-                                                                <rux-icon icon="movie" size="small"></rux-icon>
-                                                                <span className="font-bold uppercase text-sm tracking-wider">Create Loop Video</span>
-                                                            </button>
-                                                        </div>
-                                                    );
-                                                })()}
-                                                
-                                                {/* Child Loop Videos */}
-                                                {selected.cardRecord?.children?.filter((c: any) => c.type === 'loop-video').length > 0 && (
-                                                    <div className="pt-4">
-                                                        <div className="text-[10px] uppercase font-bold text-gray-500 mb-3 tracking-wider">
-                                                            Derived Loop Videos
-                                                        </div>
-                                                        <div className="grid grid-cols-2 gap-2">
-                                                            {selected.cardRecord.children.filter((c: any) => c.type === 'loop-video').map((child: any) => (
-                                                                <button
-                                                                    key={child.cardId}
-                                                                    onClick={() => {
-                                                                        const videoCard = cards.find(c => c.cardId === child.cardId);
-                                                                        if (videoCard) setSelected(videoCard);
-                                                                        else loadCards(child.cardId);
-                                                                    }}
-                                                                    className="p-3 bg-purple-900/20 border border-purple-500/30 rounded-lg text-left hover:bg-purple-900/40 transition-colors"
-                                                                >
-                                                                    <div className="flex items-center gap-2 text-purple-300">
-                                                                        <rux-icon icon="loop" size="extra-small"></rux-icon>
-                                                                        <span className="text-xs font-mono truncate">{child.label || 'Loop Video'}</span>
-                                                                    </div>
-                                                                </button>
                                                             ))}
                                                         </div>
                                                     </div>
-                                                )}
-                                            </div>
-                                        </>
-                                    )}
+                                                );
+                                            })()}
 
-                                    <div className="h-px bg-gray-800"></div>
-
-                                    {/* AI Image Generation Panel */}
-                                    {(() => {
-                                        const imageSet = getImageSet(selected);
-                                        const imageCount = imageSet.images.length;
-                                        return (
-                                            <div className="space-y-4">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2 text-cyan-400">
-                                                        <rux-icon icon="auto-awesome" size="small"></rux-icon>
-                                                        <h3 className="font-bold uppercase tracking-wider text-sm">
-                                                            AI Images {imageCount > 0 && <span className="text-gray-500">({imageCount})</span>}
-                                                        </h3>
-                                                    </div>
-                                                </div>
-                                                
-                                                {/* Image Gallery - Show if images exist */}
-                                                {imageCount > 0 && (
-                                                    <div className="grid grid-cols-3 gap-2">
-                                                        {imageSet.displayOrder.map((imgIdx, displayPos) => {
-                                                            const img = imageSet.images[imgIdx];
-                                                            if (!img) return null;
-                                                            const isHero = imgIdx === imageSet.heroIndex;
-                                                            
-                                                            // Check for loop video (supports both new and legacy)
-                                                            // NEW TAXONOMY: Look up Image Card's children for loop-video
-                                                            let hasLoop = img.loopVideo?.status === 'complete';
-                                                            let loopVideoPath = img.loopVideo?.localPath;
-                                                            
-                                                            if (img.isCard && img.cardId) {
-                                                                const imageCard = cards.find(c => c.cardId === img.cardId);
-                                                                const loopChild = imageCard?.cardRecord?.children?.find((c: any) => c.type === 'loop-video');
-                                                                if (loopChild) {
-                                                                    hasLoop = true;
-                                                                    loopVideoPath = loopChild.videoPath;
-                                                                }
-                                                            }
-                                                            
-                                                            const loopStatus = loopGenStatus[img.id] || loopGenStatus[img.cardId];
-                                                            const isGeneratingLoop = loopStatus?.status === 'generating' || loopStatus?.status === 'crafted';
-                                                            const isHovered = hoveredImageId === img.id;
-                                                            
-                                                            return (
-                                                                <div 
-                                                                    key={img.id || imgIdx}
-                                                                    className={`relative group aspect-square rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
-                                                                        isGeneratingLoop
-                                                                            ? 'border-purple-500 animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]'
-                                                                            : hasLoop
-                                                                                ? 'has-loop-video'
-                                                                                : isHero 
-                                                                                    ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
-                                                                                    : 'border-gray-700 hover:border-cyan-500/50'
+                                            {/* Video Action */}
+                                            {(() => {
+                                                const rec = selected.cardRecord || {};
+                                                // Update: Allow loops for cards with ANY valid image source (including thumbnail)
+                                                const hasImage = !!(rec.mediaPrompts?.generated_image_local || selected.mediaLocalPath || selected.thumbnail);
+                                                if (hasImage) {
+                                                    return (
+                                                        <div className="flex flex-col gap-2">
+                                                            <button
+                                                                onClick={handleHellWeekVideoGenerate}
+                                                                disabled={hwVideoGenStatus === 'generating'}
+                                                                className={`w-full py-4 relative overflow-hidden group border transition-all duration-300 ${hwVideoGenStatus === 'generating' ? 'border-purple-500/50 bg-purple-900/20' :
+                                                                    hwVideoGenStatus === 'error' ? 'border-red-500/50 bg-red-900/20' :
+                                                                        'border-cyan-500/50 bg-cyan-900/10 hover:bg-cyan-900/30 hover:border-cyan-400'
                                                                     }`}
-                                                                    onMouseEnter={() => setHoveredImageId(img.id)}
-                                                                    onMouseLeave={() => setHoveredImageId(null)}
-                                                                    onClick={() => {
-                                                                        // NEW TAXONOMY: Navigate to Image Card if it's a card
-                                                                        if (img.isCard && img.cardId) {
-                                                                            const imageCard = cards.find(c => c.cardId === img.cardId);
-                                                                            if (imageCard) {
-                                                                                setSelected(imageCard);
-                                                                            } else {
-                                                                                // Card not in local list, try to load it
-                                                                                loadCards(img.cardId);
-                                                                            }
-                                                                        }
-                                                                        // LEGACY: Navigate to loop video if exists
-                                                                        else if (hasLoop && img.loopVideo?.cardId) {
-                                                                            handleNavigateToLoopVideo(img.loopVideo.cardId);
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    {/* Base Image */}
-                                                                    <img 
-                                                                        src={img.imageUrl || toFileUrl(img.localPath)} 
-                                                                        alt={`Image #${img.creationOrder + 1}`}
-                                                                        className={`w-full h-full object-cover transition-opacity ${
-                                                                            hasLoop && isHovered ? 'opacity-0' : 'opacity-100'
-                                                                        }`}
-                                                                    />
-                                                                    
-                                                                    {/* Loop Video Preview on Hover */}
-                                                                    {hasLoop && loopVideoPath && isHovered && (
-                                                                        <video
-                                                                            src={toFileUrl(loopVideoPath)}
-                                                                            autoPlay
-                                                                            loop
-                                                                            muted
-                                                                            playsInline
-                                                                            preload="metadata"
-                                                                            className="absolute inset-0 w-full h-full object-cover"
-                                                                        />
-                                                                    )}
-                                                                    
-                                                                    {/* Loop Video Badge */}
-                                                                    {hasLoop && (
-                                                                        <div className="absolute top-1 right-1 bg-purple-500 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
-                                                                            <rux-icon icon="loop" size="extra-small"></rux-icon>
-                                                                            LOOP
-                                                                        </div>
-                                                                    )}
-                                                                    
-                                                                    {/* Generating Loop Overlay */}
-                                                                    {isGeneratingLoop && (
-                                                                        <div className="absolute inset-0 bg-purple-900/70 flex flex-col items-center justify-center">
-                                                                            <rux-icon icon="autorenew" size="small" className="animate-spin text-purple-300"></rux-icon>
-                                                                            <span className="text-[8px] text-purple-200 mt-1">
-                                                                                {loopStatus?.progress ? `${loopStatus.progress}%` : 'Creating...'}
-                                                                            </span>
-                                                                        </div>
-                                                                    )}
-                                                                    
-                                                                    {/* Hero badge */}
-                                                                    {isHero && (
-                                                                        <div className="absolute top-1 left-1 bg-amber-500 text-black text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
-                                                                            <rux-icon icon="star" size="extra-small"></rux-icon>
-                                                                            HERO
-                                                                        </div>
-                                                                    )}
-                                                                    
-                                                                    {/* Creation order badge */}
-                                                                    <div className="absolute bottom-1 right-1 bg-black/70 text-gray-300 text-[10px] font-mono px-1.5 py-0.5 rounded">
-                                                                        #{img.creationOrder + 1}
-                                                                    </div>
-                                                                    
-                                                                    {/* Image Card indicator */}
-                                                                    {img.isCard && (
-                                                                        <div className="absolute bottom-1 left-1 bg-cyan-500/80 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
-                                                                            <rux-icon icon="open-in-new" size="extra-small"></rux-icon>
-                                                                        </div>
-                                                                    )}
-                                                                    
-                                                                    {/* Hover controls */}
-                                                                    {!isGeneratingLoop && (
-                                                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                                                                            {/* View Image Card Button (new taxonomy) */}
-                                                                            {img.isCard && img.cardId && (
-                                                                                <button
-                                                                                    onClick={(e) => { 
-                                                                                        e.stopPropagation(); 
-                                                                                        const imageCard = cards.find(c => c.cardId === img.cardId);
-                                                                                        if (imageCard) setSelected(imageCard);
-                                                                                        else loadCards(img.cardId);
-                                                                                    }}
-                                                                                    className="p-1.5 bg-cyan-500/30 hover:bg-cyan-500/50 rounded text-cyan-300"
-                                                                                    title="View Image Card"
-                                                                                >
-                                                                                    <rux-icon icon="open-in-new" size="extra-small"></rux-icon>
-                                                                                </button>
-                                                                            )}
-                                                                            {/* Create Loop Button */}
-                                                                            {!hasLoop && (
-                                                                                <button
-                                                                                    onClick={(e) => { e.stopPropagation(); handleCreateLoopVideo(imgIdx); }}
-                                                                                    className="p-1.5 bg-purple-500/30 hover:bg-purple-500/50 rounded text-purple-300"
-                                                                                    title="Create Loop Video"
-                                                                                >
-                                                                                    <rux-icon icon="movie" size="extra-small"></rux-icon>
-                                                                                </button>
-                                                                            )}
-                                                                            {!isHero && (
-                                                                                <button
-                                                                                    onClick={(e) => { e.stopPropagation(); handleSetHeroImage(imgIdx); }}
-                                                                                    className="p-1.5 bg-amber-500/20 hover:bg-amber-500/40 rounded text-amber-400"
-                                                                                    title="Set as Hero"
-                                                                                >
-                                                                                    <rux-icon icon="star" size="extra-small"></rux-icon>
-                                                                                </button>
-                                                                            )}
-                                                                            {displayPos > 0 && (
-                                                                                <button
-                                                                                    onClick={(e) => { e.stopPropagation(); handleMoveImage(imgIdx, 'up'); }}
-                                                                                    className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
-                                                                                    title="Move Left"
-                                                                                >
-                                                                                    <rux-icon icon="chevron-left" size="extra-small"></rux-icon>
-                                                                                </button>
-                                                                            )}
-                                                                            {displayPos < imageCount - 1 && (
-                                                                                <button
-                                                                                    onClick={(e) => { e.stopPropagation(); handleMoveImage(imgIdx, 'down'); }}
-                                                                                    className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
-                                                                                    title="Move Right"
-                                                                                >
-                                                                                    <rux-icon icon="chevron-right" size="extra-small"></rux-icon>
-                                                                                </button>
-                                                                            )}
-                                                                        </div>
+                                                            >
+                                                                <div className="absolute inset-0 bg-scanline-bg opacity-20"></div>
+                                                                <div className="flex items-center justify-center gap-3 relative z-10">
+                                                                    {hwVideoGenStatus === 'generating' ? (
+                                                                        <>
+                                                                            <rux-icon icon="autorenew" size="small" className="animate-spin text-purple-400"></rux-icon>
+                                                                            <span className="text-purple-300 font-mono text-xs uppercase tracking-widest">Compiling Loop...</span>
+                                                                        </>
+                                                                    ) : hwVideoGenStatus === 'error' ? (
+                                                                        <>
+                                                                            <rux-icon icon="error" size="small" className="text-red-400"></rux-icon>
+                                                                            <span className="text-red-300 font-mono text-xs uppercase tracking-widest">Generation Failed</span>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <rux-icon icon="movie" size="small" className="text-cyan-400 group-hover:animate-pulse"></rux-icon>
+                                                                            <span className="text-cyan-300 font-mono text-xs uppercase tracking-widest">Initialize Loop Sequence</span>
+                                                                        </>
                                                                     )}
                                                                 </div>
+                                                            </button>
+                                                            {hwVideoGenStatus === 'error' && (
+                                                                <div className="text-[10px] text-red-400 font-mono px-2">
+                                                                    Check console for details.
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+
+                                            {/* EXPORT MEDIA button - weighty and animated */}
+                                            {(() => {
+                                                const rec = selected.cardRecord || {};
+                                                const hasMedia = !!(rec.mediaPrompts?.generated_image_local || selected.mediaLocalPath || selected.thumbnail);
+
+                                                if (hasMedia) {
+                                                    return (
+                                                        <button
+                                                            onClick={async () => {
+                                                                setExportingMedia(true);
+                                                                try {
+                                                                    const imgPath = rec.mediaPrompts?.generated_image_local || selected.mediaLocalPath || selected.thumbnail;
+                                                                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                                                                    const cardId = selected.cardId || 'unknown';
+                                                                    const hypercoreDID = selected.coreDiscoveryKey || 'no-did';
+                                                                    const cardName = selected.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+                                                                    const fileName = `${cardName}_${timestamp}_${cardId}_${hypercoreDID}.png`;
+
+                                                                    if (imgPath) {
+                                                                        const toFileUrl = (p: string) => p.startsWith('file://') ? p : `file://${p}`;
+                                                                        await exportMedia(toFileUrl(imgPath), fileName, 'image');
+                                                                    }
+                                                                } catch (error) {
+                                                                    console.error('Export failed:', error);
+                                                                } finally {
+                                                                    setExportingMedia(false);
+                                                                }
+                                                            }}
+                                                            disabled={exportingMedia}
+                                                            className={`w-full py-5 relative overflow-hidden group border-2 transition-all duration-500 transform hover:scale-[1.02] active:scale-[0.98] ${exportingMedia
+                                                                ? 'border-emerald-500/60 bg-emerald-900/30 shadow-[0_0_30px_rgba(16,185,129,0.3)]'
+                                                                : 'border-amber-500/60 bg-gradient-to-r from-amber-900/20 to-orange-900/20 hover:from-amber-800/40 hover:to-orange-800/40 hover:border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_35px_rgba(245,158,11,0.4)]'
+                                                                }`}
+                                                        >
+                                                            {/* Animated background gradient */}
+                                                            <div className={`absolute inset-0 bg-gradient-to-r from-transparent via-amber-400/10 to-transparent ${exportingMedia ? 'animate-shimmer' : ''}`}></div>
+
+                                                            {/* Scanline effect */}
+                                                            <div className="absolute inset-0 bg-scanline-bg opacity-10"></div>
+
+                                                            {/* Glow pulse effect */}
+                                                            {!exportingMedia && (
+                                                                <div className="absolute inset-0 bg-amber-500/5 animate-pulse"></div>
+                                                            )}
+
+                                                            <div className="flex items-center justify-center gap-4 relative z-10">
+                                                                {exportingMedia ? (
+                                                                    <>
+                                                                        <div className="relative">
+                                                                            <rux-icon icon="cloud-upload" size="large" className="text-emerald-400 animate-bounce"></rux-icon>
+                                                                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full animate-ping"></div>
+                                                                        </div>
+                                                                        <div className="flex flex-col items-start">
+                                                                            <span className="text-emerald-300 font-bold text-base uppercase tracking-[0.2em] animate-pulse">EXPORTING</span>
+                                                                            <span className="text-emerald-500/70 font-mono text-[10px] tracking-wider">TRANSFERRING TO ARCHIVE...</span>
+                                                                        </div>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <div className="relative transform group-hover:rotate-12 transition-transform duration-300">
+                                                                            <rux-icon icon="download" size="large" className="text-amber-300 group-hover:text-amber-200 transition-colors"></rux-icon>
+                                                                            <div className="absolute inset-0 bg-amber-400/20 blur-xl group-hover:bg-amber-300/40 transition-all"></div>
+                                                                        </div>
+                                                                        <div className="flex flex-col items-start">
+                                                                            <span className="text-amber-200 font-black text-lg uppercase tracking-[0.25em] group-hover:tracking-[0.3em] transition-all">EXPORT</span>
+                                                                            <span className="text-amber-500/80 font-mono text-[10px] tracking-wider group-hover:text-amber-400 transition-colors">ARCHIVE TO DISK</span>
+                                                                        </div>
+                                                                        <rux-icon icon="chevron-right" size="small" className="text-amber-500 group-hover:translate-x-1 transition-transform"></rux-icon>
+                                                                    </>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Bottom progress bar effect */}
+                                                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-0 group-hover:opacity-70 transition-opacity"></div>
+                                                        </button>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+                                        </div>
+
+                                        {/* Right Column: Data Matrix */}
+                                        <div className="col-span-7 p-8 overflow-y-auto custom-scrollbar flex flex-col gap-8">
+                                            {/* Name & ID Block */}
+                                            <div className="flex flex-col gap-2">
+                                                <div className="text-[10px] text-gray-500 font-mono uppercase tracking-widest">Subject Identifier</div>
+                                                {isEditingName ? (
+                                                    <div className="flex gap-2">
+                                                        <rux-input
+                                                            value={editingName}
+                                                            onInput={(e: any) => setEditingName(e.target.value)}
+                                                            className="flex-1"
+                                                        ></rux-input>
+                                                        <rux-button icon="save" onClick={handleSaveName}></rux-button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="group flex items-center gap-4">
+                                                        <h1 className="text-3xl font-bold text-white tracking-tight drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]">{selected.name || 'UNKNOWN ENTITY'}</h1>
+                                                        <button
+                                                            onClick={() => setIsEditingName(true)}
+                                                            className="opacity-0 group-hover:opacity-100 text-cyan-500 hover:text-cyan-300 transition-opacity"
+                                                            title="Edit Name"
+                                                            aria-label="Edit Name"
+                                                        >
+                                                            <rux-icon icon="edit" size="small"></rux-icon>
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                <div className="flex items-center gap-4 text-xs font-mono text-gray-500">
+                                                    <span>ID: {selected.cardId.substring(0, 12)}...</span>
+                                                    <span className="text-cyan-900">|</span>
+                                                    <span>{new Date(selected.createdAt).toLocaleDateString()}</span>
+                                                    <span className="text-cyan-900">|</span>
+                                                    <span className="text-cyan-500">{selected.mediaKind || 'DATA'}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Stats Matrix (Hell Week Only) */}
+                                            {isHellWeekCard(selected) && (
+                                                <div>
+                                                    <div className="bg-gray-900/30 border border-cyan-900/30 p-6 relative overflow-hidden">
+                                                        {/* Corner Accents */}
+                                                        <div className="absolute top-0 right-0 w-4 h-4 border-t border-r border-cyan-500/30"></div>
+                                                        <div className="absolute bottom-0 left-0 w-4 h-4 border-b border-l border-cyan-500/30"></div>
+
+
+                                                        <div className="text-[10px] text-cyan-500 font-mono uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                            <rux-icon icon="bar-chart" size="extra-small"></rux-icon>
+                                                            Power Matrix
+                                                        </div>
+
+
+                                                        {(() => {
+                                                            const rec = selected.cardRecord || {};
+                                                            const stats = generateHellWeekStats(rec.name || selected.name);
+                                                            return (
+                                                                <div className="space-y-4">
+                                                                    {[
+                                                                        { label: 'PWR', fullLabel: 'POWER', value: stats.power, color: 'text-red-400' },
+                                                                        { label: 'WIS', fullLabel: 'WISDOM', value: stats.wisdom, color: 'text-blue-400' },
+                                                                        { label: 'SPD', fullLabel: 'SPEED', value: stats.speed, color: 'text-green-400' },
+                                                                        { label: 'MAG', fullLabel: 'MAGIC', value: stats.magic, color: 'text-purple-400' },
+                                                                    ].map(stat => (
+                                                                        <div key={stat.label} className="group/stat">
+                                                                            <div className="flex justify-between text-[10px] font-mono mb-1 text-gray-500">
+                                                                                <span>{stat.fullLabel}</span>
+                                                                                <span className={stat.color}>{stat.value}/100</span>
+                                                                            </div>
+                                                                            <div className="h-2 bg-gray-800/50 flex gap-0.5 overflow-hidden">
+                                                                                {[...Array(20)].map((_, i) => (
+                                                                                    <div
+                                                                                        key={i}
+                                                                                        className={`flex-1 transition-all duration-300 ${(i / 20) * 100 < stat.value
+                                                                                            ? `${stat.color.replace('text', 'bg')} opacity-80 group-hover/stat:opacity-100 shadow-[0_0_5px_currentColor]`
+                                                                                            : 'bg-transparent'
+                                                                                            }`}
+                                                                                    ></div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
+
+                                                    {/* ═══════════════════════════════════════════════════════════════
+                                            SKILLS MATRIX - RPG-Style Skill Cards with Neon Effects
+                                            ═══════════════════════════════════════════════════════════════ */}
+                                                    {(() => {
+                                                        const rec = selected.cardRecord || {};
+                                                        const cardData = rec.cardData || {};
+                                                        // Check multiple possible locations for skills data
+                                                        const skills = cardData.skills || rec.skills || [];
+                                                        if (skills.length === 0) return null;
+
+                                                        return (
+                                                            <div className="bg-gray-900/40 border border-cyan-900/30 p-5 relative overflow-hidden">
+                                                                {/* Animated Background Grid */}
+                                                                <div className="absolute inset-0 opacity-5">
+                                                                    <div className="absolute inset-0" style={{
+                                                                        backgroundImage: `linear-gradient(rgba(0,255,255,0.1) 1px, transparent 1px),
+                                                                             linear-gradient(90deg, rgba(0,255,255,0.1) 1px, transparent 1px)`,
+                                                                        backgroundSize: '20px 20px',
+                                                                        animation: 'pulse 4s ease-in-out infinite'
+                                                                    }}></div>
+                                                                </div>
+
+                                                                {/* Corner Decorations */}
+                                                                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-cyan-500/50"></div>
+                                                                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-cyan-500/50"></div>
+                                                                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-cyan-500/50"></div>
+                                                                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-cyan-500/50"></div>
+
+                                                                {/* Section Header */}
+                                                                <div className="relative flex items-center gap-3 mb-5">
+                                                                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
+                                                                        <rux-icon icon="flash-on" size="small" className="text-white"></rux-icon>
+                                                                    </div>
+                                                                    <div>
+                                                                        <h3 className="text-sm font-bold text-white uppercase tracking-wider">Combat Skills</h3>
+                                                                        <p className="text-[10px] text-gray-500 font-mono">{skills.length} ABILITIES UNLOCKED</p>
+                                                                    </div>
+                                                                    <div className="ml-auto flex gap-2">
+                                                                        <span className="px-2 py-0.5 text-[9px] font-bold bg-emerald-500/20 text-emerald-400 rounded border border-emerald-500/30">
+                                                                            {skills.filter((s: any) => s.type === 'Passive').length} PASSIVE
+                                                                        </span>
+                                                                        <span className="px-2 py-0.5 text-[9px] font-bold bg-orange-500/20 text-orange-400 rounded border border-orange-500/30">
+                                                                            {skills.filter((s: any) => s.type === 'Active').length} ACTIVE
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Skills Grid */}
+                                                                <div className="relative space-y-3">
+                                                                    {skills.map((skill: any, idx: number) => {
+                                                                        const isActive = skill.type === 'Active';
+                                                                        const skillColor = isActive
+                                                                            ? { border: 'border-orange-500/40', bg: 'bg-orange-500', text: 'text-orange-400', glow: 'shadow-orange-500/30', accent: 'from-orange-600 to-amber-500' }
+                                                                            : { border: 'border-emerald-500/40', bg: 'bg-emerald-500', text: 'text-emerald-400', glow: 'shadow-emerald-500/30', accent: 'from-emerald-600 to-teal-500' };
+
+                                                                        return (
+                                                                            <div
+                                                                                key={idx}
+                                                                                className={`group relative bg-gray-900/60 rounded-lg border ${skillColor.border} overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:${skillColor.glow} hover:shadow-lg cursor-pointer`}
+                                                                            >
+                                                                                {/* Skill Glow Effect on Hover */}
+                                                                                <div className={`absolute inset-0 bg-gradient-to-r ${skillColor.accent} opacity-0 group-hover:opacity-10 transition-opacity duration-300`}></div>
+
+                                                                                {/* Scanning Line Animation */}
+                                                                                <div className="absolute inset-0 overflow-hidden opacity-0 group-hover:opacity-100">
+                                                                                    <div className={`absolute top-0 left-0 w-full h-0.5 ${skillColor.bg} animate-[scan_2s_ease-in-out_infinite]`}
+                                                                                        style={{ animation: 'scan 2s ease-in-out infinite' }}></div>
+                                                                                </div>
+
+                                                                                <div className="relative p-4 flex gap-4">
+                                                                                    {/* Skill Icon/Badge */}
+                                                                                    <div className="flex-shrink-0">
+                                                                                        <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${skillColor.accent} flex items-center justify-center shadow-lg ${skillColor.glow} relative overflow-hidden`}>
+                                                                                            {/* Inner glow */}
+                                                                                            <div className="absolute inset-0 bg-white/10 rounded-lg"></div>
+                                                                                            {/* Icon */}
+                                                                                            <span className="text-white text-lg font-black relative z-10">
+                                                                                                {isActive ? '⚔' : '🛡'}
+                                                                                            </span>
+                                                                                            {/* Level indicator */}
+                                                                                            <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 bg-gray-900 rounded-full border-2 border-gray-800 flex items-center justify-center">
+                                                                                                <span className="text-[8px] font-bold text-white">{idx + 1}</span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                    {/* Skill Info */}
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <div className="flex items-center gap-2 mb-1.5">
+                                                                                            <h4 className={`font-bold text-sm ${skillColor.text} truncate`}>{skill.name}</h4>
+                                                                                            <span className={`flex-shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase rounded ${isActive
+                                                                                                ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                                                                                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                                                                }`}>
+                                                                                                {skill.type || 'PASSIVE'}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">{skill.description}</p>
+
+                                                                                        {/* Skill Stats Bar */}
+                                                                                        <div className="mt-2 flex items-center gap-2">
+                                                                                            <div className="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
+                                                                                                <div
+                                                                                                    className={`h-full ${skillColor.bg} rounded-full transition-all duration-500 group-hover:animate-pulse`}
+                                                                                                    style={{ width: `${Math.min(100, 40 + (skill.name?.length || 5) * 5)}%` }}
+                                                                                                ></div>
+                                                                                            </div>
+                                                                                            <span className="text-[9px] font-mono text-gray-500">
+                                                                                                PWR {Math.floor(40 + (skill.name?.length || 5) * 5)}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                    {/* Activation Indicator */}
+                                                                                    <div className="flex-shrink-0 flex flex-col items-center justify-center gap-1">
+                                                                                        <div className={`w-2 h-2 rounded-full ${skillColor.bg} animate-pulse shadow-lg ${skillColor.glow}`}></div>
+                                                                                        <span className="text-[8px] font-mono text-gray-600 uppercase">ready</span>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* Bottom Energy Bar */}
+                                                                                <div className="h-0.5 w-full bg-gray-800">
+                                                                                    <div className={`h-full ${skillColor.bg} opacity-50 group-hover:opacity-100 transition-opacity`} style={{ width: '100%' }}></div>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+
+                                                                {/* Footer Stats */}
+                                                                <div className="relative mt-4 pt-3 border-t border-gray-800/50 flex justify-between text-[9px] font-mono text-gray-600">
+                                                                    <span>SKILL TREE v2.1</span>
+                                                                    <span>TOTAL PWR: {skills.reduce((acc: number, s: any) => acc + Math.floor(40 + (s.name?.length || 5) * 5), 0)}</span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()}
+
+                                                    {/* Flavor Text */}
+                                                    {(() => {
+                                                        const rec = selected.cardRecord || {};
+                                                        const flavorText = rec.flavorText || rec.lore;
+
+                                                        return (
+                                                            <>
+                                                                <div className="h-px bg-gray-800"></div>
+                                                                <div className="space-y-3">
+                                                                    <div className="flex items-center gap-2 text-violet-400">
+                                                                        <rux-icon icon="format-quote" size="small"></rux-icon>
+                                                                        <h3 className="font-bold uppercase tracking-wider text-sm">Flavor Text</h3>
+                                                                    </div>
+                                                                    <div className="bg-violet-900/10 rounded-lg p-4 border border-violet-500/20">
+                                                                        <p className="text-sm text-gray-400 leading-relaxed italic font-light">"{flavorText}"</p>
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+
+                                                    {/* Card Classification (Type, Element, Rarity) */}
+                                                    {(() => {
+                                                        const rec = selected.cardRecord || {};
+                                                        const type = rec.type;
+                                                        const element = rec.element;
+                                                        const rarity = rec.rarity;
+                                                        if (!type && !element && !rarity) return null;
+
+                                                        return (
+                                                            <>
+                                                                <div className="h-px bg-gray-800"></div>
+                                                                <div className="space-y-3">
+                                                                    <div className="flex items-center gap-2 text-teal-400">
+                                                                        <rux-icon icon="label" size="small"></rux-icon>
+                                                                        <h3 className="font-bold uppercase tracking-wider text-sm">Classification</h3>
+                                                                    </div>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        {type && (
+                                                                            <span className="px-3 py-1.5 bg-gray-800/50 rounded-lg border border-gray-700/50 text-xs font-mono">
+                                                                                <span className="text-gray-500">Type: </span>
+                                                                                <span className="text-white">{type}</span>
+                                                                            </span>
+                                                                        )}
+                                                                        {element && (
+                                                                            <span className="px-3 py-1.5 bg-cyan-900/20 rounded-lg border border-cyan-500/30 text-xs font-mono">
+                                                                                <span className="text-cyan-500">Element: </span>
+                                                                                <span className="text-cyan-300">{element}</span>
+                                                                            </span>
+                                                                        )}
+                                                                        {rarity && (
+                                                                            <span className="px-3 py-1.5 bg-amber-900/20 rounded-lg border border-amber-500/30 text-xs font-mono">
+                                                                                <span className="text-amber-500">Rarity: </span>
+                                                                                <span className="text-amber-300">{rarity}</span>
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+
+                                                    {/* Abilities Section */}
+                                                    {(() => {
+                                                        const rec = selected.cardRecord || {};
+                                                        const abilities = rec.abilities || [];
+                                                        if (abilities.length === 0) return null;
+
+                                                        return (
+                                                            <>
+                                                                <div className="h-px bg-gray-800"></div>
+                                                                <div className="space-y-3">
+                                                                    <div className="flex items-center gap-2 text-rose-400">
+                                                                        <rux-icon icon="flash-on" size="small"></rux-icon>
+                                                                        <h3 className="font-bold uppercase tracking-wider text-sm">Abilities</h3>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        {abilities.map((ability: any, i: number) => (
+                                                                            <div key={i} className="bg-rose-900/10 rounded-lg p-3 border border-rose-500/20">
+                                                                                <div className="text-sm font-bold text-rose-300 mb-1">{ability.name || ability}</div>
+                                                                                {ability.description && (
+                                                                                    <p className="text-xs text-gray-400">{ability.description}</p>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+
+                                                    {/* Truth Analysis Section */}
+                                                    {(() => {
+                                                        const rec = selected.cardRecord || {};
+                                                        const truth = rec.truthAnalysis;
+                                                        if (!truth || (!truth.facts?.length && !truth.desires?.length)) return null;
+
+                                                        return (
+                                                            <>
+                                                                <div className="h-px bg-gray-800"></div>
+                                                                <div className="space-y-3">
+                                                                    <div className="flex items-center gap-2 text-orange-400">
+                                                                        <rux-icon icon="psychology" size="small"></rux-icon>
+                                                                        <h3 className="font-bold uppercase tracking-wider text-sm">Truth Analysis</h3>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-4">
+                                                                        {/* Facts */}
+                                                                        <div className="bg-blue-900/20 rounded-lg p-3 border border-blue-500/30">
+                                                                            <div className="text-[10px] uppercase font-bold text-blue-400 mb-2 tracking-wider">Facts</div>
+                                                                            <ul className="space-y-1">
+                                                                                {(truth.facts || []).slice(0, 4).map((fact: string, i: number) => (
+                                                                                    <li key={i} className="text-xs text-gray-300 flex gap-2">
+                                                                                        <span className="text-blue-400">•</span>
+                                                                                        <span className="line-clamp-2">{fact}</span>
+                                                                                    </li>
+                                                                                ))}
+                                                                            </ul>
+                                                                        </div>
+                                                                        {/* Desires */}
+                                                                        <div className="bg-purple-900/20 rounded-lg p-3 border border-purple-500/30">
+                                                                            <div className="text-[10px] uppercase font-bold text-purple-400 mb-2 tracking-wider">Desires</div>
+                                                                            <ul className="space-y-1">
+                                                                                {(truth.desires || []).slice(0, 4).map((desire: string, i: number) => (
+                                                                                    <li key={i} className="text-xs text-gray-300 flex gap-2">
+                                                                                        <span className="text-purple-400">•</span>
+                                                                                        <span className="line-clamp-2">{desire}</span>
+                                                                                    </li>
+                                                                                ))}
+                                                                            </ul>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+
+                                                    {/* Provenance Section */}
+                                                    {(() => {
+                                                        const rec = selected.cardRecord || {};
+                                                        const prov = rec.provenance;
+                                                        if (!prov) return null;
+
+                                                        return (
+                                                            <>
+                                                                <div className="h-px bg-gray-800"></div>
+                                                                <div className="space-y-3">
+                                                                    <div className="flex items-center gap-2 text-teal-400">
+                                                                        <rux-icon icon="fingerprint" size="small"></rux-icon>
+                                                                        <h3 className="font-bold uppercase tracking-wider text-sm">Provenance</h3>
+                                                                    </div>
+                                                                    <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50 space-y-2 text-xs">
+                                                                        {prov.leo && (
+                                                                            <div className="flex justify-between">
+                                                                                <span className="text-gray-500">LEO</span>
+                                                                                <span className="text-gray-300 font-mono">{prov.leo.commonName || prov.leo.modelName}</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {prov.thor && (
+                                                                            <div className="flex justify-between">
+                                                                                <span className="text-gray-500">THOR</span>
+                                                                                <span className="text-gray-300 font-mono">{prov.thor.commonName || prov.thor.modelName}</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {prov.image && (
+                                                                            <div className="flex justify-between">
+                                                                                <span className="text-gray-500">IMAGE</span>
+                                                                                <span className="text-gray-300 font-mono">{prov.image.commonName || prov.image.modelName}</span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            )}
+
+                                            {/* Loop Video Generation Details - Show for loop video cards */}
+                                            {selected.cardRecord?.generationParams?.loopMode && (
+                                                <>
+                                                    <div className="h-px bg-gray-800"></div>
+                                                    <div className="space-y-4">
+                                                        <div className="flex items-center gap-2 text-purple-400">
+                                                            <rux-icon icon="loop" size="small"></rux-icon>
+                                                            <h3 className="font-bold uppercase tracking-wider text-sm">Loop Video Details</h3>
+                                                        </div>
+
+                                                        {/* View Parent Image Card Button */}
+                                                        {selected.cardRecord?.parentCardId && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    const parentCard = cards.find(c => c.cardId === selected.cardRecord?.parentCardId);
+                                                                    if (parentCard) {
+                                                                        setSelected(parentCard);
+                                                                    } else {
+                                                                        loadCards(selected.cardRecord?.parentCardId);
+                                                                    }
+                                                                }}
+                                                                className="w-full py-2 px-4 bg-cyan-900/30 hover:bg-cyan-900/50 border border-cyan-500/50 rounded-lg flex items-center justify-center gap-2 text-cyan-300 transition-all"
+                                                            >
+                                                                <rux-icon icon="image" size="small"></rux-icon>
+                                                                <span className="font-bold text-sm">← View Source Image Card</span>
+                                                            </button>
+                                                        )}
+
+                                                        {/* Loop Prompt */}
+                                                        <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-4">
+                                                            <div className="text-[10px] uppercase font-bold text-purple-400 mb-2 tracking-wider">
+                                                                AI-Crafted Motion Prompt
+                                                            </div>
+                                                            <p className="text-gray-300 text-sm leading-relaxed">
+                                                                {selected.cardRecord?.generationParams?.loopPrompt || 'No prompt available'}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Source Image Info */}
+                                                        {selected.cardRecord?.sourceImage && (
+                                                            <div className="grid grid-cols-2 gap-4 text-xs">
+                                                                <div>
+                                                                    <div className="text-gray-500 mb-1">Model</div>
+                                                                    <div className="text-gray-300 font-mono">
+                                                                        {selected.cardRecord?.generationParams?.model || 'Veo 3.1'}
+                                                                    </div>
+                                                                </div>
+                                                                <div>
+                                                                    <div className="text-gray-500 mb-1">Parent</div>
+                                                                    <div className="text-gray-300 font-mono truncate" title={selected.cardRecord?.parentCardId}>
+                                                                        {selected.cardRecord?.parentCardId?.slice(0, 20)}...
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Original Image Prompt */}
+                                                        {selected.cardRecord?.sourceImage?.craftedPrompt && (
+                                                            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+                                                                <div className="text-[10px] uppercase font-bold text-gray-500 mb-2 tracking-wider">
+                                                                    Original Image Prompt
+                                                                </div>
+                                                                <p className="text-gray-400 text-sm leading-relaxed">
+                                                                    {selected.cardRecord?.sourceImage?.craftedPrompt}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* Image Card Details - Show for generated image cards */}
+                                            {selected.mediaKind === 'image' && selected.cardRecord?.subType === 'generated' && (
+                                                <>
+                                                    <div className="h-px bg-gray-800"></div>
+                                                    <div className="space-y-4">
+                                                        <div className="flex items-center gap-2 text-cyan-400">
+                                                            <rux-icon icon="image" size="small"></rux-icon>
+                                                            <h3 className="font-bold uppercase tracking-wider text-sm">Image Details</h3>
+                                                        </div>
+
+                                                        {/* Generation Prompt */}
+                                                        {selected.cardRecord?.generationPrompt && (
+                                                            <div className="bg-cyan-900/20 border border-cyan-500/30 rounded-lg p-4">
+                                                                <div className="text-[10px] uppercase font-bold text-cyan-400 mb-2 tracking-wider">
+                                                                    AI-Crafted Image Prompt
+                                                                </div>
+                                                                <p className="text-gray-300 text-sm leading-relaxed">
+                                                                    {selected.cardRecord?.generationPrompt}
+                                                                </p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Generation Info */}
+                                                        <div className="grid grid-cols-2 gap-4 text-xs">
+                                                            <div>
+                                                                <div className="text-gray-500 mb-1">Model</div>
+                                                                <div className="text-gray-300 font-mono">
+                                                                    {selected.cardRecord?.generationModel || 'Unknown'}
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-gray-500 mb-1">Series #</div>
+                                                                <div className="text-gray-300 font-mono">
+                                                                    #{selected.cardRecord?.generationIndex || 1}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Create Loop Video Button / Status */}
+                                                        {(() => {
+                                                            const hasLoopVideo = selected.cardRecord?.children?.some((c: any) => c.type === 'loop-video');
+                                                            const loopStatus = loopGenStatus[selected.cardId];
+                                                            const isGenerating = loopStatus?.status === 'generating';
+
+                                                            if (hasLoopVideo) {
+                                                                // Already has loop video - show success state
+                                                                return (
+                                                                    <div className="pt-2">
+                                                                        <div className="w-full py-3 px-4 bg-green-900/20 border border-green-500/30 rounded-lg flex items-center justify-center gap-2 text-green-400">
+                                                                            <rux-icon icon="check-circle" size="small"></rux-icon>
+                                                                            <span className="font-bold uppercase text-sm tracking-wider">Loop Video Created</span>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            }
+
+                                                            if (isGenerating) {
+                                                                // Currently generating
+                                                                return (
+                                                                    <div className="pt-2">
+                                                                        <div className="w-full py-3 px-4 bg-purple-900/40 border border-purple-500/50 rounded-lg flex items-center justify-center gap-2 text-purple-300 animate-pulse">
+                                                                            <rux-icon icon="autorenew" size="small" className="animate-spin"></rux-icon>
+                                                                            <span className="font-bold uppercase text-sm tracking-wider">Creating Loop Video...</span>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            }
+
+                                                            // Show create button
+                                                            return (
+                                                                <div className="pt-2">
+                                                                    <button
+                                                                        onClick={() => handleCreateLoopVideoFromImageCard(selected)}
+                                                                        className="w-full py-3 px-4 bg-purple-900/30 hover:bg-purple-900/50 border border-purple-500/50 rounded-lg flex items-center justify-center gap-2 text-purple-300 transition-all hover:border-purple-400"
+                                                                    >
+                                                                        <rux-icon icon="movie" size="small"></rux-icon>
+                                                                        <span className="font-bold uppercase text-sm tracking-wider">Create Loop Video</span>
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        })()}
+
+                                                        {/* Child Loop Videos */}
+                                                        {selected.cardRecord?.children?.filter((c: any) => c.type === 'loop-video').length > 0 && (
+                                                            <div className="pt-4">
+                                                                <div className="text-[10px] uppercase font-bold text-gray-500 mb-3 tracking-wider">
+                                                                    Derived Loop Videos
+                                                                </div>
+                                                                <div className="grid grid-cols-2 gap-2">
+                                                                    {selected.cardRecord.children.filter((c: any) => c.type === 'loop-video').map((child: any) => (
+                                                                        <button
+                                                                            key={child.cardId}
+                                                                            onClick={() => {
+                                                                                const videoCard = cards.find(c => c.cardId === child.cardId);
+                                                                                if (videoCard) setSelected(videoCard);
+                                                                                else loadCards(child.cardId);
+                                                                            }}
+                                                                            className="p-3 bg-purple-900/20 border border-purple-500/30 rounded-lg text-left hover:bg-purple-900/40 transition-colors"
+                                                                        >
+                                                                            <div className="flex items-center gap-2 text-purple-300">
+                                                                                <rux-icon icon="loop" size="extra-small"></rux-icon>
+                                                                                <span className="text-xs font-mono truncate">{child.label || 'Loop Video'}</span>
+                                                                            </div>
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            <div className="h-px bg-gray-800"></div>
+
+                                            {/* AI Image Generation Panel */}
+                                            {(() => {
+                                                const imageSet = getImageSet(selected);
+                                                const imageCount = imageSet.images.length;
+                                                return (
+                                                    <div className="space-y-4">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2 text-cyan-400">
+                                                                <rux-icon icon="auto-awesome" size="small"></rux-icon>
+                                                                <h3 className="font-bold uppercase tracking-wider text-sm">
+                                                                    AI Images {imageCount > 0 && <span className="text-gray-500">({imageCount})</span>}
+                                                                </h3>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Image Gallery - Show if images exist */}
+                                                        {imageCount > 0 && (
+                                                            <div className="grid grid-cols-3 gap-2">
+                                                                {imageSet.displayOrder.map((imgIdx, displayPos) => {
+                                                                    const img = imageSet.images[imgIdx];
+                                                                    if (!img) return null;
+                                                                    const isHero = imgIdx === imageSet.heroIndex;
+
+                                                                    // Check for loop video (supports both new and legacy)
+                                                                    // NEW TAXONOMY: Look up Image Card's children for loop-video
+                                                                    let hasLoop = img.loopVideo?.status === 'complete';
+                                                                    let loopVideoPath = img.loopVideo?.localPath;
+
+                                                                    if (img.isCard && img.cardId) {
+                                                                        const imageCard = cards.find(c => c.cardId === img.cardId);
+                                                                        const loopChild = imageCard?.cardRecord?.children?.find((c: any) => c.type === 'loop-video');
+                                                                        if (loopChild) {
+                                                                            hasLoop = true;
+                                                                            loopVideoPath = loopChild.videoPath;
+                                                                        }
+                                                                    }
+
+                                                                    const loopStatus = loopGenStatus[img.id] || loopGenStatus[img.cardId];
+                                                                    const isGeneratingLoop = loopStatus?.status === 'generating' || loopStatus?.status === 'crafted';
+                                                                    const isHovered = hoveredImageId === img.id;
+
+                                                                    return (
+                                                                        <div
+                                                                            key={img.id || imgIdx}
+                                                                            className={`relative group aspect-square rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${isGeneratingLoop
+                                                                                ? 'border-purple-500 animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]'
+                                                                                : hasLoop
+                                                                                    ? 'has-loop-video'
+                                                                                    : isHero
+                                                                                        ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+                                                                                        : 'border-gray-700 hover:border-cyan-500/50'
+                                                                                }`}
+                                                                            onMouseEnter={() => setHoveredImageId(img.id)}
+                                                                            onMouseLeave={() => setHoveredImageId(null)}
+                                                                            onClick={() => {
+                                                                                // NEW TAXONOMY: Navigate to Image Card if it's a card
+                                                                                if (img.isCard && img.cardId) {
+                                                                                    const imageCard = cards.find(c => c.cardId === img.cardId);
+                                                                                    if (imageCard) {
+                                                                                        setSelected(imageCard);
+                                                                                    } else {
+                                                                                        // Card not in local list, try to load it
+                                                                                        loadCards(img.cardId);
+                                                                                    }
+                                                                                }
+                                                                                // LEGACY: Navigate to loop video if exists
+                                                                                else if (hasLoop && img.loopVideo?.cardId) {
+                                                                                    handleNavigateToLoopVideo(img.loopVideo.cardId);
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            {/* Base Image */}
+                                                                            <img
+                                                                                src={img.imageUrl || toFileUrl(img.localPath)}
+                                                                                alt={`Image #${img.creationOrder + 1}`}
+                                                                                className={`w-full h-full object-cover transition-opacity ${hasLoop && isHovered ? 'opacity-0' : 'opacity-100'
+                                                                                    }`}
+                                                                            />
+
+                                                                            {/* Loop Video Preview on Hover */}
+                                                                            {hasLoop && loopVideoPath && isHovered && (
+                                                                                <video
+                                                                                    src={toFileUrl(loopVideoPath)}
+                                                                                    autoPlay
+                                                                                    loop
+                                                                                    muted
+                                                                                    playsInline
+                                                                                    preload="metadata"
+                                                                                    className="absolute inset-0 w-full h-full object-cover"
+                                                                                />
+                                                                            )}
+
+                                                                            {/* Loop Video Badge */}
+                                                                            {hasLoop && (
+                                                                                <div className="absolute top-1 right-1 bg-purple-500 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                                                                                    <rux-icon icon="loop" size="extra-small"></rux-icon>
+                                                                                    LOOP
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* Generating Loop Overlay */}
+                                                                            {isGeneratingLoop && (
+                                                                                <div className="absolute inset-0 bg-purple-900/70 flex flex-col items-center justify-center">
+                                                                                    <rux-icon icon="autorenew" size="small" className="animate-spin text-purple-300"></rux-icon>
+                                                                                    <span className="text-[8px] text-purple-200 mt-1">
+                                                                                        {loopStatus?.progress ? `${loopStatus.progress}%` : 'Creating...'}
+                                                                                    </span>
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* Hero badge */}
+                                                                            {isHero && (
+                                                                                <div className="absolute top-1 left-1 bg-amber-500 text-black text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                                                                                    <rux-icon icon="star" size="extra-small"></rux-icon>
+                                                                                    HERO
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* Creation order badge */}
+                                                                            <div className="absolute bottom-1 right-1 bg-black/70 text-gray-300 text-[10px] font-mono px-1.5 py-0.5 rounded">
+                                                                                #{img.creationOrder + 1}
+                                                                            </div>
+
+                                                                            {/* Image Card indicator */}
+                                                                            {img.isCard && (
+                                                                                <div className="absolute bottom-1 left-1 bg-cyan-500/80 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                                                                                    <rux-icon icon="open-in-new" size="extra-small"></rux-icon>
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* Hover controls */}
+                                                                            {!isGeneratingLoop && (
+                                                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                                                                    {/* View Image Card Button (new taxonomy) */}
+                                                                                    {img.isCard && img.cardId && (
+                                                                                        <button
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                const imageCard = cards.find(c => c.cardId === img.cardId);
+                                                                                                if (imageCard) setSelected(imageCard);
+                                                                                                else loadCards(img.cardId);
+                                                                                            }}
+                                                                                            className="p-1.5 bg-cyan-500/30 hover:bg-cyan-500/50 rounded text-cyan-300"
+                                                                                            title="View Image Card"
+                                                                                        >
+                                                                                            <rux-icon icon="open-in-new" size="extra-small"></rux-icon>
+                                                                                        </button>
+                                                                                    )}
+                                                                                    {/* Create Loop Button */}
+                                                                                    {!hasLoop && (
+                                                                                        <button
+                                                                                            onClick={(e) => { e.stopPropagation(); handleCreateLoopVideo(imgIdx); }}
+                                                                                            className="p-1.5 bg-purple-500/30 hover:bg-purple-500/50 rounded text-purple-300"
+                                                                                            title="Create Loop Video"
+                                                                                        >
+                                                                                            <rux-icon icon="movie" size="extra-small"></rux-icon>
+                                                                                        </button>
+                                                                                    )}
+                                                                                    {!isHero && (
+                                                                                        <button
+                                                                                            onClick={(e) => { e.stopPropagation(); handleSetHeroImage(imgIdx); }}
+                                                                                            className="p-1.5 bg-amber-500/20 hover:bg-amber-500/40 rounded text-amber-400"
+                                                                                            title="Set as Hero"
+                                                                                        >
+                                                                                            <rux-icon icon="star" size="extra-small"></rux-icon>
+                                                                                        </button>
+                                                                                    )}
+                                                                                    {displayPos > 0 && (
+                                                                                        <button
+                                                                                            onClick={(e) => { e.stopPropagation(); handleMoveImage(imgIdx, 'up'); }}
+                                                                                            className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
+                                                                                            title="Move Left"
+                                                                                        >
+                                                                                            <rux-icon icon="chevron-left" size="extra-small"></rux-icon>
+                                                                                        </button>
+                                                                                    )}
+                                                                                    {displayPos < imageCount - 1 && (
+                                                                                        <button
+                                                                                            onClick={(e) => { e.stopPropagation(); handleMoveImage(imgIdx, 'down'); }}
+                                                                                            className="p-1.5 bg-gray-500/20 hover:bg-gray-500/40 rounded text-gray-300"
+                                                                                            title="Move Right"
+                                                                                        >
+                                                                                            <rux-icon icon="chevron-right" size="extra-small"></rux-icon>
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Provider Selector */}
+                                                        <div className="flex gap-2 mb-2 bg-gray-900/50 p-1 rounded-lg">
+                                                            <button
+                                                                onClick={() => setImageProvider('gemini')}
+                                                                className={`flex-1 py-1.5 text-xs font-bold rounded transition-colors ${imageProvider === 'gemini'
+                                                                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                                                                    : 'text-gray-500 hover:text-gray-300'
+                                                                    }`}
+                                                            >
+                                                                Gemini (Cloud)
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setImageProvider('local-vision')}
+                                                                className={`flex-1 py-1.5 text-xs font-bold rounded transition-colors flex items-center justify-center gap-1 ${imageProvider === 'local-vision'
+                                                                    ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                                                                    : 'text-gray-500 hover:text-gray-300'
+                                                                    }`}
+                                                            >
+                                                                Local Vision
+                                                                {imageProvider !== 'local-vision' && localVisionStatus.running && (
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                                                                )}
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Local Vision Status Warning */}
+                                                        {imageProvider === 'local-vision' && !localVisionStatus.running && (
+                                                            <div className="mb-2 px-2 py-1.5 bg-red-900/20 border border-red-500/30 rounded text-[10px] text-red-300 flex items-center gap-2">
+                                                                <rux-icon icon="warning" size="extra-small"></rux-icon>
+                                                                {/* Assuming Link is available, or use window.location */}
+                                                                <span>Server offline. Check Local Vision settings.</span>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Generate Button */}
+                                                        <button
+                                                            onClick={handleGenerateImage}
+                                                            disabled={
+                                                                (imageGenState !== 'idle' && imageGenState !== 'error') ||
+                                                                (imageProvider === 'local-vision' && !localVisionStatus.running)
+                                                            }
+                                                            className={`w-full p-4 rounded-lg border-2 transition-all duration-300 flex items-center justify-center gap-3 ${imageGenState === 'complete'
+                                                                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                                                                : imageGenState === 'error'
+                                                                    ? 'bg-red-500/20 border-red-500/50 text-red-400'
+                                                                    : imageGenState === 'crafting' || imageGenState === 'generating'
+                                                                        ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 animate-neon-pulse'
+                                                                        : 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)]'
+                                                                }`}
+                                                        >
+                                                            {imageGenState === 'crafting' ? (
+                                                                <>
+                                                                    <rux-icon icon="psychology" size="small" className="animate-pulse"></rux-icon>
+                                                                    <span className="text-sm font-bold uppercase tracking-wider">Crafting Vision...</span>
+                                                                </>
+                                                            ) : imageGenState === 'generating' ? (
+                                                                <>
+                                                                    <rux-icon icon="brush" size="small" className="animate-spin"></rux-icon>
+                                                                    <span className="text-sm font-bold uppercase tracking-wider">Manifesting #{imageCount + 1}...</span>
+                                                                </>
+                                                            ) : imageGenState === 'complete' ? (
+                                                                <>
+                                                                    <rux-icon icon="check-circle" size="small"></rux-icon>
+                                                                    <span className="text-sm font-bold uppercase tracking-wider">Image #{imageCount} Created!</span>
+                                                                </>
+                                                            ) : imageGenState === 'error' ? (
+                                                                <>
+                                                                    <rux-icon icon="error" size="small"></rux-icon>
+                                                                    <span className="text-xs">{imageGenError || 'Generation failed'}</span>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <rux-icon icon="auto-awesome" size="small"></rux-icon>
+                                                                    <span className="text-sm font-bold uppercase tracking-wider">
+                                                                        {imageCount > 0 ? `Generate Next Image (#${imageCount + 1})` : 'Create Image'}
+                                                                    </span>
+                                                                </>
+                                                            )}
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            <div className="h-px bg-gray-800"></div>
+
+                                            {/* Extraction Panel - Only for video cards */}
+                                            {selected.mediaKind === 'video' && (
+                                                <div className="space-y-4">
+                                                    <div className="flex items-center gap-2 text-purple-400">
+                                                        <rux-icon icon="content-cut" size="small"></rux-icon>
+                                                        <h3 className="font-bold uppercase tracking-wider text-sm">Extract Media</h3>
+                                                    </div>
+                                                    <div className="flex gap-3">
+                                                        {(['first-frame', 'last-frame', 'audio'] as const).map((extractType) => {
+                                                            const isExtracting = extracting[`${selected.cardId}-${extractType}`];
+                                                            const isDone = hasExtractionChild(selected, extractType);
+                                                            const config = {
+                                                                'first-frame': { icon: 'first-page', label: 'First Frame' },
+                                                                'last-frame': { icon: 'last-page', label: 'Last Frame' },
+                                                                'audio': { icon: 'audiotrack', label: 'Audio' }
+                                                            }[extractType];
+
+                                                            return (
+                                                                <button
+                                                                    key={extractType}
+                                                                    onClick={() => handleExtract(extractType)}
+                                                                    disabled={isExtracting || isDone}
+                                                                    className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${isDone
+                                                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                                                        : isExtracting
+                                                                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                                                            : 'bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20 animate-extract-pulse'
+                                                                        }`}
+                                                                    data-tooltip={isDone ? 'Already extracted' : isExtracting ? 'Extracting...' : `Extract ${config.label}`}
+                                                                >
+                                                                    <rux-icon icon={isDone ? 'check' : config.icon} size="small"></rux-icon>
+                                                                    <span className="text-[10px] font-bold uppercase tracking-wider">
+                                                                        {isDone ? 'Done' : isExtracting ? 'Working...' : config.label}
+                                                                    </span>
+                                                                </button>
                                                             );
                                                         })}
                                                     </div>
-                                                )}
-                                                
-                                                {/* Provider Selector */}
-                                                <div className="flex gap-2 mb-2 bg-gray-900/50 p-1 rounded-lg">
-                                                    <button
-                                                        onClick={() => setImageProvider('gemini')}
-                                                        className={`flex-1 py-1.5 text-xs font-bold rounded transition-colors ${
-                                                            imageProvider === 'gemini' 
-                                                                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
-                                                                : 'text-gray-500 hover:text-gray-300'
-                                                        }`}
-                                                    >
-                                                        Gemini (Cloud)
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setImageProvider('local-vision')}
-                                                        className={`flex-1 py-1.5 text-xs font-bold rounded transition-colors flex items-center justify-center gap-1 ${
-                                                            imageProvider === 'local-vision' 
-                                                                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' 
-                                                                : 'text-gray-500 hover:text-gray-300'
-                                                        }`}
-                                                    >
-                                                        Local Vision
-                                                        {imageProvider !== 'local-vision' && localVisionStatus.running && (
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                                                        )}
-                                                    </button>
                                                 </div>
-                                                
-                                                {/* Local Vision Status Warning */}
-                                                {imageProvider === 'local-vision' && !localVisionStatus.running && (
-                                                    <div className="mb-2 px-2 py-1.5 bg-red-900/20 border border-red-500/30 rounded text-[10px] text-red-300 flex items-center gap-2">
-                                                        <rux-icon icon="warning" size="extra-small"></rux-icon>
-                                                        {/* Assuming Link is available, or use window.location */}
-                                                        <span>Server offline. Check Local Vision settings.</span>
-                                                    </div>
-                                                )}
+                                            )}
 
-                                                {/* Generate Button */}
-                                                <button
-                                                    onClick={handleGenerateImage}
-                                                    disabled={
-                                                        (imageGenState !== 'idle' && imageGenState !== 'error') ||
-                                                        (imageProvider === 'local-vision' && !localVisionStatus.running)
-                                                    }
-                                                    className={`w-full p-4 rounded-lg border-2 transition-all duration-300 flex items-center justify-center gap-3 ${
-                                                        imageGenState === 'complete'
-                                                            ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
-                                                            : imageGenState === 'error'
-                                                                ? 'bg-red-500/20 border-red-500/50 text-red-400'
-                                                                : imageGenState === 'crafting' || imageGenState === 'generating'
-                                                                    ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 animate-neon-pulse'
-                                                                    : 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)]'
-                                                    }`}
-                                                >
-                                                    {imageGenState === 'crafting' ? (
-                                                        <>
-                                                            <rux-icon icon="psychology" size="small" className="animate-pulse"></rux-icon>
-                                                            <span className="text-sm font-bold uppercase tracking-wider">Crafting Vision...</span>
-                                                        </>
-                                                    ) : imageGenState === 'generating' ? (
-                                                        <>
-                                                            <rux-icon icon="brush" size="small" className="animate-spin"></rux-icon>
-                                                            <span className="text-sm font-bold uppercase tracking-wider">Manifesting #{imageCount + 1}...</span>
-                                                        </>
-                                                    ) : imageGenState === 'complete' ? (
-                                                        <>
-                                                            <rux-icon icon="check-circle" size="small"></rux-icon>
-                                                            <span className="text-sm font-bold uppercase tracking-wider">Image #{imageCount} Created!</span>
-                                                        </>
-                                                    ) : imageGenState === 'error' ? (
-                                                        <>
-                                                            <rux-icon icon="error" size="small"></rux-icon>
-                                                            <span className="text-xs">{imageGenError || 'Generation failed'}</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <rux-icon icon="auto-awesome" size="small"></rux-icon>
-                                                            <span className="text-sm font-bold uppercase tracking-wider">
-                                                                {imageCount > 0 ? `Generate Next Image (#${imageCount + 1})` : 'Create Image'}
-                                                            </span>
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
-                                        );
-                                    })()}
+                                            {/* Lineage Panel */}
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 text-cyan-400">
+                                                    <rux-icon icon="account-tree" size="small"></rux-icon>
+                                                    <h3 className="font-bold uppercase tracking-wider text-sm">Card Lineage</h3>
+                                                </div>
 
-                                    <div className="h-px bg-gray-800"></div>
-
-                                    {/* Extraction Panel - Only for video cards */}
-                                    {selected.mediaKind === 'video' && (
-                                        <div className="space-y-4">
-                                            <div className="flex items-center gap-2 text-purple-400">
-                                                <rux-icon icon="content-cut" size="small"></rux-icon>
-                                                <h3 className="font-bold uppercase tracking-wider text-sm">Extract Media</h3>
-                                            </div>
-                                            <div className="flex gap-3">
-                                                {(['first-frame', 'last-frame', 'audio'] as const).map((extractType) => {
-                                                    const isExtracting = extracting[`${selected.cardId}-${extractType}`];
-                                                    const isDone = hasExtractionChild(selected, extractType);
-                                                    const config = {
-                                                        'first-frame': { icon: 'first-page', label: 'First Frame' },
-                                                        'last-frame': { icon: 'last-page', label: 'Last Frame' },
-                                                        'audio': { icon: 'audiotrack', label: 'Audio' }
-                                                    }[extractType];
-                                                    
-                                                    return (
-                                                        <button
-                                                            key={extractType}
-                                                            onClick={() => handleExtract(extractType)}
-                                                            disabled={isExtracting || isDone}
-                                                            className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
-                                                                isDone
-                                                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                                                                    : isExtracting
-                                                                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                                                                        : 'bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20 animate-extract-pulse'
-                                                            }`}
-                                                            data-tooltip={isDone ? 'Already extracted' : isExtracting ? 'Extracting...' : `Extract ${config.label}`}
-                                                        >
-                                                            <rux-icon icon={isDone ? 'check' : config.icon} size="small"></rux-icon>
-                                                            <span className="text-[10px] font-bold uppercase tracking-wider">
-                                                                {isDone ? 'Done' : isExtracting ? 'Working...' : config.label}
-                                                            </span>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Lineage Panel */}
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2 text-cyan-400">
-                                            <rux-icon icon="account-tree" size="small"></rux-icon>
-                                            <h3 className="font-bold uppercase tracking-wider text-sm">Card Lineage</h3>
-                                        </div>
-                                        
-                                        <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50 space-y-4">
-                                            {/* Parent Card */}
-                                            {(() => {
-                                                const parent = getParentCard(selected);
-                                                const parentThumb = parent ? getMiniThumbnailSrc(parent) : null;
-                                                return parent ? (
-                                                    <div>
-                                                        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Parent</div>
-                                                        <button
-                                                            onClick={() => navigateToCard(parent, 'parent')}
-                                                            className="w-full flex items-center gap-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-purple-500/50 hover:bg-purple-500/10 transition-all group"
-                                                        >
-                                                            <div className="w-16 h-16 rounded overflow-hidden border border-gray-700 flex-shrink-0 bg-gray-800">
-                                                                {parentThumb ? (
-                                                                    <img src={parentThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
-                                                                ) : parent.mediaKind === 'video' && parent.mediaLocalPath ? (
-                                                                    <video src={toFileUrl(parent.mediaLocalPath)} className="w-full h-full object-cover" muted preload="metadata" />
-                                                                ) : (
-                                                                    <div className="w-full h-full flex items-center justify-center">
-                                                                        <rux-icon icon={parent.mediaKind === 'video' ? 'videocam' : parent.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="small" className="text-gray-600"></rux-icon>
+                                                <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50 space-y-4">
+                                                    {/* Parent Card */}
+                                                    {(() => {
+                                                        const parent = getParentCard(selected);
+                                                        const parentThumb = parent ? getMiniThumbnailSrc(parent) : null;
+                                                        return parent ? (
+                                                            <div>
+                                                                <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Parent</div>
+                                                                <button
+                                                                    onClick={() => navigateToCard(parent, 'parent')}
+                                                                    className="w-full flex items-center gap-3 p-3 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-purple-500/50 hover:bg-purple-500/10 transition-all group"
+                                                                >
+                                                                    <div className="w-16 h-16 rounded overflow-hidden border border-gray-700 flex-shrink-0 bg-gray-800">
+                                                                        {parentThumb ? (
+                                                                            <img src={parentThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                                                        ) : parent.mediaKind === 'video' && parent.mediaLocalPath ? (
+                                                                            <video src={toFileUrl(parent.mediaLocalPath)} className="w-full h-full object-cover" muted preload="metadata" />
+                                                                        ) : (
+                                                                            <div className="w-full h-full flex items-center justify-center">
+                                                                                <rux-icon icon={parent.mediaKind === 'video' ? 'videocam' : parent.mediaKind === 'audio' ? 'audiotrack' : 'image'} size="small" className="text-gray-600"></rux-icon>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
-                                                                )}
+                                                                    <div className="flex-1 text-left">
+                                                                        <div className="text-sm text-white group-hover:text-purple-300 truncate">
+                                                                            {parent.name || 'Untitled'}
+                                                                        </div>
+                                                                        <div className="text-[10px] text-gray-500 uppercase">{parent.mediaKind}</div>
+                                                                    </div>
+                                                                    <rux-icon icon="arrow-upward" size="small" className="text-gray-500 group-hover:text-purple-400"></rux-icon>
+                                                                </button>
                                                             </div>
-                                                            <div className="flex-1 text-left">
-                                                                <div className="text-sm text-white group-hover:text-purple-300 truncate">
-                                                                    {parent.name || 'Untitled'}
+                                                        ) : (
+                                                            <div className="flex items-center gap-2 text-gray-500">
+                                                                <rux-icon icon="star" size="extra-small"></rux-icon>
+                                                                <span className="text-xs">Original (No Parent)</span>
+                                                            </div>
+                                                        );
+                                                    })()}
+
+                                                    {/* Children Cards */}
+                                                    {(() => {
+                                                        const children = getChildCards(selected);
+                                                        return children.length > 0 && (
+                                                            <div>
+                                                                <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                                                                    Children ({children.length})
                                                                 </div>
-                                                                <div className="text-[10px] text-gray-500 uppercase">{parent.mediaKind}</div>
+                                                                <div className="flex gap-2 overflow-x-auto pb-2">
+                                                                    {children.map(child => {
+                                                                        const childThumb = getMiniThumbnailSrc(child);
+                                                                        return (
+                                                                            <button
+                                                                                key={child.cardId}
+                                                                                onClick={() => navigateToCard(child, 'child')}
+                                                                                className="flex-shrink-0 flex flex-col items-center gap-1 p-2 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all group"
+                                                                            >
+                                                                                <div className="w-14 h-14 rounded overflow-hidden border border-gray-700 bg-gray-800">
+                                                                                    {childThumb ? (
+                                                                                        <img src={childThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                                                                    ) : (
+                                                                                        <div className="w-full h-full flex items-center justify-center">
+                                                                                            <rux-icon
+                                                                                                icon={child.mediaKind === 'audio' ? 'audiotrack' : 'image'}
+                                                                                                size="small"
+                                                                                                className="text-gray-600"
+                                                                                            ></rux-icon>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                                <span className="text-[9px] text-gray-400 truncate max-w-[60px] group-hover:text-cyan-300">
+                                                                                    {child.cardRecord?.extractionSource?.type || child.mediaKind}
+                                                                                </span>
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
                                                             </div>
-                                                            <rux-icon icon="arrow-upward" size="small" className="text-gray-500 group-hover:text-purple-400"></rux-icon>
-                                                        </button>
+                                                        );
+                                                    })()}
+
+                                                    {/* Siblings */}
+                                                    {(() => {
+                                                        const siblings = getSiblingCards(selected);
+                                                        return siblings.length > 0 && (
+                                                            <div>
+                                                                <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                                                                    Siblings ({siblings.length})
+                                                                </div>
+                                                                <div className="flex gap-2 overflow-x-auto pb-2">
+                                                                    {siblings.map(sibling => {
+                                                                        const siblingThumb = getMiniThumbnailSrc(sibling);
+                                                                        return (
+                                                                            <button
+                                                                                key={sibling.cardId}
+                                                                                onClick={() => navigateToCard(sibling, 'sibling')}
+                                                                                className="flex-shrink-0 flex flex-col items-center gap-1 p-2 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-pink-500/50 hover:bg-pink-500/10 transition-all group"
+                                                                            >
+                                                                                <div className="w-12 h-12 rounded overflow-hidden border border-gray-700 bg-gray-800">
+                                                                                    {siblingThumb ? (
+                                                                                        <img src={siblingThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                                                                    ) : (
+                                                                                        <div className="w-full h-full flex items-center justify-center">
+                                                                                            <rux-icon
+                                                                                                icon={sibling.mediaKind === 'audio' ? 'audiotrack' : 'image'}
+                                                                                                size="extra-small"
+                                                                                                className="text-gray-600"
+                                                                                            ></rux-icon>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                                <span className="text-[9px] text-gray-400 truncate max-w-[50px] group-hover:text-pink-300">
+                                                                                    {sibling.cardRecord?.extractionSource?.type || sibling.mediaKind}
+                                                                                </span>
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </div>
+
+                                            <div className="h-px bg-gray-800"></div>
+
+                                            {/* Wormhole Section */}
+                                            <div className="space-y-4">
+                                                <div className="flex items-center gap-2 text-emerald-400">
+                                                    <rux-icon icon="cloud-queue" size="small"></rux-icon>
+                                                    <h3 className="font-bold uppercase tracking-wider text-sm">Wormhole Status</h3>
+                                                </div>
+
+                                                {selectedWormholeProcessing ? (
+                                                    <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50">
+                                                        <div className="flex flex-wrap gap-2 mb-4">
+                                                            {renderWormholeStepBadge('Ingest', selectedWormholeProcessing.ingest)}
+                                                            {renderWormholeStepBadge('Transcription', selectedWormholeProcessing.transcription)}
+                                                            {renderWormholeStepBadge('Summarization', selectedWormholeProcessing.summarization)}
+                                                            {renderWormholeStepBadge('Key terms', selectedWormholeProcessing.keyTerms)}
+                                                            {renderWormholeStepBadge('Wiki update', selectedWormholeProcessing.wikiUpdate)}
+                                                        </div>
+
+                                                        {/* Run Stats */}
+                                                        <div className="grid grid-cols-3 gap-4 mb-4 border-t border-gray-700/50 pt-4">
+                                                            <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
+                                                                <rux-icon icon="subject" size="small" className="text-cyan-400 mb-1"></rux-icon>
+                                                                <span className="text-2xl font-bold text-white">{selected.cardRecord?.summaries?.length || 0}</span>
+                                                                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Summaries</span>
+                                                            </div>
+                                                            <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
+                                                                <rux-icon icon="local-offer" size="small" className="text-purple-400 mb-1"></rux-icon>
+                                                                <span className="text-2xl font-bold text-white">{selected.cardRecord?.keyTerms?.length || 0}</span>
+                                                                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Key Terms</span>
+                                                            </div>
+                                                            <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
+                                                                <rux-icon icon="public" size="small" className="text-emerald-400 mb-1"></rux-icon>
+                                                                <span className="text-2xl font-bold text-white">{selected.cardRecord?.wormhole?.wikiEntries?.length || 0}</span>
+                                                                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Wiki Entries</span>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                                                            <rux-button
+                                                                size="small"
+                                                                secondary
+                                                                onClick={() => runWormholeStep('summarization')}
+                                                                disabled={wormholeActionPending}
+                                                            >
+                                                                {wormholeActionPending && activeWormholeStep === 'summarization' ? (
+                                                                    <>
+                                                                        <rux-icon
+                                                                            icon="sync"
+                                                                            size="extra-small"
+                                                                            className="animate-spin mr-1"
+                                                                        ></rux-icon>
+                                                                        Running…
+                                                                    </>
+                                                                ) : (
+                                                                    'Run Summarization'
+                                                                )}
+                                                            </rux-button>
+                                                            <rux-button
+                                                                size="small"
+                                                                secondary
+                                                                onClick={() => runWormholeStep('keyTerms')}
+                                                                disabled={wormholeActionPending}
+                                                            >
+                                                                {wormholeActionPending && activeWormholeStep === 'keyTerms' ? (
+                                                                    <>
+                                                                        <rux-icon
+                                                                            icon="sync"
+                                                                            size="extra-small"
+                                                                            className="animate-spin mr-1"
+                                                                        ></rux-icon>
+                                                                        Running…
+                                                                    </>
+                                                                ) : (
+                                                                    'Run Key Terms'
+                                                                )}
+                                                            </rux-button>
+                                                            <rux-button
+                                                                size="small"
+                                                                secondary
+                                                                onClick={() => runWormholeStep('wikiUpdate')}
+                                                                disabled={wormholeActionPending}
+                                                            >
+                                                                {wormholeActionPending && activeWormholeStep === 'wikiUpdate' ? (
+                                                                    <>
+                                                                        <rux-icon
+                                                                            icon="sync"
+                                                                            size="extra-small"
+                                                                            className="animate-spin mr-1"
+                                                                        ></rux-icon>
+                                                                        Running…
+                                                                    </>
+                                                                ) : (
+                                                                    'Run Wiki Update'
+                                                                )}
+                                                            </rux-button>
+                                                        </div>
                                                     </div>
                                                 ) : (
-                                                    <div className="flex items-center gap-2 text-gray-500">
-                                                        <rux-icon icon="star" size="extra-small"></rux-icon>
-                                                        <span className="text-xs">Original (No Parent)</span>
+                                                    <div className="text-gray-500 text-sm italic">
+                                                        No Wormhole data associated with this card.
                                                     </div>
-                                                );
-                                            })()}
+                                                )}
+                                            </div>
 
-                                            {/* Children Cards */}
-                                            {(() => {
-                                                const children = getChildCards(selected);
-                                                return children.length > 0 && (
-                                                    <div>
-                                                        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
-                                                            Children ({children.length})
-                                                        </div>
-                                                        <div className="flex gap-2 overflow-x-auto pb-2">
-                                                            {children.map(child => {
-                                                                const childThumb = getMiniThumbnailSrc(child);
-                                                                return (
-                                                                <button
-                                                                    key={child.cardId}
-                                                                    onClick={() => navigateToCard(child, 'child')}
-                                                                    className="flex-shrink-0 flex flex-col items-center gap-1 p-2 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all group"
-                                                                >
-                                                                    <div className="w-14 h-14 rounded overflow-hidden border border-gray-700 bg-gray-800">
-                                                                        {childThumb ? (
-                                                                            <img src={childThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
-                                                                        ) : (
-                                                                            <div className="w-full h-full flex items-center justify-center">
-                                                                                <rux-icon 
-                                                                                    icon={child.mediaKind === 'audio' ? 'audiotrack' : 'image'} 
-                                                                                    size="small" 
-                                                                                    className="text-gray-600"
-                                                                                ></rux-icon>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    <span className="text-[9px] text-gray-400 truncate max-w-[60px] group-hover:text-cyan-300">
-                                                                        {child.cardRecord?.extractionSource?.type || child.mediaKind}
+                                            {/* SCROLLS Section - Context documents for LLM analysis */}
+                                            <div className="space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2 text-amber-400">
+                                                        <rux-icon icon="description" size="small"></rux-icon>
+                                                        <h3 className="font-bold uppercase tracking-wider text-sm">Scrolls (Context)</h3>
+                                                    </div>
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (!window.electronAPI?.getTextCardsForScroll) return;
+                                                            try {
+                                                                const textCards = await window.electronAPI.getTextCardsForScroll();
+                                                                setAvailableScrollCards(textCards || []);
+                                                                setShowScrollPicker(true);
+                                                            } catch (e) {
+                                                                console.error('Failed to load text cards:', e);
+                                                            }
+                                                        }}
+                                                        className="text-xs px-3 py-1 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-500/30 rounded text-amber-300 transition-colors"
+                                                    >
+                                                        + Attach Scroll
+                                                    </button>
+                                                </div>
+
+                                                {/* Attached Scrolls */}
+                                                {selected.cardRecord?.scrolls && selected.cardRecord.scrolls.length > 0 ? (
+                                                    <div className="space-y-2">
+                                                        {selected.cardRecord.scrolls.map((scroll: any) => (
+                                                            <div
+                                                                key={scroll.cardId}
+                                                                className="flex items-center justify-between p-3 bg-amber-900/20 border border-amber-500/30 rounded-lg"
+                                                            >
+                                                                <div className="flex items-center gap-2">
+                                                                    <rux-icon icon="text-snippet" size="extra-small" className="text-amber-300"></rux-icon>
+                                                                    <span className="text-sm text-amber-200 font-mono truncate max-w-[200px]">
+                                                                        {scroll.label || scroll.cardId}
                                                                     </span>
-                                                                </button>
-                                                            );})}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })()}
-
-                                            {/* Siblings */}
-                                            {(() => {
-                                                const siblings = getSiblingCards(selected);
-                                                return siblings.length > 0 && (
-                                                    <div>
-                                                        <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
-                                                            Siblings ({siblings.length})
-                                                        </div>
-                                                        <div className="flex gap-2 overflow-x-auto pb-2">
-                                                            {siblings.map(sibling => {
-                                                                const siblingThumb = getMiniThumbnailSrc(sibling);
-                                                                return (
+                                                                </div>
                                                                 <button
-                                                                    key={sibling.cardId}
-                                                                    onClick={() => navigateToCard(sibling, 'sibling')}
-                                                                    className="flex-shrink-0 flex flex-col items-center gap-1 p-2 bg-gray-900/50 rounded-lg border border-gray-700/30 hover:border-pink-500/50 hover:bg-pink-500/10 transition-all group"
+                                                                    onClick={async () => {
+                                                                        if (!window.electronAPI?.detachCardScroll || !selected) return;
+                                                                        try {
+                                                                            await window.electronAPI.detachCardScroll({
+                                                                                cardId: selected.cardId,
+                                                                                scrollCardId: scroll.cardId,
+                                                                            });
+                                                                            await loadCards(selected.cardId);
+                                                                        } catch (e: any) {
+                                                                            setError(e?.message || 'Failed to detach scroll');
+                                                                        }
+                                                                    }}
+                                                                    className="text-red-400 hover:text-red-300 text-xs px-2"
+                                                                    title="Remove scroll"
                                                                 >
-                                                                    <div className="w-12 h-12 rounded overflow-hidden border border-gray-700 bg-gray-800">
-                                                                        {siblingThumb ? (
-                                                                            <img src={siblingThumb} alt="" className="w-full h-full object-cover" loading="lazy" />
-                                                                        ) : (
-                                                                            <div className="w-full h-full flex items-center justify-center">
-                                                                                <rux-icon 
-                                                                                    icon={sibling.mediaKind === 'audio' ? 'audiotrack' : 'image'} 
-                                                                                    size="extra-small" 
-                                                                                    className="text-gray-600"
-                                                                                ></rux-icon>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    <span className="text-[9px] text-gray-400 truncate max-w-[50px] group-hover:text-pink-300">
-                                                                        {sibling.cardRecord?.extractionSource?.type || sibling.mediaKind}
-                                                                    </span>
+                                                                    ✕
                                                                 </button>
-                                                            );})}
-                                                        </div>
+                                                            </div>
+                                                        ))}
                                                     </div>
-                                                );
-                                            })()}
-                                        </div>
-                                    </div>
-
-                                    <div className="h-px bg-gray-800"></div>
-
-                                    {/* Wormhole Section */}
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2 text-emerald-400">
-                                            <rux-icon icon="cloud-queue" size="small"></rux-icon>
-                                            <h3 className="font-bold uppercase tracking-wider text-sm">Wormhole Status</h3>
-                                        </div>
-
-                                        {selectedWormholeProcessing ? (
-                                            <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700/50">
-                                                <div className="flex flex-wrap gap-2 mb-4">
-                                                    {renderWormholeStepBadge('Ingest', selectedWormholeProcessing.ingest)}
-                                                    {renderWormholeStepBadge('Transcription', selectedWormholeProcessing.transcription)}
-                                                    {renderWormholeStepBadge('Summarization', selectedWormholeProcessing.summarization)}
-                                                    {renderWormholeStepBadge('Key terms', selectedWormholeProcessing.keyTerms)}
-                                                    {renderWormholeStepBadge('Wiki update', selectedWormholeProcessing.wikiUpdate)}
-                                                </div>
-
-                                                {/* Run Stats */}
-                                                <div className="grid grid-cols-3 gap-4 mb-4 border-t border-gray-700/50 pt-4">
-                                                    <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
-                                                        <rux-icon icon="subject" size="small" className="text-cyan-400 mb-1"></rux-icon>
-                                                        <span className="text-2xl font-bold text-white">{selected.cardRecord?.summaries?.length || 0}</span>
-                                                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Summaries</span>
+                                                ) : (
+                                                    <div className="text-gray-500 text-xs italic p-3 bg-gray-900/30 rounded-lg border border-gray-800">
+                                                        No scrolls attached. Attach a text/markdown card to provide context for AI analysis.
                                                     </div>
-                                                    <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
-                                                        <rux-icon icon="local-offer" size="small" className="text-purple-400 mb-1"></rux-icon>
-                                                        <span className="text-2xl font-bold text-white">{selected.cardRecord?.keyTerms?.length || 0}</span>
-                                                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Key Terms</span>
-                                                    </div>
-                                                    <div className="flex flex-col items-center p-3 bg-gray-900/50 rounded-lg border border-gray-700/30">
-                                                        <rux-icon icon="public" size="small" className="text-emerald-400 mb-1"></rux-icon>
-                                                        <span className="text-2xl font-bold text-white">{selected.cardRecord?.wormhole?.wikiEntries?.length || 0}</span>
-                                                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Wiki Entries</span>
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-                                                    <rux-button
-                                                        size="small"
-                                                        secondary
-                                                        onClick={() => runWormholeStep('summarization')}
-                                                        disabled={wormholeActionPending}
-                                                    >
-                                                        {wormholeActionPending && activeWormholeStep === 'summarization' ? (
-                                                            <>
-                                                                <rux-icon
-                                                                    icon="sync"
-                                                                    size="extra-small"
-                                                                    className="animate-spin mr-1"
-                                                                ></rux-icon>
-                                                                Running…
-                                                            </>
-                                                        ) : (
-                                                            'Run Summarization'
-                                                        )}
-                                                    </rux-button>
-                                                    <rux-button
-                                                        size="small"
-                                                        secondary
-                                                        onClick={() => runWormholeStep('keyTerms')}
-                                                        disabled={wormholeActionPending}
-                                                    >
-                                                        {wormholeActionPending && activeWormholeStep === 'keyTerms' ? (
-                                                            <>
-                                                                <rux-icon
-                                                                    icon="sync"
-                                                                    size="extra-small"
-                                                                    className="animate-spin mr-1"
-                                                                ></rux-icon>
-                                                                Running…
-                                                            </>
-                                                        ) : (
-                                                            'Run Key Terms'
-                                                        )}
-                                                    </rux-button>
-                                                    <rux-button
-                                                        size="small"
-                                                        secondary
-                                                        onClick={() => runWormholeStep('wikiUpdate')}
-                                                        disabled={wormholeActionPending}
-                                                    >
-                                                        {wormholeActionPending && activeWormholeStep === 'wikiUpdate' ? (
-                                                            <>
-                                                                <rux-icon
-                                                                    icon="sync"
-                                                                    size="extra-small"
-                                                                    className="animate-spin mr-1"
-                                                                ></rux-icon>
-                                                                Running…
-                                                            </>
-                                                        ) : (
-                                                            'Run Wiki Update'
-                                                        )}
-                                                    </rux-button>
-                                                </div>
+                                                )}
                                             </div>
-                                        ) : (
-                                            <div className="text-gray-500 text-sm italic">
-                                                No Wormhole data associated with this card.
-                                            </div>
-                                        )}
-                                    </div>
 
-                                    {/* SCROLLS Section - Context documents for LLM analysis */}
-                                    <div className="space-y-4">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2 text-amber-400">
-                                                <rux-icon icon="description" size="small"></rux-icon>
-                                                <h3 className="font-bold uppercase tracking-wider text-sm">Scrolls (Context)</h3>
-                                            </div>
-                                            <button
-                                                onClick={async () => {
-                                                    if (!window.electronAPI?.getTextCardsForScroll) return;
-                                                    try {
-                                                        const textCards = await window.electronAPI.getTextCardsForScroll();
-                                                        setAvailableScrollCards(textCards || []);
-                                                        setShowScrollPicker(true);
-                                                    } catch (e) {
-                                                        console.error('Failed to load text cards:', e);
-                                                    }
-                                                }}
-                                                className="text-xs px-3 py-1 bg-amber-900/30 hover:bg-amber-900/50 border border-amber-500/30 rounded text-amber-300 transition-colors"
-                                            >
-                                                + Attach Scroll
-                                            </button>
-                                        </div>
-                                        
-                                        {/* Attached Scrolls */}
-                                        {selected.cardRecord?.scrolls && selected.cardRecord.scrolls.length > 0 ? (
+                                            {/* Raw Data Section */}
                                             <div className="space-y-2">
-                                                {selected.cardRecord.scrolls.map((scroll: any) => (
-                                                    <div 
-                                                        key={scroll.cardId}
-                                                        className="flex items-center justify-between p-3 bg-amber-900/20 border border-amber-500/30 rounded-lg"
-                                                    >
-                                                        <div className="flex items-center gap-2">
-                                                            <rux-icon icon="text-snippet" size="extra-small" className="text-amber-300"></rux-icon>
-                                                            <span className="text-sm text-amber-200 font-mono truncate max-w-[200px]">
-                                                                {scroll.label || scroll.cardId}
-                                                            </span>
-                                                        </div>
-                                                        <button
-                                                            onClick={async () => {
-                                                                if (!window.electronAPI?.detachCardScroll || !selected) return;
-                                                                try {
-                                                                    await window.electronAPI.detachCardScroll({
-                                                                        cardId: selected.cardId,
-                                                                        scrollCardId: scroll.cardId,
-                                                                    });
-                                                                    await loadCards(selected.cardId);
-                                                                } catch (e: any) {
-                                                                    setError(e?.message || 'Failed to detach scroll');
-                                                                }
-                                                            }}
-                                                            className="text-red-400 hover:text-red-300 text-xs px-2"
-                                                            title="Remove scroll"
-                                                        >
-                                                            ✕
-                                                        </button>
-                                                    </div>
-                                                ))}
+                                                <div className="flex items-center gap-2 text-gray-500">
+                                                    <rux-icon icon="code" size="small"></rux-icon>
+                                                    <h3 className="font-bold uppercase tracking-wider text-xs">Raw Metadata</h3>
+                                                </div>
+                                                <pre className="bg-black/50 border border-gray-800 rounded-lg p-4 text-[10px] font-mono text-gray-400 overflow-x-auto max-h-60 custom-scrollbar">
+                                                    {JSON.stringify(selected.cardRecord || selected.raw, null, 2)}
+                                                </pre>
                                             </div>
-                                        ) : (
-                                            <div className="text-gray-500 text-xs italic p-3 bg-gray-900/30 rounded-lg border border-gray-800">
-                                                No scrolls attached. Attach a text/markdown card to provide context for AI analysis.
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Raw Data Section */}
-                                    <div className="space-y-2">
-                                        <div className="flex items-center gap-2 text-gray-500">
-                                            <rux-icon icon="code" size="small"></rux-icon>
-                                            <h3 className="font-bold uppercase tracking-wider text-xs">Raw Metadata</h3>
                                         </div>
-                                        <pre className="bg-black/50 border border-gray-800 rounded-lg p-4 text-[10px] font-mono text-gray-400 overflow-x-auto max-h-60 custom-scrollbar">
-                                            {JSON.stringify(selected.cardRecord || selected.raw, null, 2)}
-                                        </pre>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-            </div>
-        </div>
-        
-        {/* Lightbox Modal for Full-Screen Image View */}
-        {showLightbox && selected && (
-            <div 
-                className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center cursor-zoom-out"
-                onClick={() => setShowLightbox(false)}
-            >
-                <div className="absolute top-4 right-4 flex gap-2 z-10">
-                    <button
-                        onClick={(e) => { e.stopPropagation(); setShowLightbox(false); }}
-                        className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white transition-colors"
-                        title="Close lightbox"
-                        aria-label="Close lightbox"
-                    >
-                        <rux-icon icon="close" size="small"></rux-icon>
-                    </button>
-                </div>
-                <img 
-                    src={(() => {
-                        const rec = selected.cardRecord || {};
-                        const imgPath = rec.mediaPrompts?.generated_image_local || selected.thumbnail || selected.mediaLocalPath;
-                        return imgPath ? toFileUrl(imgPath) : '';
-                    })()}
-                    alt={selected.name}
-                    className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-                    onClick={(e) => e.stopPropagation()}
-                />
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 px-4 py-2 rounded-full">
-                    <span className="text-white font-mono text-sm">{selected.name}</span>
-                </div>
-            </div>
-        )}
-        
-        {/* 3D Card Viewer */}
-        {show3DViewer && (
-            <Suspense fallback={
-                <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="text-cyan-400 text-4xl mb-4 animate-pulse">◈</div>
-                        <div className="text-cyan-300 font-mono">Loading Card Nexus...</div>
-                    </div>
-                </div>
-            }>
-                <Card3DViewer
-                    cards={cards.map(c => ({
-                        cardId: c.cardId,
-                        name: c.name,
-                        mediaKind: c.mediaKind,
-                        thumbnail: c.thumbnail,
-                        mediaLocalPath: c.mediaLocalPath,
-                        parentCardId: c.parentCardId,
-                        cardRecord: c.cardRecord,
-                    }))}
-                    focusedCardId={selected?.cardId}
-                    onCardSelect={(cardId) => {
-                        const card = cards.find(c => c.cardId === cardId);
-                        if (card) setSelected(card);
-                    }}
-                    onClose={() => setShow3DViewer(false)}
-                />
-            </Suspense>
-        )}
-        
-        {/* Scroll Picker Modal */}
-        {showScrollPicker && selected && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-                <div className="bg-gray-900 border border-amber-500/30 rounded-xl p-6 w-full max-w-md max-h-[70vh] overflow-hidden flex flex-col">
-                    <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-bold text-amber-400 flex items-center gap-2">
-                            <rux-icon icon="description" size="small"></rux-icon>
-                            Attach Scroll
-                        </h2>
-                        <button
-                            onClick={() => setShowScrollPicker(false)}
-                            className="text-gray-400 hover:text-white text-xl"
-                        >
-                            ✕
-                        </button>
-                    </div>
-                    
-                    <p className="text-sm text-gray-400 mb-4">
-                        Select a text or markdown card to attach as context for AI analysis.
-                    </p>
-                    
-                    <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
-                        {availableScrollCards.length === 0 ? (
-                            <div className="text-gray-500 text-sm italic text-center py-8">
-                                No text or markdown cards found in your library.
-                            </div>
-                        ) : (
-                            availableScrollCards
-                                .filter(sc => sc.cardId !== selected.cardId) // Don't show self
-                                .filter(sc => !selected.cardRecord?.scrolls?.some((s: any) => s.cardId === sc.cardId)) // Don't show already attached
-                                .map(scrollCard => (
-                                    <button
-                                        key={scrollCard.cardId}
-                                        onClick={async () => {
-                                            if (!window.electronAPI?.attachCardScroll || scrollAttaching) return;
-                                            setScrollAttaching(true);
-                                            try {
-                                                await window.electronAPI.attachCardScroll({
-                                                    cardId: selected.cardId,
-                                                    scrollCardId: scrollCard.cardId,
-                                                });
-                                                await loadCards(selected.cardId);
-                                                setShowScrollPicker(false);
-                                            } catch (e: any) {
-                                                setError(e?.message || 'Failed to attach scroll');
-                                            } finally {
-                                                setScrollAttaching(false);
-                                            }
-                                        }}
-                                        disabled={scrollAttaching}
-                                        className="w-full text-left p-3 bg-gray-800/50 hover:bg-amber-900/30 border border-gray-700 hover:border-amber-500/50 rounded-lg transition-all"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <rux-icon 
-                                                icon={scrollCard.mediaType === 'markdown' ? 'article' : 'text-snippet'} 
-                                                size="small" 
-                                                className="text-amber-400"
-                                            ></rux-icon>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="text-sm text-gray-200 truncate font-mono">
-                                                    {scrollCard.name}
-                                                </div>
-                                                <div className="text-xs text-gray-500">
-                                                    {scrollCard.mediaType.toUpperCase()}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </button>
-                                ))
                         )}
                     </div>
-                    
-                    <div className="mt-4 pt-4 border-t border-gray-800 flex justify-end">
-                        <button
-                            onClick={() => setShowScrollPicker(false)}
-                            className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
-                        >
-                            Cancel
-                        </button>
-                    </div>
                 </div>
             </div>
-        )}
+
+            {/* Lightbox Modal for Full-Screen Image View */}
+            {showLightbox && selected && (
+                <div
+                    className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center cursor-zoom-out"
+                    onClick={() => setShowLightbox(false)}
+                >
+                    <div className="absolute top-4 right-4 flex gap-2 z-10">
+                        <button
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                const rec = selected.cardRecord || {};
+                                const imgPath = rec.mediaPrompts?.generated_image_local || selected.thumbnail || selected.mediaLocalPath;
+                                if (imgPath) {
+                                    await downloadMedia(
+                                        toFileUrl(imgPath),
+                                        `${selected.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`,
+                                        'image'
+                                    );
+                                }
+                            }}
+                            className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white transition-colors"
+                            title="Download image"
+                            aria-label="Download image"
+                        >
+                            <rux-icon icon="download" size="small"></rux-icon>
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setShowLightbox(false); }}
+                            className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white transition-colors"
+                            title="Close lightbox"
+                            aria-label="Close lightbox"
+                        >
+                            <rux-icon icon="close" size="small"></rux-icon>
+                        </button>
+                    </div>
+                    <img
+                        src={(() => {
+                            const rec = selected.cardRecord || {};
+                            const imgPath = rec.mediaPrompts?.generated_image_local || selected.thumbnail || selected.mediaLocalPath;
+                            return imgPath ? toFileUrl(imgPath) : '';
+                        })()}
+                        alt={selected.name}
+                        className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 px-4 py-2 rounded-full">
+                        <span className="text-white font-mono text-sm">{selected.name}</span>
+                    </div>
+                </div>
+            )}
+
+            {/* 3D Card Viewer */}
+            {show3DViewer && (
+                <Suspense fallback={
+                    <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="text-cyan-400 text-4xl mb-4 animate-pulse">◈</div>
+                            <div className="text-cyan-300 font-mono">Loading Card Nexus...</div>
+                        </div>
+                    </div>
+                }>
+                    <Card3DViewer
+                        cards={cards.map(c => ({
+                            cardId: c.cardId,
+                            name: c.name,
+                            mediaKind: c.mediaKind,
+                            thumbnail: c.thumbnail,
+                            mediaLocalPath: c.mediaLocalPath,
+                            parentCardId: c.parentCardId,
+                            cardRecord: c.cardRecord,
+                        }))}
+                        focusedCardId={selected?.cardId}
+                        onCardSelect={(cardId) => {
+                            const card = cards.find(c => c.cardId === cardId);
+                            if (card) setSelected(card);
+                        }}
+                        onClose={() => setShow3DViewer(false)}
+                    />
+                </Suspense>
+            )}
+
+            {/* Scroll Picker Modal */}
+            {showScrollPicker && selected && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                    <div className="bg-gray-900 border border-amber-500/30 rounded-xl p-6 w-full max-w-md max-h-[70vh] overflow-hidden flex flex-col">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-amber-400 flex items-center gap-2">
+                                <rux-icon icon="description" size="small"></rux-icon>
+                                Attach Scroll
+                            </h2>
+                            <button
+                                onClick={() => setShowScrollPicker(false)}
+                                className="text-gray-400 hover:text-white text-xl"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <p className="text-sm text-gray-400 mb-4">
+                            Select a text or markdown card to attach as context for AI analysis.
+                        </p>
+
+                        <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+                            {availableScrollCards.length === 0 ? (
+                                <div className="text-gray-500 text-sm italic text-center py-8">
+                                    No text or markdown cards found in your library.
+                                </div>
+                            ) : (
+                                availableScrollCards
+                                    .filter(sc => sc.cardId !== selected.cardId) // Don't show self
+                                    .filter(sc => !selected.cardRecord?.scrolls?.some((s: any) => s.cardId === sc.cardId)) // Don't show already attached
+                                    .map(scrollCard => (
+                                        <button
+                                            key={scrollCard.cardId}
+                                            onClick={async () => {
+                                                if (!window.electronAPI?.attachCardScroll || scrollAttaching) return;
+                                                setScrollAttaching(true);
+                                                try {
+                                                    await window.electronAPI.attachCardScroll({
+                                                        cardId: selected.cardId,
+                                                        scrollCardId: scrollCard.cardId,
+                                                    });
+                                                    await loadCards(selected.cardId);
+                                                    setShowScrollPicker(false);
+                                                } catch (e: any) {
+                                                    setError(e?.message || 'Failed to attach scroll');
+                                                } finally {
+                                                    setScrollAttaching(false);
+                                                }
+                                            }}
+                                            disabled={scrollAttaching}
+                                            className="w-full text-left p-3 bg-gray-800/50 hover:bg-amber-900/30 border border-gray-700 hover:border-amber-500/50 rounded-lg transition-all"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <rux-icon
+                                                    icon={scrollCard.mediaType === 'markdown' ? 'article' : 'text-snippet'}
+                                                    size="small"
+                                                    className="text-amber-400"
+                                                ></rux-icon>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-sm text-gray-200 truncate font-mono">
+                                                        {scrollCard.name}
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">
+                                                        {scrollCard.mediaType.toUpperCase()}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </button>
+                                    ))
+                            )}
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t border-gray-800 flex justify-end">
+                            <button
+                                onClick={() => setShowScrollPicker(false)}
+                                className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 };

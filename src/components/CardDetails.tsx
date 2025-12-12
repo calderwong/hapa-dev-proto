@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React from 'react';
+import { useMediaDownload } from '../hooks/useMediaDownload';
 
 interface ModelProvenance {
   commonName: string;
@@ -62,15 +63,15 @@ const getRarity = (type: string): { name: string; color: string; stars: number }
 };
 
 // Stat bar component
-const StatBar: React.FC<{ label: string; value: number; max?: number; color: string }> = ({ 
-  label, value, max = 100, color 
+const StatBar: React.FC<{ label: string; value: number; max?: number; color: string }> = ({
+  label, value, max = 100, color
 }) => {
   const percentage = Math.min((value / max) * 100, 100);
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="w-16 text-gray-400 font-mono">{label}</span>
       <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
-        <div 
+        <div
           className={`h-full ${color} transition-all duration-500`}
           style={{ width: `${percentage}%` }}
         />
@@ -92,14 +93,15 @@ const CardDetails: React.FC<CardDetailsProps> = ({
   const [videoGenStatus, setVideoGenStatus] = React.useState<'idle' | 'generating' | 'complete' | 'error'>('idle');
   const [generatedVideoPath, setGeneratedVideoPath] = React.useState<string | null>(null);
   const [showReveal, setShowReveal] = React.useState(false);
-  
+  const { downloadMedia } = useMediaDownload();
+
   const rarity = getRarity(card.card_data.stats?.type || 'Concept');
   const hasImage = !!card.media_prompts?.generated_image_local;
-  
+
   // Handle video generation for this card
   const handleGenerateVideo = async () => {
     if (!hasImage || !window.electronAPI?.createLoopVideoForImage) return;
-    
+
     setVideoGenStatus('generating');
     try {
       const result = await window.electronAPI.createLoopVideoForImage({
@@ -110,15 +112,15 @@ const CardDetails: React.FC<CardDetailsProps> = ({
         cardName: card.card_data.name,
         imageOrder: 0
       });
-      
+
       setVideoGenStatus('complete');
-      
+
       if (result && result.videoPath) {
         setGeneratedVideoPath(`file://${result.videoPath}`);
         setShowReveal(true);
         // Play reveal sound (placeholder)
         // new Audio('path/to/reveal.mp3').play().catch(() => {});
-        
+
         // Hide reveal after animation
         setTimeout(() => setShowReveal(false), 3000);
       }
@@ -127,7 +129,7 @@ const CardDetails: React.FC<CardDetailsProps> = ({
       setVideoGenStatus('error');
     }
   };
-  
+
   // Generate pseudo-random stats based on card name for visual interest
   const generateStat = (seed: string, base: number = 50) => {
     let hash = 0;
@@ -137,7 +139,7 @@ const CardDetails: React.FC<CardDetailsProps> = ({
     }
     return Math.abs(hash % 50) + base;
   };
-  
+
   const stats = {
     power: generateStat(card.card_data.name + 'power', 40),
     wisdom: generateStat(card.card_data.name + 'wisdom', 30),
@@ -167,7 +169,7 @@ const CardDetails: React.FC<CardDetailsProps> = ({
       <div className="relative w-full max-w-4xl max-h-[90vh] overflow-hidden">
         {/* Holographic border effect */}
         <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 opacity-50 blur-sm animate-pulse" />
-        
+
         <div className="relative bg-gray-900 rounded-2xl border border-gray-700 overflow-hidden">
           {/* Header */}
           <div className="relative h-14 bg-gradient-to-r from-gray-800 via-gray-900 to-gray-800 border-b border-gray-700 flex items-center justify-between px-6">
@@ -177,12 +179,12 @@ const CardDetails: React.FC<CardDetailsProps> = ({
                 {'★'.repeat(rarity.stars)}{'☆'.repeat(5 - rarity.stars)} {rarity.name}
               </span>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <rux-icon icon="auto-awesome" size="small" className="text-cyan-400"></rux-icon>
               <span className="text-sm font-mono text-gray-400">CARD #{cardIndex + 1} / {totalCards}</span>
             </div>
-            
+
             <button
               onClick={onClose}
               className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
@@ -196,26 +198,26 @@ const CardDetails: React.FC<CardDetailsProps> = ({
             {/* Left Column - Card Visual */}
             <div className="lg:w-1/3 flex flex-col gap-4">
               {/* Card Image - Clickable for Lightbox */}
-              <div 
+              <div
                 className={`relative aspect-[3/4] rounded-xl overflow-hidden border-2 border-gray-700 bg-gradient-to-br from-gray-800 to-gray-900 ${hasImage ? 'cursor-pointer group' : ''}`}
                 onClick={() => hasImage && setShowLightbox(true)}
                 title={hasImage ? "Click to enlarge" : undefined}
               >
                 {hasImage ? (
                   <>
-                    <img 
+                    <img
                       src={`file://${card.media_prompts.generated_image_local}`}
                       alt={card.card_data.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
-                    
+
                     {/* Video Loop Overlay */}
                     {generatedVideoPath && (
-                      <video 
+                      <video
                         src={generatedVideoPath}
                         className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10"
-                        muted 
-                        loop 
+                        muted
+                        loop
                         playsInline
                         onMouseEnter={(e) => e.currentTarget.play()}
                         onMouseLeave={(e) => e.currentTarget.pause()}
@@ -235,16 +237,16 @@ const CardDetails: React.FC<CardDetailsProps> = ({
                     {/* Gacha Reveal Animation */}
                     {showReveal && (
                       <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-                         {/* Flash Effect */}
-                         <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-                         
-                         {/* Unlock Text */}
-                         <div className="relative text-center animate-bounce">
-                           <rux-icon icon="movie" size="large" className="text-emerald-400 mb-2 drop-shadow-[0_0_15px_rgba(52,211,153,0.8)]"></rux-icon>
-                           <h3 className="text-xl font-bold text-white uppercase tracking-widest drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">
-                             VIDEO UNLOCKED!
-                           </h3>
-                         </div>
+                        {/* Flash Effect */}
+                        <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+
+                        {/* Unlock Text */}
+                        <div className="relative text-center animate-bounce">
+                          <rux-icon icon="movie" size="large" className="text-emerald-400 mb-2 drop-shadow-[0_0_15px_rgba(52,211,153,0.8)]"></rux-icon>
+                          <h3 className="text-xl font-bold text-white uppercase tracking-widest drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">
+                            VIDEO UNLOCKED!
+                          </h3>
+                        </div>
                       </div>
                     )}
                   </>
@@ -259,7 +261,7 @@ const CardDetails: React.FC<CardDetailsProps> = ({
                     </p>
                   </div>
                 )}
-                
+
                 {/* Card name overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4">
                   <h2 className="text-xl font-bold text-white drop-shadow-lg">
@@ -288,14 +290,14 @@ const CardDetails: React.FC<CardDetailsProps> = ({
                   <div className="flex-1 h-1 rounded-full bg-gray-700" title="Committed" />
                 </div>
               </div>
-              
+
               {/* Video Generation Button */}
               {hasImage && (
                 <button
                   onClick={handleGenerateVideo}
                   disabled={videoGenStatus === 'generating'}
                   className={`w-full py-3 px-4 rounded-lg border flex items-center justify-center gap-2 text-sm font-mono transition-all
-                    ${videoGenStatus === 'generating' 
+                    ${videoGenStatus === 'generating'
                       ? 'bg-purple-900/30 border-purple-500/50 text-purple-300 cursor-wait'
                       : videoGenStatus === 'complete'
                         ? 'bg-emerald-900/30 border-emerald-500/50 text-emerald-300'
@@ -358,9 +360,8 @@ const CardDetails: React.FC<CardDetailsProps> = ({
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-bold text-cyan-300">{skill.name}</span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                            skill.type === 'Active' ? 'bg-red-900/50 text-red-300' : 'bg-blue-900/50 text-blue-300'
-                          }`}>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${skill.type === 'Active' ? 'bg-red-900/50 text-red-300' : 'bg-blue-900/50 text-blue-300'
+                            }`}>
                             {skill.type}
                           </span>
                         </div>
@@ -458,15 +459,14 @@ const CardDetails: React.FC<CardDetailsProps> = ({
           <div className="h-12 bg-gray-800 border-t border-gray-700 flex items-center justify-between px-6">
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-500 font-mono">PIPELINE:</span>
-              <span className={`text-xs font-mono ${
-                pipelineStatus === 'COMPLETE' ? 'text-emerald-400' : 'text-cyan-400 animate-pulse'
-              }`}>
+              <span className={`text-xs font-mono ${pipelineStatus === 'COMPLETE' ? 'text-emerald-400' : 'text-cyan-400 animate-pulse'
+                }`}>
                 {pipelineStatus}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                <div 
+                <div
                   className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all duration-300"
                   style={{ width: `${pipelineProgress}%` }}
                 />
@@ -476,14 +476,29 @@ const CardDetails: React.FC<CardDetailsProps> = ({
           </div>
         </div>
       </div>
-      
+
       {/* Lightbox Modal */}
       {showLightbox && hasImage && (
-        <div 
+        <div
           className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center cursor-zoom-out"
           onClick={() => setShowLightbox(false)}
         >
           <div className="absolute top-4 right-4 flex gap-2">
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                await downloadMedia(
+                  `file://${card.media_prompts.generated_image_local}`,
+                  `${card.card_data.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`,
+                  'image'
+                );
+              }}
+              className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white transition-colors"
+              title="Download image"
+              aria-label="Download image"
+            >
+              <rux-icon icon="download" size="small"></rux-icon>
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); setShowLightbox(false); }}
               className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white transition-colors"
@@ -493,7 +508,7 @@ const CardDetails: React.FC<CardDetailsProps> = ({
               <rux-icon icon="close" size="small"></rux-icon>
             </button>
           </div>
-          <img 
+          <img
             src={`file://${card.media_prompts.generated_image_local}`}
             alt={card.card_data.name}
             className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
