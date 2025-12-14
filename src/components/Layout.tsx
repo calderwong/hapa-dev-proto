@@ -4,6 +4,8 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import PetPortal from './pets/PetPortal';
 import CardHand from './cards/CardHand';
 import { DragCanvas } from './DragCanvas';
+import { useDragCanvas } from '../contexts/DragCanvasContext';
+import { createFlyingCardClone } from '../hooks/useAnime';
 
 interface NavItemConfig {
     path: string;
@@ -102,10 +104,120 @@ const Layout: React.FC = () => {
     const location = useLocation();
     const wormholeActivity = useWormholeActivity();
     const [isMuted, setIsMuted] = React.useState(getMuteState());
+    const { registerSnapZone, unregisterSnapZone, items: overlayItems, removeItem, selectedItemId } = useDragCanvas();
+    const [menuStacks, setMenuStacks] = React.useState<Record<string, any[]>>({});
     const wormholeBusy = wormholeActivity.busy;
     const wormholeLabel = wormholeBusy
         ? `WH:${String(wormholeActivity.lastStep || 'RUN').toUpperCase()}`
         : 'WH:IDLE';
+
+    const hasOverlayItems = overlayItems.length > 0;
+    const showLocationTargets = true;
+    const hasShootableSelected = !!selectedItemId || overlayItems.length === 1;
+
+    const toFileUrl = React.useCallback((p?: string) => {
+        if (!p) return null;
+        const raw = String(p);
+        if (raw.startsWith('file://')) return raw;
+        if (raw.startsWith('data:')) return raw;
+        if (raw.startsWith('blob:')) return raw;
+        if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+        const normalized = raw.replace(/\\/g, '/');
+        return `file:///${normalized}`;
+    }, []);
+
+    const getBestThumbnail = React.useCallback((data: any) => {
+        const d: any = data || {};
+        const rec: any = d.cardRecord || d.raw || {};
+        const kind = String(d.mediaKind || rec.mediaKind || '');
+
+        const normalizeMaybeLocalUrl = (v: any) => {
+            if (!v) return null;
+            const s = String(v).trim();
+            if (!s) return null;
+            if (s.startsWith('file://') || s.startsWith('data:') || s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
+                return s;
+            }
+            return toFileUrl(s);
+        };
+
+        const isImagePath = (p: any) => {
+            if (!p) return false;
+            const s = String(p).toLowerCase();
+            return s.endsWith('.png') || s.endsWith('.jpg') || s.endsWith('.jpeg') || s.endsWith('.webp') || s.endsWith('.gif') || s.endsWith('.bmp') || s.endsWith('.svg');
+        };
+
+        const direct = d.thumbnail || d.imageUrl || d.thumbUrl || d.thumbnailUrl || d.poster;
+        if (direct) return normalizeMaybeLocalUrl(direct);
+
+        const recThumb = rec.thumbnail || rec.poster || rec.thumbUrl || rec.thumbnailUrl;
+        if (recThumb) return normalizeMaybeLocalUrl(recThumb);
+
+        const sourceImagePath = rec.sourceImage?.localPath;
+        if (sourceImagePath) return toFileUrl(sourceImagePath);
+
+        const imageLocal = d.mediaLocalPath || rec.image?.localPath || rec.mediaLocalPath || rec.mediaPrompts?.generated_image_local;
+        if (imageLocal && (kind === 'image' || isImagePath(imageLocal))) return toFileUrl(imageLocal);
+
+        const imageRemote = d.mediaRemoteUrl || rec.image?.remoteUrl;
+        if (imageRemote && (kind === 'image' || isImagePath(imageRemote))) return String(imageRemote);
+
+        const attachment = rec.attachments?.[0];
+        if (attachment?.dataUrl) return String(attachment.dataUrl);
+        if (attachment?.localPath) return toFileUrl(attachment.localPath);
+
+        return null;
+    }, [toFileUrl]);
+
+    const handleAttachToLocation = React.useCallback((to: string, item: any) => {
+        const d = item?.data || {};
+        const bestThumb = getBestThumbnail(d);
+        const entry = {
+            id: item.id,
+            type: item.type,
+            cardId: d.cardId || d.id || item.id,
+            name: d.name,
+            thumbnail: bestThumb || undefined,
+            mediaKind: d.mediaKind,
+            createdAt: d.createdAt,
+            provider: d.provider,
+            attachedAt: Date.now(),
+        };
+
+        setMenuStacks((prev) => {
+            const stack = Array.isArray(prev[to]) ? prev[to] : [];
+            return {
+                ...prev,
+                [to]: [entry, ...stack],
+            };
+        });
+    }, []);
+
+    const shootSelectedToLocation = React.useCallback((to: string, targetRect: DOMRect) => {
+        const id = selectedItemId || (overlayItems.length === 1 ? overlayItems[0]?.id : null);
+        if (!id) return false;
+
+        const item = overlayItems.find((it) => it.id === id);
+        if (!item) return false;
+
+        const overlayEl = document.querySelector(`[data-overlay-card-id="${CSS.escape(String(item.id))}"]`) as HTMLElement | null;
+        const startRect = overlayEl?.getBoundingClientRect();
+        if (!startRect) return false;
+
+        const startX = startRect.left + startRect.width / 2 - 30;
+        const startY = startRect.top + startRect.height / 2 - 42;
+
+        const targetX = targetRect.left + targetRect.width / 2 - 30;
+        const targetY = targetRect.top + targetRect.height / 2 - 42;
+
+        const bestThumb = getBestThumbnail(item?.data);
+        createFlyingCardClone(bestThumb || undefined, startX, startY, targetX, targetY, () => {
+            handleAttachToLocation(to, item);
+            removeItem(item.id);
+        });
+
+        return true;
+    }, [getBestThumbnail, handleAttachToLocation, overlayItems, removeItem, selectedItemId]);
 
     const [userAvatar, setUserAvatar] = React.useState<string | null>(null);
 
@@ -185,6 +297,9 @@ const Layout: React.FC = () => {
         };
 
         const handleClick = (event: MouseEvent) => {
+            const overlayCard = findInPath(event, (el) => el.hasAttribute('data-overlay-card'));
+            if (overlayCard) return;
+
             const interactive = findInPath(event, (el) =>
                 el.matches('button, a, [role="button"], input[type="submit"], input[type="button"], .interactive'),
             );
@@ -265,7 +380,7 @@ const Layout: React.FC = () => {
                     </div>
                 </div>
 
-                <nav className="flex-1 py-4 space-y-1 overflow-y-auto">
+                <nav className="flex-1 py-4 space-y-1 overflow-y-auto sidebar-nav">
                     {NAV_ITEMS.map((item) => (
                         <SidebarNavItem
                             key={item.path}
@@ -273,6 +388,13 @@ const Layout: React.FC = () => {
                             label={item.label}
                             icon={item.icon}
                             active={location.pathname === item.path}
+                            stack={menuStacks[item.path]}
+                            showLocationTargets={showLocationTargets && (hasOverlayItems || true)}
+                            registerSnapZone={registerSnapZone}
+                            unregisterSnapZone={unregisterSnapZone}
+                            onAttachToLocation={handleAttachToLocation}
+                            onShootSelectedToLocation={shootSelectedToLocation}
+                            hasShootableSelected={hasShootableSelected}
                         />
                     ))}
                 </nav>
@@ -371,9 +493,28 @@ interface SidebarNavItemProps {
     label: string;
     icon: string;
     active: boolean;
+    stack?: any[];
+    showLocationTargets: boolean;
+    registerSnapZone: (zone: any) => void;
+    unregisterSnapZone: (id: string) => void;
+    onAttachToLocation: (to: string, item: any) => void;
+    onShootSelectedToLocation: (to: string, targetRect: DOMRect) => boolean;
+    hasShootableSelected: boolean;
 }
 
-const SidebarNavItem: React.FC<SidebarNavItemProps> = ({ to, label, icon, active }) => {
+const SidebarNavItem: React.FC<SidebarNavItemProps> = ({
+    to,
+    label,
+    icon,
+    active,
+    stack,
+    showLocationTargets,
+    registerSnapZone,
+    unregisterSnapZone,
+    onAttachToLocation,
+    onShootSelectedToLocation,
+    hasShootableSelected,
+}) => {
     const isExperimental = to === '/prototypes';
     const experimentalClass = isExperimental
         ? (active
@@ -383,21 +524,153 @@ const SidebarNavItem: React.FC<SidebarNavItemProps> = ({ to, label, icon, active
             ? 'bg-blue-600 text-white shadow-md shadow-blue-900/20 font-medium'
             : 'text-gray-400 hover:bg-gray-700/60 hover:text-gray-100');
 
+    const containerRef = React.useRef<HTMLDivElement | null>(null);
+    const padRef = React.useRef<HTMLButtonElement | null>(null);
+    const stackCount = Array.isArray(stack) ? stack.length : 0;
+    const top = stackCount > 0 ? stack![0] : null;
+
+    React.useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        const id = `menu-location:${to}`;
+
+        const update = () => {
+            const rect = el.getBoundingClientRect();
+            registerSnapZone({
+                id,
+                rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+                threshold: 90,
+                onSnap: (item: any) => onAttachToLocation(to, item),
+            });
+        };
+
+        update();
+
+        const ro = new ResizeObserver(() => update());
+        ro.observe(el);
+
+        const navEl = el.closest('.sidebar-nav');
+        const onScroll = () => update();
+        navEl?.addEventListener('scroll', onScroll, { passive: true } as any);
+
+        window.addEventListener('resize', update);
+
+        return () => {
+            ro.disconnect();
+            window.removeEventListener('resize', update);
+            navEl?.removeEventListener('scroll', onScroll as any);
+            unregisterSnapZone(id);
+        };
+    }, [onAttachToLocation, registerSnapZone, to, unregisterSnapZone]);
+
     return (
-        <Link
-            to={to}
-            className={`mx-3 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group ${experimentalClass}`}
+        <div
+            ref={containerRef}
+            className={`mx-3 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group relative ${experimentalClass}`}
         >
-            <div
-                className={`${active
-                    ? (isExperimental ? 'text-red-400 animate-spin-slow' : 'text-white animate-neon-breathe')
-                    : (isExperimental ? 'text-red-500/70 group-hover:text-red-400' : 'text-gray-500 group-hover:text-gray-300 group-hover:animate-neon-breathe')
-                    } transition-colors flex-shrink-0 flex items-center justify-center`}
+            <Link
+                to={to}
+                className="flex items-center gap-3 min-w-0 flex-1"
             >
-                <rux-icon icon={icon} size="small"></rux-icon>
+                <div
+                    className={`${active
+                        ? (isExperimental ? 'text-red-400 animate-spin-slow' : 'text-white animate-neon-breathe')
+                        : (isExperimental ? 'text-red-500/70 group-hover:text-red-400' : 'text-gray-500 group-hover:text-gray-300 group-hover:animate-neon-breathe')
+                        } transition-colors flex-shrink-0 flex items-center justify-center`}
+                >
+                    <rux-icon icon={icon} size="small"></rux-icon>
+                </div>
+                <span className="truncate leading-none pt-0.5">{label}</span>
+            </Link>
+
+            <div className="relative flex-shrink-0">
+                <button
+                    ref={padRef}
+                    type="button"
+                    onClick={(e) => {
+                        if (!padRef.current) return;
+                        if (!hasShootableSelected) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const rect = padRef.current.getBoundingClientRect();
+                        onShootSelectedToLocation(to, rect);
+                    }}
+                    title={hasShootableSelected ? 'Shoot selected card here' : 'Drop a card here'}
+                    className={`relative w-16 h-11 rounded-md border overflow-hidden transition-all duration-200 ${stackCount > 0
+                        ? 'border-red-400/70 shadow-[0_0_18px_rgba(239,68,68,0.35)] bg-red-950/20'
+                        : showLocationTargets
+                            ? 'border-red-900/40 bg-gray-900/30 opacity-75 group-hover:opacity-95'
+                            : 'border-gray-700/40 bg-gray-900/20 opacity-35 group-hover:opacity-60'
+                        } ${hasShootableSelected ? 'ring-1 ring-cyan-300/40 shadow-[0_0_16px_rgba(34,211,238,0.18)]' : ''}`}
+                >
+                    {stackCount > 1 && (
+                        <div className="absolute inset-0 pointer-events-none">
+                            <div className="absolute inset-0 rounded-md border border-red-400/15 opacity-60" style={{ transform: 'translate(3px, -2px)' }} />
+                            <div className="absolute inset-0 rounded-md border border-red-400/10 opacity-40" style={{ transform: 'translate(5px, -4px)' }} />
+                        </div>
+                    )}
+
+                    {top?.thumbnail ? (
+                        <div className="absolute inset-0">
+                            <img
+                                src={top.thumbnail}
+                                alt={top.name || top.cardId || 'Card'}
+                                className="absolute left-1/2 top-1/2 w-[72px] h-[54px] object-cover -translate-x-1/2 -translate-y-1/2 rotate-90"
+                                draggable={false}
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-black/35" />
+                            <div className="absolute inset-0 ring-1 ring-white/5" />
+                        </div>
+                    ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className={`w-6 h-6 rounded border ${showLocationTargets ? 'border-red-500/25 bg-red-950/15' : 'border-gray-700 bg-gray-900/30'} ${hasShootableSelected ? 'border-cyan-300/35 shadow-[0_0_18px_rgba(34,211,238,0.12)]' : ''}`} />
+                        </div>
+                    )}
+
+                    {(showLocationTargets || stackCount > 0) && (
+                        <div className="absolute inset-0 pointer-events-none">
+                            <div className={`${stackCount > 0 ? 'opacity-0' : 'opacity-100'} absolute inset-0 bg-gradient-to-b from-red-500/5 via-transparent to-transparent`} />
+                        </div>
+                    )}
+                </button>
+
+                {stackCount > 0 && (
+                    <div className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center shadow-[0_0_10px_rgba(239,68,68,0.35)]">
+                        {stackCount}
+                    </div>
+                )}
+
+                {stackCount > 0 && (
+                    <div className="absolute right-16 top-1/2 -translate-y-1/2 hidden group-hover:block pointer-events-none">
+                        <div className="w-64 rounded-xl bg-gray-950/92 border border-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.18)] backdrop-blur-sm p-2">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-red-200 px-1">{label} Stack</div>
+                            <div className="mt-2 space-y-1 max-h-56 overflow-hidden">
+                                {stack!.slice(0, 8).map((c: any, idx: number) => (
+                                    <div key={`${c.cardId}-${idx}`} className="flex items-center gap-2 px-1 py-1 rounded-lg bg-gray-900/30 border border-gray-800/40">
+                                        <div className="w-9 h-6 rounded-md overflow-hidden border border-red-400/20 bg-gray-900/30 flex-shrink-0">
+                                            {c.thumbnail ? (
+                                                <img src={c.thumbnail} alt={c.name || c.cardId} className="w-full h-full object-cover" draggable={false} />
+                                            ) : (
+                                                <div className="w-full h-full" />
+                                            )}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="text-[10px] text-gray-200 truncate">{c.name || c.cardId}</div>
+                                            <div className="text-[9px] text-gray-500 font-mono truncate">#{idx + 1}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                                {stackCount > 8 && (
+                                    <div className="text-[10px] text-gray-500 font-mono px-1">+{stackCount - 8} more…</div>
+                                )}
+                            </div>
+                            <div className="mt-2 text-[9px] text-gray-500 font-mono px-1">Priority: top → bottom</div>
+                        </div>
+                    </div>
+                )}
             </div>
-            <span className="truncate leading-none pt-0.5">{label}</span>
-        </Link>
+        </div>
     );
 };
 

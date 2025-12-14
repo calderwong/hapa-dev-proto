@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import PageContainer from '../components/PageContainer';
 import type { WormholeSettings, WormholeProviderId } from '../types';
+import { initFirebase, validateFirebaseConfigJson } from '../firebase';
 
 interface ModelInfo {
     name: string;
@@ -115,8 +116,40 @@ USER REQUEST: {{USER_PROMPT}}`;
         loadModels();
     }, [loadModels]);
 
+    const handleValidateFirebase = () => {
+        try {
+            const parsed = validateFirebaseConfigJson(firebaseConfig);
+            setStatus(parsed.ok ? 'Firebase config JSON valid' : 'Firebase config invalid or empty');
+            setTimeout(() => setStatus(''), 3000);
+        } catch (err) {
+            setStatus('Firebase validation failed');
+            setTimeout(() => setStatus(''), 3000);
+        }
+    };
+
+    const handleInitFirebase = () => {
+        try {
+            const ok = initFirebase(firebaseConfig);
+            setStatus(ok ? 'Firebase initialized' : 'Firebase init failed (check config)');
+            setTimeout(() => setStatus(''), 4000);
+        } catch (err) {
+            setStatus('Firebase init failed');
+            setTimeout(() => setStatus(''), 4000);
+        }
+    };
+
     const handleSave = async () => {
         if (window.electronAPI) {
+            const trimmedFirebaseConfig = (firebaseConfig || '').trim();
+            if (trimmedFirebaseConfig.length > 0) {
+                const parsed = validateFirebaseConfigJson(trimmedFirebaseConfig);
+                if (!parsed.ok) {
+                    setStatus('Firebase config invalid JSON (not saved)');
+                    setTimeout(() => setStatus(''), 4000);
+                    return;
+                }
+            }
+
             const wormholePayload = {
                 transcription: wormhole.transcription,
                 summarization: wormhole.summarization,
@@ -165,6 +198,8 @@ USER REQUEST: {{USER_PROMPT}}`;
             return (
                 <div className="relative">
                     <select
+                        aria-label={`${stepKey} model`}
+                        title="Model"
                         value={currentModel}
                         onChange={(e) =>
                             setWormhole((prev) => {
@@ -391,6 +426,20 @@ USER REQUEST: {{USER_PROMPT}}`;
                                         className="w-full h-32 rounded-lg px-4 py-2.5 input-base font-mono text-xs leading-relaxed"
                                         placeholder='{"apiKey": "...", "authDomain": "..."}'
                                     />
+                                    <div className="flex items-center justify-end pt-2">
+                                        <button
+                                            onClick={handleInitFirebase}
+                                            className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg border border-cyan-500/30 text-cyan-200 bg-cyan-900/10 hover:bg-cyan-900/20 hover:border-cyan-400 transition-colors"
+                                        >
+                                            Initialize Firebase
+                                        </button>
+                                        <button
+                                            onClick={handleValidateFirebase}
+                                            className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-lg border border-orange-500/40 text-orange-300 bg-orange-900/20 hover:bg-orange-900/35 hover:border-orange-400 transition-colors"
+                                        >
+                                            Validate Firebase
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -427,6 +476,8 @@ USER REQUEST: {{USER_PROMPT}}`;
                                         <div className="md:col-span-2 flex gap-2">
                                             <div className="relative w-1/3">
                                                 <select
+                                                    aria-label="Transcription provider"
+                                                    title="Transcription provider"
                                                     value={wormhole.transcription?.provider || 'openai'}
                                                     onChange={(e) => setWormhole(prev => {
                                                         const base = ensureWormholeDefaults(prev);
@@ -455,6 +506,8 @@ USER REQUEST: {{USER_PROMPT}}`;
                                         <div className="md:col-span-2 flex gap-2">
                                             <div className="relative w-1/3">
                                                 <select
+                                                    aria-label="Summarization provider"
+                                                    title="Summarization provider"
                                                     value={wormhole.summarization?.provider || 'gemini'}
                                                     onChange={(e) => setWormhole(prev => {
                                                         const base = ensureWormholeDefaults(prev);
@@ -483,6 +536,8 @@ USER REQUEST: {{USER_PROMPT}}`;
                                         <div className="md:col-span-2 flex gap-2">
                                             <div className="relative w-1/3">
                                                 <select
+                                                    aria-label="Key terms provider"
+                                                    title="Key terms provider"
                                                     value={wormhole.keyTerms?.provider || 'gemini'}
                                                     onChange={(e) => setWormhole(prev => {
                                                         const base = ensureWormholeDefaults(prev);
@@ -511,6 +566,8 @@ USER REQUEST: {{USER_PROMPT}}`;
                                         <div className="md:col-span-2 flex gap-2">
                                             <div className="relative w-1/3">
                                                 <select
+                                                    aria-label="Wiki update provider"
+                                                    title="Wiki update provider"
                                                     value={wormhole.wikiUpdate?.provider || 'gemini'}
                                                     onChange={(e) => setWormhole(prev => {
                                                         const base = ensureWormholeDefaults(prev);

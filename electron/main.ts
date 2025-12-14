@@ -1654,7 +1654,11 @@ function createWindow() {
   });
 
   if (isDev) {
-    win.loadURL('http://localhost:5173');
+    const devUrl =
+      process.env.VITE_DEV_SERVER_URL ||
+      process.env.ELECTRON_RENDERER_URL ||
+      'http://localhost:5173';
+    win.loadURL(devUrl);
     // win.webContents.openDevTools(); // Use F12 to toggle
   } else {
     win.loadFile(path.join(__dirname, '../dist-renderer/index.html'));

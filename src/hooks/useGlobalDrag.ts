@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useDragCanvas } from '../contexts/DragCanvasContext';
+import type { PortalColorMode } from '../contexts/DragCanvasContext';
 
 interface UseGlobalDragOptions {
   id: string;
@@ -9,11 +10,12 @@ interface UseGlobalDragOptions {
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onClick?: (e: React.MouseEvent | React.PointerEvent | PointerEvent) => void; // Pass through click
+  portalColorMode?: PortalColorMode;
 }
 
 export function useGlobalDrag(options: UseGlobalDragOptions) {
   const { spawnItem } = useDragCanvas();
-  const { id, type, data, render, onDragStart, onClick } = options;
+  const { id, type, data, render, onDragStart, onClick, portalColorMode } = options;
 
   const handlePointerDown = useCallback((e: React.PointerEvent | React.MouseEvent) => {
     // Prevent default browser drag/selection
@@ -33,10 +35,11 @@ export function useGlobalDrag(options: UseGlobalDragOptions) {
       startY: e.clientY,
       pointerId: (e as any).pointerId, // Cast because React.MouseEvent doesn't have pointerId
       onClick,
+      portalColorMode,
     });
     
     if (onDragStart) onDragStart();
-  }, [id, type, data, render, spawnItem, onDragStart, onClick]);
+  }, [id, type, data, render, spawnItem, onDragStart, onClick, portalColorMode]);
 
   return {
     dragHandlers: {

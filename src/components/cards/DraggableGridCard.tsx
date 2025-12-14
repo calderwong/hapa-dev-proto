@@ -1,6 +1,7 @@
 import React from 'react';
 import { useGlobalDrag } from '../../hooks/useGlobalDrag';
 import type { CardIndexEntry } from '../../hooks/useCardLoadQueue';
+import type { PortalColorMode } from '../../contexts/DragCanvasContext';
 
 interface DraggableGridCardProps {
   card: CardIndexEntry;
@@ -8,6 +9,7 @@ interface DraggableGridCardProps {
   renderPreview: () => React.ReactNode;
   onClick?: (e: React.MouseEvent) => void;
   className?: string;
+  portalColorMode?: PortalColorMode;
 }
 
 export const DraggableGridCard: React.FC<DraggableGridCardProps> = ({
@@ -16,6 +18,7 @@ export const DraggableGridCard: React.FC<DraggableGridCardProps> = ({
   renderPreview,
   onClick,
   className = '',
+  portalColorMode,
 }) => {
   const { dragHandlers } = useGlobalDrag({
     id: card.cardId,
@@ -23,14 +26,14 @@ export const DraggableGridCard: React.FC<DraggableGridCardProps> = ({
     data: card,
     render: renderPreview,
     onClick: onClick ? (e) => onClick(e as any) : undefined,
+    portalColorMode: portalColorMode ?? 'blue',
   });
 
   return (
     <div
       {...dragHandlers}
       onClick={onClick}
-      className={`relative ${className}`}
-      style={{ touchAction: 'none' }}
+      className={`relative touch-none ${className}`}
     >
       {children}
     </div>

@@ -2714,6 +2714,7 @@ const CardLibrary: React.FC = () => {
                                 cards={filteredCards}
                                 onCardClick={(card, e) => handleCardClick(card, e)}
                                 onCardDragStart={(e, card) => handleDragStart(e, card)}
+                                getPortalColorMode={(card) => (card?.provider === 'revid' ? 'red' : 'blue')}
                                 selectedCardId={selected?.cardId}
                                 className="flex-1 pb-10"
                                 renderCard={(card) => {

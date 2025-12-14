@@ -353,23 +353,27 @@ const createCardTexture = (card, loadedImage = null) => {
 };
 
 // --- COMPONENT: 3D ENGINE ---
-const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattleImpact }) => {
+const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattleImpact, onCardUpdate }) => {
     const mountRef = useRef(null);
     const sceneRef = useRef(null);
     const cameraRef = useRef(null);
     const rendererRef = useRef(null);
     
     const cardsRef = useRef({}); 
+    const cardsDataRef = useRef(cards);
     const particlesRef = useRef([]); 
     const projectilesRef = useRef([]);
     const frameIdRef = useRef(null);
     const modeRef = useRef(mode);
     const focusedCardIdRef = useRef(focusedCardId);
     const onBattleImpactRef = useRef(onBattleImpact);
+    const onCardUpdateRef = useRef(onCardUpdate);
+    const dragRef = useRef({ activeId: null, plane: null, offset: null, startZone: null, moved: false });
 
     useEffect(() => { modeRef.current = mode; }, [mode]);
     useEffect(() => { focusedCardIdRef.current = focusedCardId; }, [focusedCardId]);
     useEffect(() => { onBattleImpactRef.current = onBattleImpact; }, [onBattleImpact]);
+    useEffect(() => { onCardUpdateRef.current = onCardUpdate; }, [onCardUpdate]);
 
     // --- INIT SCENE ---
     useEffect(() => {
@@ -423,6 +427,10 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
 
         const onClick = (e) => {
             if (modeRef.current === 'ui') return;
+            if (dragRef.current.moved) {
+                dragRef.current.moved = false;
+                return;
+            }
             mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
             
@@ -453,9 +461,95 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
             });
         };
 
+        const getHitId = (intersects) => {
+            const hit = intersects.find(obj => obj.object.userData.id || (obj.object.parent && obj.object.parent.userData.id));
+            if (!hit) return null;
+            return hit.object.userData.id || hit.object.parent.userData.id;
+        };
+
+        const onPointerDown = (e) => {
+            if (modeRef.current === 'ui') return;
+            if (!renderer || !renderer.domElement) return;
+
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(scene.children, true);
+            const id = getHitId(intersects);
+            if (!id) return;
+
+            const mesh = cardsRef.current[id];
+            if (!mesh) return;
+
+            const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -mesh.position.y);
+            const hitPoint = new THREE.Vector3();
+            raycaster.ray.intersectPlane(dragPlane, hitPoint);
+            const offset = mesh.position.clone().sub(hitPoint);
+
+            let startZone = null;
+            const card = (cardsDataRef.current || []).find(c => c.id === id);
+            if (card && card.zone) startZone = card.zone;
+
+            dragRef.current = { activeId: id, plane: dragPlane, offset, startZone, moved: false };
+
+            try {
+                renderer.domElement.setPointerCapture(e.pointerId);
+            } catch {}
+        };
+
+        const onPointerMove = (e) => {
+            if (!dragRef.current.activeId) return;
+            const id = dragRef.current.activeId;
+            const mesh = cardsRef.current[id];
+            if (!mesh) return;
+
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            const hitPoint = new THREE.Vector3();
+            const ok = raycaster.ray.intersectPlane(dragRef.current.plane, hitPoint);
+            if (!ok) return;
+
+            const nextPos = hitPoint.add(dragRef.current.offset);
+            mesh.userData.targetX = nextPos.x;
+            mesh.userData.targetY = nextPos.y;
+            mesh.userData.targetZ = nextPos.z;
+            dragRef.current.moved = true;
+        };
+
+        const onPointerUp = (e) => {
+            if (!dragRef.current.activeId) return;
+            const id = dragRef.current.activeId;
+            const mesh = cardsRef.current[id];
+            const startZone = dragRef.current.startZone;
+            dragRef.current.activeId = null;
+
+            try {
+                renderer.domElement.releasePointerCapture(e.pointerId);
+            } catch {}
+
+            if (!mesh) return;
+
+            const next = {
+                x: mesh.userData.targetX ?? mesh.position.x,
+                y: mesh.userData.targetY ?? mesh.position.y,
+                z: mesh.userData.targetZ ?? mesh.position.z,
+            };
+
+            const nextZone = startZone === 'hand' ? 'field' : undefined;
+            if (onCardUpdateRef.current) {
+                onCardUpdateRef.current(id, nextZone ? { ...next, zone: nextZone } : next);
+            }
+        };
+
         window.addEventListener('resize', handleResize);
         window.addEventListener('click', onClick);
         window.addEventListener('mousemove', onMouseMove);
+        renderer.domElement.addEventListener('pointerdown', onPointerDown);
+        renderer.domElement.addEventListener('pointermove', onPointerMove);
+        renderer.domElement.addEventListener('pointerup', onPointerUp);
+        renderer.domElement.addEventListener('pointercancel', onPointerUp);
 
         // --- ANIMATION LOOP ---
         const animate = () => {
@@ -469,10 +563,15 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
                 const isTarot = mesh.userData.isTarot;
                 const status = mesh.userData.imageStatus; // loading, error, loaded
 
-                // Bobbing Motion
+                const tx = mesh.userData.targetX ?? mesh.position.x;
+                const tyBase = mesh.userData.targetY ?? mesh.userData.baseY ?? mesh.position.y;
+                const tz = mesh.userData.targetZ ?? mesh.position.z;
                 const yOffset = Math.sin(time + mesh.userData.seed) * 0.15;
-                const targetY = mesh.userData.baseY + yOffset;
-                mesh.position.y += (targetY - mesh.position.y) * 0.1;
+                const ty = tyBase + yOffset;
+
+                mesh.position.x += (tx - mesh.position.x) * 0.12;
+                mesh.position.y += (ty - mesh.position.y) * 0.12;
+                mesh.position.z += (tz - mesh.position.z) * 0.12;
 
                 // Focus Highlight Scale
                 let targetScale = isFocused ? 1.15 : 1.0;
@@ -522,10 +621,12 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
                     if (!isFocused) mesh.scale.multiplyScalar(1 + (pulse * 0.005));
                 }
 
+                const baseRotZ = mesh.userData.targetRotZ ?? 0;
                 if (isFocused) {
-                    mesh.rotation.z = Math.sin(time * 2) * 0.02; 
+                    const wobble = Math.sin(time * 2) * 0.02;
+                    mesh.rotation.z = THREE.MathUtils.lerp(mesh.rotation.z, baseRotZ + wobble, 0.15);
                 } else {
-                    mesh.rotation.z = THREE.MathUtils.lerp(mesh.rotation.z, 0, 0.1);
+                    mesh.rotation.z = THREE.MathUtils.lerp(mesh.rotation.z, baseRotZ, 0.12);
                 }
             });
 
@@ -612,6 +713,12 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
             window.removeEventListener('resize', handleResize);
             window.removeEventListener('click', onClick);
             window.removeEventListener('mousemove', onMouseMove);
+            if (renderer && renderer.domElement) {
+                renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+                renderer.domElement.removeEventListener('pointermove', onPointerMove);
+                renderer.domElement.removeEventListener('pointerup', onPointerUp);
+                renderer.domElement.removeEventListener('pointercancel', onPointerUp);
+            }
             cancelAnimationFrame(frameIdRef.current);
             if(mountRef.current && renderer.domElement) {
                 mountRef.current.removeChild(renderer.domElement);
@@ -622,6 +729,7 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
     // --- MANAGE CARDS & UPDATE TEXTURES ---
     useEffect(() => {
         if(!sceneRef.current) return;
+        cardsDataRef.current = cards;
         cards.forEach(card => {
             let mesh = cardsRef.current[card.id];
 
@@ -660,6 +768,11 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
                     imageStatus: card.imageStatus // Sync prop to userdata
                 };
 
+                mesh.userData.targetX = card.x;
+                mesh.userData.targetY = card.y;
+                mesh.userData.targetZ = card.z;
+                mesh.userData.targetRotZ = card.rotZ || 0;
+
                 sceneRef.current.add(mesh);
                 cardsRef.current[card.id] = mesh;
             }
@@ -668,6 +781,10 @@ const VolumetricLayer = ({ cards, mode, focusedCardId, setFocusedCardId, onBattl
             if (mesh) {
                 // Update mesh userData state
                 mesh.userData.imageStatus = card.imageStatus;
+                mesh.userData.targetX = card.x;
+                mesh.userData.targetY = card.y;
+                mesh.userData.targetZ = card.z;
+                mesh.userData.targetRotZ = card.rotZ || 0;
 
                 // Case A: Image Loaded Successfully
                 if (card.imageUrl && !mesh.userData.hasImage && card.imageStatus === 'loaded') {
@@ -769,16 +886,123 @@ const App = () => {
     const [isForging, setIsForging] = useState(false);
     const [forgingStep, setForgingStep] = useState(""); // "" | "Forging..." | "Dreaming..." | "Minting..."
     const [tarotTheme, setTarotTheme] = useState("");
+    const [handHoverEnabled, setHandHoverEnabled] = useState(true);
+    const [handFormation, setHandFormation] = useState('fan');
+
     const [systemLogs, setSystemLogs] = useState([
         { id: 1, text: "System initialized. Waiting for input...", time: new Date().toLocaleTimeString() }
     ]);
     const [cards, setCards] = useState([
-        { id: 'c1', title: 'Genesis Core', color: '#60a5fa', x: -4, y: 2, z: 0, isFloating: true, imageStatus: 'loaded' },
-        { id: 'c2', title: 'Deep Logic', color: '#a78bfa', x: 0, y: 1, z: -2, isFloating: true, imageStatus: 'loaded' },
-        { id: 'c3', title: 'Firewall', color: '#f87171', x: 4, y: 2, z: 0, isFloating: true, imageStatus: 'loaded' },
-        { id: 'c4', title: 'Archive', color: '#34d399', x: -2, y: -2, z: 1, isFloating: true, imageStatus: 'loaded' },
-        { id: 'c5', title: 'Nexus', color: '#fbbf24', x: 3, y: -2, z: -1, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c1', title: 'Genesis Core', color: '#60a5fa', x: -4, y: 2, z: 0, rotZ: 0, zone: 'hand', handIndex: 0, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c2', title: 'Deep Logic', color: '#a78bfa', x: 0, y: 1, z: -2, rotZ: 0, zone: 'hand', handIndex: 1, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c3', title: 'Firewall', color: '#f87171', x: 4, y: 2, z: 0, rotZ: 0, zone: 'hand', handIndex: 2, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c4', title: 'Archive', color: '#34d399', x: -2, y: -2, z: 1, rotZ: 0, zone: 'hand', handIndex: 3, isFloating: true, imageStatus: 'loaded' },
+        { id: 'c5', title: 'Nexus', color: '#fbbf24', x: 3, y: -2, z: -1, rotZ: 0, zone: 'hand', handIndex: 4, isFloating: true, imageStatus: 'loaded' },
     ]);
+
+    const computeHandLayout = useCallback((allCards, formation, hoverEnabled) => {
+        const hand = allCards
+            .filter(c => c.zone === 'hand')
+            .slice()
+            .sort((a, b) => (a.handIndex ?? 0) - (b.handIndex ?? 0));
+
+        const N = hand.length;
+        const anchorY = hoverEnabled ? -3.4 : -5.0;
+        const anchorZ = hoverEnabled ? 5.0 : 2.0;
+        const baseX = 0;
+
+        const results = new Map();
+        for (let i = 0; i < N; i++) {
+            const t = N <= 1 ? 0 : (i - (N - 1) / 2) / ((N - 1) / 2);
+
+            let x = baseX;
+            let y = anchorY;
+            let z = anchorZ;
+            let rotZ = 0;
+
+            if (formation === 'fan') {
+                x = baseX + t * 5.2;
+                z = anchorZ + Math.abs(t) * -0.9 + i * 0.02;
+                rotZ = t * -0.35;
+            } else if (formation === 'line') {
+                x = baseX + t * 6.0;
+                z = anchorZ + i * 0.02;
+                rotZ = 0;
+            } else if (formation === 'stack') {
+                x = baseX;
+                z = anchorZ + i * 0.08;
+                rotZ = (i - (N - 1) / 2) * 0.04;
+            } else if (formation === 'arc') {
+                const radius = 6.0;
+                const a = t * 0.9;
+                x = baseX + Math.sin(a) * radius;
+                z = anchorZ + Math.cos(a) * -2.0 + i * 0.02;
+                rotZ = -a * 0.35;
+            } else if (formation === 'ring') {
+                const radius = 3.0;
+                const a = (i / Math.max(N, 1)) * Math.PI * 2;
+                x = baseX + Math.cos(a) * radius;
+                z = anchorZ + Math.sin(a) * radius;
+                rotZ = 0;
+            }
+
+            results.set(hand[i].id, { x, y, z, rotZ });
+        }
+
+        return allCards.map(c => {
+            if (c.zone !== 'hand') return c;
+            const target = results.get(c.id);
+            if (!target) return c;
+            return { ...c, ...target };
+        });
+    }, []);
+
+    useEffect(() => {
+        setCards(prev => computeHandLayout(prev, handFormation, handHoverEnabled));
+    }, [computeHandLayout, handFormation, handHoverEnabled]);
+
+    const handleCardUpdate = useCallback((cardId, updates) => {
+        setCards(prev => {
+            let next = prev.map(c => c.id === cardId ? { ...c, ...updates } : c);
+            const updated = next.find(c => c.id === cardId);
+            if (updated && updated.zone === 'hand' && (updated.handIndex === undefined || updated.handIndex === null)) {
+                const maxIdx = next.reduce((m, c) => c.zone === 'hand' ? Math.max(m, c.handIndex ?? -1) : m, -1);
+                next = next.map(c => c.id === cardId ? { ...c, handIndex: maxIdx + 1 } : c);
+            }
+            return computeHandLayout(next, handFormation, handHoverEnabled);
+        });
+    }, [computeHandLayout, handFormation, handHoverEnabled]);
+
+    const returnAllToHand = useCallback(() => {
+        setCards(prev => {
+            const ordered = prev.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)));
+            const next = ordered.map((c, idx) => ({
+                ...c,
+                zone: 'hand',
+                handIndex: idx,
+            }));
+            return computeHandLayout(next, handFormation, handHoverEnabled);
+        });
+    }, [computeHandLayout, handFormation, handHoverEnabled]);
+
+    const returnFocusedToHand = useCallback(() => {
+        if (!focusedCardId) return;
+        setCards(prev => {
+            const maxIdx = prev.reduce((m, c) => c.zone === 'hand' ? Math.max(m, c.handIndex ?? -1) : m, -1);
+            const next = prev.map(c => c.id === focusedCardId ? { ...c, zone: 'hand', handIndex: maxIdx + 1 } : c);
+            return computeHandLayout(next, handFormation, handHoverEnabled);
+        });
+    }, [computeHandLayout, focusedCardId, handFormation, handHoverEnabled]);
+
+    const scatterToField = useCallback(() => {
+        setCards(prev => prev.map(c => {
+            if (c.zone !== 'hand') return c;
+            const x = (Math.random() - 0.5) * 10;
+            const y = (Math.random() - 0.5) * 4;
+            const z = (Math.random() - 0.5) * 6;
+            return { ...c, zone: 'field', x, y, z, rotZ: 0 };
+        }));
+    }, []);
 
     const addLog = (text) => {
         setSystemLogs(prev => [...prev.slice(-4), { id: Date.now(), text, time: new Date().toLocaleTimeString() }]);
@@ -804,20 +1028,24 @@ const App = () => {
         const angle = cards.length * 0.8;
         const radius = 3 + (cards.length * 0.2);
         
+        const maxHandIdx = cards.reduce((m, c) => c.zone === 'hand' ? Math.max(m, c.handIndex ?? -1) : m, -1);
         const newCard = {
             id,
             title: newTitle,
             color: randomColor,
-            x: Math.cos(angle) * radius,
-            y: (Math.random() - 0.5) * 4,
-            z: Math.sin(angle) * radius * 0.5,
+            x: 0,
+            y: -4,
+            z: 3,
+            rotZ: 0,
+            zone: 'hand',
+            handIndex: maxHandIdx + 1,
             isFloating: true,
             isTarot: false,
             imageUrl: null,
             imageStatus: 'loading' // INIT STATUS: LOADING
         };
         
-        setCards(prev => [...prev, newCard]);
+        setCards(prev => computeHandLayout([...prev, newCard], handFormation, handHoverEnabled));
         addLog(`Forged new entity: [${newTitle}]`);
 
         try {
@@ -870,23 +1098,25 @@ const App = () => {
         const newCardsData = await callGemini(prompt, "", true);
         
         if (Array.isArray(newCardsData)) {
+            const maxHandIdx = cards.reduce((m, c) => c.zone === 'hand' ? Math.max(m, c.handIndex ?? -1) : m, -1);
             const newTarotCards = newCardsData.map((data, index) => {
-                const angle = (cards.length + index) * 0.8;
-                const radius = 4; 
                 return {
                     id: `tarot-${Date.now()}-${index}`,
                     title: data.title,
                     color: data.color || '#a855f7',
                     meaning: data.meaning,
-                    x: Math.cos(angle) * radius,
-                    y: (Math.random() - 0.5) * 2,
-                    z: Math.sin(angle) * radius * 0.5,
+                    x: 0,
+                    y: -4,
+                    z: 3,
+                    rotZ: 0,
+                    zone: 'hand',
+                    handIndex: maxHandIdx + index + 1,
                     isFloating: true,
                     isTarot: true,
                     imageStatus: 'loaded' // Tarot are purely procedural for now
                 };
             });
-            setCards(prev => [...prev, ...newTarotCards]);
+            setCards(prev => computeHandLayout([...prev, ...newTarotCards], handFormation, handHoverEnabled));
             addLog(`Success. ${newCardsData.length} Arcana materialized.`);
         } else {
             addLog("Minting failed. Data corruption.");
@@ -930,6 +1160,7 @@ const App = () => {
                 focusedCardId={focusedCardId}
                 setFocusedCardId={setFocusedCardId}
                 onBattleImpact={handleBattleImpact}
+                onCardUpdate={handleCardUpdate}
             />
 
             {/* LEFT SIDEBAR */}
@@ -1022,6 +1253,45 @@ const App = () => {
                             <CtrlBtn active={mode==='ui'} onClick={()=>setMode('ui')} icon={Icons.Layers} label="2D Grid" />
                             <CtrlBtn active={mode==='battle'} onClick={()=>setMode('battle')} icon={Icons.Crosshair} label="Battle" />
                             <CtrlBtn active={mode==='pov'} onClick={()=>setMode('pov')} icon={Icons.Eye} label="POV" />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mb-4">
+                            <button
+                                onClick={() => setHandHoverEnabled(v => !v)}
+                                className={`py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${handHoverEnabled ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/40' : 'bg-gray-800/50 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
+                            >
+                                {handHoverEnabled ? 'HAND: HOVER' : 'HAND: REST'}
+                            </button>
+                            <button
+                                onClick={returnAllToHand}
+                                className="py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20 transition-all"
+                            >
+                                RETURN ALL
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-5 gap-2 mb-4">
+                            <button onClick={() => setHandFormation('fan')} className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${handFormation==='fan' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'}`}>FAN</button>
+                            <button onClick={() => setHandFormation('line')} className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${handFormation==='line' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'}`}>LINE</button>
+                            <button onClick={() => setHandFormation('stack')} className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${handFormation==='stack' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'}`}>STACK</button>
+                            <button onClick={() => setHandFormation('arc')} className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${handFormation==='arc' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'}`}>ARC</button>
+                            <button onClick={() => setHandFormation('ring')} className={`py-2 rounded-lg border text-[10px] font-bold transition-all ${handFormation==='ring' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'}`}>RING</button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mb-4">
+                            <button
+                                onClick={scatterToField}
+                                className="py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20 transition-all"
+                            >
+                                SCATTER
+                            </button>
+                            <button
+                                onClick={returnFocusedToHand}
+                                disabled={!focusedCardId}
+                                className={`py-2 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${focusedCardId ? 'bg-purple-500/10 text-purple-300 border-purple-500/30 hover:bg-purple-500/20' : 'bg-gray-800/50 text-gray-600 border-gray-800 cursor-not-allowed'}`}
+                            >
+                                RETURN FOCUS
+                            </button>
                         </div>
 
                         <div className="space-y-3">

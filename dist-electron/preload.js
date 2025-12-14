@@ -7,7 +7,9 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     saveSettings: (settings) => electron_1.ipcRenderer.invoke('save-settings', settings),
     listGeminiModels: () => electron_1.ipcRenderer.invoke('list-gemini-models'),
     listOpenAIModels: () => electron_1.ipcRenderer.invoke('list-openai-models'),
+    listAimlApiModels: () => electron_1.ipcRenderer.invoke('list-aimlapi-models'),
     listLlamaModels: () => electron_1.ipcRenderer.invoke('list-llama-models'),
+    chatWithAimlApi: (data) => electron_1.ipcRenderer.invoke('chat-with-aimlapi', data),
     chatWithGemini: (data) => electron_1.ipcRenderer.invoke('chat-with-gemini', data),
     chatWithOpenAI: (data) => electron_1.ipcRenderer.invoke('chat-with-openai', data),
     chatWithLlama: (data) => electron_1.ipcRenderer.invoke('chat-with-llama', data),
@@ -131,5 +133,10 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         electron_1.ipcRenderer.on('thor-update', listener);
         return () => electron_1.ipcRenderer.removeListener('thor-update', listener);
     },
+    // Media download/export
+    saveMedia: (params) => electron_1.ipcRenderer.invoke('save-media', params),
+    exportMedia: (params) => electron_1.ipcRenderer.invoke('export-media', params),
+    exportAllMedia: () => electron_1.ipcRenderer.invoke('export-all-media'),
+    savePrototype: (data) => electron_1.ipcRenderer.invoke('save-prototype', data),
 });
 console.log('Electron API exposed successfully!', typeof window !== 'undefined' ? window.electronAPI : 'window not defined');

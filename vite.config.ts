@@ -35,6 +35,8 @@ export default defineConfig(({ command }) => ({
     },
   },
   server: {
+    port: 5173,
+    strictPort: true,
     fs: {
       // Allow serving ALL of node_modules for Stencil lazy loading
       allow: ['.', 'node_modules'],

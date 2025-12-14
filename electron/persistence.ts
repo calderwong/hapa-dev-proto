@@ -7,6 +7,7 @@
 
 import { app } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { SqliteAdapter } from './SqliteAdapter';
 import type { HypercoreEvent, CardCreatedPayload } from './persistence-types';
 
@@ -30,6 +31,35 @@ export async function initPersistence(): Promise<void> {
     console.log('[Persistence] Initialized. Cards:', stats.cardCount, 'Wiki:', stats.wikiNodeCount);
     initialized = true;
   } catch (err) {
+    const dbPath = path.join(app.getPath('userData'), 'persistence.db');
+    const code = (err as any)?.code ? String((err as any).code) : '';
+    const message = (err as any)?.message ? String((err as any).message) : '';
+    const isRecoverable = code.includes('SQLITE_IOERR_TRUNCATE') || message.includes('SQLITE_IOERR_TRUNCATE');
+
+    if (isRecoverable) {
+      try {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const renameIfExists = (p: string) => {
+          if (!fs.existsSync(p)) return;
+          const next = `${p}.${stamp}.corrupt`;
+          fs.renameSync(p, next);
+        };
+
+        renameIfExists(dbPath);
+        renameIfExists(`${dbPath}-wal`);
+        renameIfExists(`${dbPath}-shm`);
+
+        adapter = new SqliteAdapter(dbPath);
+        await adapter.initialize();
+        const stats = await adapter.getStats();
+        console.log('[Persistence] Initialized. Cards:', stats.cardCount, 'Wiki:', stats.wikiNodeCount);
+        initialized = true;
+        return;
+      } catch (err2) {
+        console.error('[Persistence] Failed to recover after DB rename:', err2);
+      }
+    }
+
     console.error('[Persistence] Failed to initialize:', err);
     adapter = null;
   }

@@ -6,7 +6,7 @@ import { HandProvider } from './contexts/HandContext';
 import { DragCanvasProvider } from './contexts/DragCanvasContext';
 import Chat from './pages/Chat';
 import Settings from './pages/Settings';
-import { initFirebase } from './firebase';
+import { initFirebase, validateFirebaseConfigJson } from './firebase';
 // import { ToastProvider } from './context/ToastContext'; // Temporarily disabled - causes white screen
 
 import P2P from './pages/P2P';
@@ -36,7 +36,8 @@ function App() {
       if (window.electronAPI) {
         const settings = await window.electronAPI.getSettings();
         if (settings.firebaseConfig) {
-          initFirebase(settings.firebaseConfig);
+          const parsed = validateFirebaseConfigJson(settings.firebaseConfig);
+          if (parsed.ok) initFirebase(settings.firebaseConfig);
         }
       }
     };

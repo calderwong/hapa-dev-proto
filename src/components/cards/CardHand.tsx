@@ -18,6 +18,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useHand } from '../../contexts/HandContext';
 import { useDragCanvas } from '../../contexts/DragCanvasContext';
+import type { DragItem } from '../../contexts/DragCanvasContext';
 import type { HandCard, CardState } from '../../contexts/HandContext';
 import { 
   animateCardState, 
@@ -59,40 +60,72 @@ const CardHand: React.FC<CardHandProps> = ({ className = '' }) => {
 
   // Register Snap Zones for all 7 slots
   useEffect(() => {
-    if (isCollapsed) return; // Don't snap if collapsed
+    const handleSnap = (item: DragItem) => {
+      if (!item) return;
+      if (item.type === 'HAND_CARD') {
+        // Returning a hand card overlay back to hand: no-op.
+        // The FloatingCard removal restores the original card visibility.
+        return;
+      }
 
-    const handleSnap = (itemId: string) => {
-      // Logic handled in FloatingCard via item.data usually, 
-      // but here we just ensure the hand accepts it.
-      // The drag system will call this when dropped on a snap zone.
-      // We can trigger a re-render or state update if needed.
-      console.log('Snapped to hand slot:', itemId);
-      // Actual data logic is handled by the drop handler or the calling item
+      if (item.type === 'LIBRARY_CARD') {
+        const data: any = item.data;
+        if (!data?.cardId) return;
+        if (hasCard(data.cardId)) return;
+
+        const handCard: HandCard = {
+          cardId: data.cardId,
+          name: data.name || data.cardId.substring(0, 8),
+          thumbnail: data.thumbnail,
+          mediaKind: data.mediaKind,
+          createdAt: data.createdAt,
+          tier: data.tier,
+        };
+        addCard(handCard);
+      }
+    };
+
+    const registerZones = () => {
+      const handRect = handContainerRef.current?.getBoundingClientRect();
+      if (handRect) {
+        registerSnapZone({
+          id: 'hand-dock',
+          rect: { left: handRect.left, top: handRect.top, width: handRect.width, height: handRect.height },
+          threshold: 140,
+          onSnap: handleSnap
+        });
+      }
+
+      if (!isCollapsed) {
+        slotRefs.current.forEach((el, index) => {
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            registerSnapZone({
+              id: `hand-slot-${index}`,
+              rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+              threshold: 80,
+              onSnap: handleSnap
+            });
+          }
+        });
+      }
     };
 
     // Delay slightly to ensure layout is stable
-    const timer = setTimeout(() => {
-      slotRefs.current.forEach((el, index) => {
-        if (el) {
-          const rect = el.getBoundingClientRect();
-          registerSnapZone({
-            id: `hand-slot-${index}`,
-            rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-            threshold: 60, // Snap distance
-            onSnap: handleSnap
-          });
-        }
-      });
-    }, 100);
+    const timer = setTimeout(registerZones, 100);
+
+    window.addEventListener('resize', registerZones);
 
     return () => {
       clearTimeout(timer);
+      window.removeEventListener('resize', registerZones);
+      unregisterSnapZone('hand-dock');
       // Unregister all potential slots
       for (let i = 0; i < maxCapacity; i++) {
         unregisterSnapZone(`hand-slot-${i}`);
       }
     };
-  }, [isCollapsed, maxCapacity, registerSnapZone, unregisterSnapZone]);
+  }, [isCollapsed, maxCapacity, registerSnapZone, unregisterSnapZone, addCard, hasCard]);
 
   // Animate new cards when added
   useEffect(() => {

@@ -2873,3 +2873,475 @@ Body: {"operationName": "projects/.../operations/{uuid}"}
 **Tags:** #bugfix #stability #electron #ipc #pipeline
 **Est. Avg. Human Dev Time:** 1.0 hours
 
+## Entry 44 – Overlay Cards: Z-Axis Hover + Formations (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Cards picked up from header/library should hover on Z-axis and snap into formations on top of the main app"
+
+**Summary of actions:**
+- Identified the existing always-on-top overlay card system:
+  - `DragCanvasProvider` / `DragCanvasContext`
+  - `DragCanvas`
+  - `FloatingCard`
+  - Spawners via `useGlobalDrag` from hand (`DraggableHandCard`) and library (`DraggableGridCard`).
+- Added an overlay formation controller:
+  - Global `overlayLayout` state (`mode` + `hover`) in `DragCanvasContext`.
+  - HUD controls in `DragCanvas` to toggle hover and switch formations (`free`, `fan`, `line`, `stack`, `arc`, `ring`).
+  - Formation target computation based on viewport anchor.
+- Implemented DOM-based 3D depth:
+  - `perspective` on the overlay container.
+  - `translateZ` + `rotate` on the card visual layer.
+- Implemented snap-to-hand on drop:
+  - `FloatingCard` now evaluates registered `snapZones` on pointer up and invokes `zone.onSnap(item)`.
+  - `CardHand` snap handler accepts `DragItem` and adds `LIBRARY_CARD` entries to hand.
+- Hardened drag UX:
+  - Avoids “jump” when starting a drag from a formation by syncing baseline translate from computed style.
+
+**Files modified:**
+- `src/contexts/DragCanvasContext.tsx`
+- `src/components/DragCanvas.tsx`
+- `src/components/cards/FloatingCard.tsx`
+- `src/components/cards/CardHand.tsx`
+
+**Files created:**
+- `docs/features/OVERLAY_CARD_3D_FORMATIONS.md`
+
+**Tags:** #feature #ui #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 2.0 hours
+
+## Entry 45 – Overlay Snap Feel + Wheel Z-Adjust (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Hand snap should feel like it works; library→hand should add; add mouse scroll to move selected overlay card on Z-axis"
+
+**Summary of actions:**
+- Improved snap-to-hand behavior:
+  - Registered a `hand-dock` snap zone even when the hand is collapsed (uses the hand container rect).
+  - Added window resize handling to keep snap zone rects up to date.
+  - Updated overlay drop snapping to prefer rectangle overlap (and fallback to center-distance), so leaving a card over the hand reliably snaps.
+  - Added a shrink-into-zone animation on snap to make the “put into hand” action feel tangible.
+- Added Z-axis test controls:
+  - `Shift+Click` to select/deselect an overlay card.
+  - Mouse wheel over the selected card adjusts `translateZ` via per-item `zOffsets`.
+
+**Files modified:**
+- `src/contexts/DragCanvasContext.tsx`
+- `src/components/cards/CardHand.tsx`
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 1.0 hours
+
+## Entry 46 – Overlay Selection UX Polish (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Proceed" (polish selection UX so Z-axis testing is obvious)
+
+**Summary of actions:**
+- Added selection readout + quick actions to the overlay HUD:
+  - Shows selected overlay card id prefix and current `Z` value.
+  - Added `Z Reset` (clears per-card Z offset) and `Clear` (deselect).
+- Added a visible selection highlight ring around the selected overlay card.
+
+**Files modified:**
+- `src/components/DragCanvas.tsx`
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 47 – Overlay Formations Anchored to Hand + Hotkeys (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "It's good, keep going" / "continue"
+
+**Summary of actions:**
+- Anchored formation targets to the registered `hand-dock` snap zone when available, so formations appear where the hand lives.
+- Added keyboard shortcuts for faster testing:
+  - `H` toggle hover
+  - `0` free
+  - `1-5` formation presets
+  - `Esc` clear selection
+  - Ignores shortcuts while typing in inputs/textareas/contenteditable.
+
+**Files modified:**
+- `src/components/DragCanvas.tsx`
+- `docs/features/OVERLAY_CARD_3D_FORMATIONS.md`
+
+**Tags:** #feature #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 48 – Persist Overlay Cards (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "persist please"
+
+**Summary of actions:**
+- Persisted overlay-card state to `localStorage`:
+  - Overlay items (minimal serialized card data)
+  - Per-item free position (`tx/ty`)
+  - `overlayLayout` (mode/hover)
+  - Per-item `zOffsets`
+- Added hydration on app start to restore overlay cards after reload.
+- Added `updateItemPosition` so `FloatingCard` can commit free position updates on drag end.
+
+**Files modified:**
+- `src/contexts/DragCanvasContext.tsx`
+- `src/components/cards/FloatingCard.tsx`
+- `docs/features/OVERLAY_CARD_3D_FORMATIONS.md`
+
+**Tags:** #feature #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 1.0 hours
+
+## Entry 49 – Center Overlay Formations (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "pretty goood, but can you have the formations \"Center\" when forming versus pulling left?"
+
+**Summary of actions:**
+- Updated formation spacing math so layouts are centered around the hand dock anchor even when overlay cards have different widths.
+- Switched fan/line spacing to use a consistent reference width (average of overlay item widths) so offsets are symmetric.
+
+**Files modified:**
+- `src/components/DragCanvas.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 0.3 hours
+
+## Entry 50 – Push/Pull Overlay Cards on Z-Axis (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "ok great, now can you make it so I can pull/push cards towards or away from me on the z-axis?"
+
+**Summary of actions:**
+- Added depth "push/pull" controls on overlay cards:
+  - `Alt + Wheel` over a card adjusts its per-card Z offset (no selection required).
+  - `Alt + Drag` (vertical) during a drag session adjusts per-card Z offset without snapping/removing when no X/Y movement occurs.
+- Preserved existing `Shift+Click` selection + wheel adjustment behavior.
+- Added guard logic to prevent Z jumps when pressing `Alt` mid-drag and to avoid unintended snap/remove when the user was only adjusting depth.
+
+**Files modified:**
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 0.6 hours
+
+## Entry 51 – Fix Push/Pull Z Modifier Detection (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "push/pull doesn't seem to work"
+
+**Summary of actions:**
+- Hardened modifier detection for depth adjustments on Windows/Electron:
+  - `wheel` handler now treats *any* modifier (`Alt`, `Ctrl`, `Meta`, `Shift`) as enabling per-card Z adjustment even when not selected.
+  - Drag depth-mode now uses `getModifierState('Alt'|'Control'|'Meta')` in addition to `altKey/ctrlKey` flags.
+
+**Files modified:**
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #bugfix #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 0.3 hours
+
+## Entry 52 – Fix Z Depth Rendering + Improve Depth Feedback (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "I tried both and want both to be able to move on the Z, so definitely invest the time into making the animations/feel/look really good and performant"
+
+**Summary of actions:**
+- Fixed a likely CSS 3D flattening issue:
+  - The transformed overlay container (`dragRef`) now sets `transformStyle: 'preserve-3d'` so child `translateZ` is not flattened.
+- Made depth adjustments more visually obvious but still lightweight:
+  - Depth-linked `scale` applied alongside `translateZ` during depth-drag and in steady-state animations.
+
+**Files modified:**
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #bugfix #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 0.4 hours
+
+## Entry 53 – Default Wheel Push/Pull Depth (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "can you make it so I dont have to hold ALT to scroll, just move it scrolls, ok?"
+
+**Summary of actions:**
+- Updated overlay card wheel behavior:
+  - Scrolling over an overlay card now adjusts its Z depth by default.
+  - Holding `Alt` allows wheel events to pass through for normal page scrolling.
+
+**Files modified:**
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #3d
+**Est. Avg. Human Dev Time:** 0.2 hours
+
+## Entry 54 – Overlay Card Interaction SFX (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "craft/choose sound effect for everytime a card does something (moves, clicks, drops, picked up, etc.)"
+
+**Summary of actions:**
+- Extended the existing WebAudio synth SFX utilities with a cohesive overlay-card palette:
+  - pick up, click/tap, move tick (throttled), depth nudge (wheel), drop, snap-to-hand.
+- Wired sounds into `FloatingCard` so overlay cards emit SFX on key interactions while remaining performant.
+
+**Files modified:**
+- `src/utils/audio.ts`
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #audio #cards #drag #overlay
+**Est. Avg. Human Dev Time:** 0.8 hours
+
+## Entry 55 – SFX Mix + Variation Polish (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Added a lightweight master mix chain (gain + compressor) for more consistent perceived loudness.
+- Added subtle randomized pitch variation for repetitive card SFX (move tick + depth nudge) to reduce fatigue.
+- Slightly reduced gains on repetitive sounds to keep the mix clean.
+
+**Files modified:**
+- `src/utils/audio.ts`
+
+**Tags:** #feature #ux #audio
+**Est. Avg. Human Dev Time:** 0.3 hours
+
+## Entry 56 – Portal/Wormhole Dismiss Animation (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Portal animation for when you click a card and it speeds to the bottom and disappears"
+
+**Summary of actions:**
+- Updated overlay card click-to-dismiss behavior to animate into a bottom "portal" (hand dock center when available).
+- Added a warp/spiral feel using fast acceleration, rotation, depth pull-back, blur/saturation shift, glow, and collapse-to-zero before removal.
+- Added a dedicated portal SFX to match the wormhole dismiss.
+
+**Files modified:**
+- `src/components/cards/FloatingCard.tsx`
+- `src/utils/audio.ts`
+
+**Tags:** #feature #ux #cards #drag #overlay #animation #audio
+**Est. Avg. Human Dev Time:** 0.8 hours
+
+## Entry 57 – Portal Target Toggle (Temporary) (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "I'm not sure need to feel it. can you do both for now and make a toggle in the menu (its temporary)"
+
+**Summary of actions:**
+- Added a temporary HUD toggle to switch the portal dismiss target between:
+  - Hand dock center
+  - Bottom-center offscreen
+- Persisted the toggle in `overlayLayout` so it survives reloads.
+
+**Files modified:**
+- `src/contexts/DragCanvasContext.tsx`
+- `src/components/DragCanvas.tsx`
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #animation
+**Est. Avg. Human Dev Time:** 0.4 hours
+
+## Entry 58 – Aiming Reticle/Laser + Opening Portal VFX (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "I want it to feel like the user is aiming the card at a point in the UI below... add a targeting reticle and a laser... portal opens up"
+
+**Summary of actions:**
+- Added an aiming overlay (reticle + laser) that points from the card toward the active portal target.
+- Added an opening portal VFX at the target point during dismiss so it reads like “sending the card into the thing below”.
+- Adjusted bottom-center portal target to be on-screen near the bottom so the portal/reticle are visible.
+
+**Files modified:**
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #animation
+**Est. Avg. Human Dev Time:** 0.9 hours
+
+## Entry 59 – Portal Color (Blue/Red) + In-Card Targeting HUD (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "great work, continue"
+
+**Summary of actions:**
+- Added a temporary portal color mode (Blue vs Red) to theme the aiming laser/reticle and portal opening VFX.
+- Added a subtle in-card targeting HUD overlay when a card is selected to reinforce the “aiming” feel.
+- Persisted the portal color mode in `overlayLayout` with a safe default.
+
+**Files modified:**
+- `src/contexts/DragCanvasContext.tsx`
+- `src/components/DragCanvas.tsx`
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #animation
+**Est. Avg. Human Dev Time:** 0.6 hours
+
+## Entry 60 – Dual Portal Style Tuning (Blue vs Red) (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Can you support both and still tune? ... maintain both for now."
+
+**Summary of actions:**
+- Kept both portal modes and tuned them as distinct animation “profiles”:
+  - Blue: smoother/arcane timing and swirl.
+  - Red: punchier, faster open/close with more aggressive spin/collapse.
+- Themed the card collapse glow to match the portal color.
+- Added a small blue/red variation to the portal SFX sweep to reinforce the visual cue.
+
+**Files modified:**
+- `src/components/cards/FloatingCard.tsx`
+- `src/utils/audio.ts`
+
+**Tags:** #feature #ux #cards #drag #overlay #animation #audio
+**Est. Avg. Human Dev Time:** 0.5 hours
+
+## Entry 61 – Semantic Portal Colors (Per-Card Override) (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Blue should = Saving to Node as a memory, Red should = Sending something to another place/card..."
+
+**Summary of actions:**
+- Added a per-card `portalColorMode` override so portal color can be driven by the semantic intent of the action.
+- Updated the portal aiming/VFX/SFX to prefer `item.portalColorMode` when present, falling back to the HUD default.
+- Extended `useGlobalDrag` to allow spawn call sites to set `portalColorMode` at card creation time.
+- Persisted the per-card portal color in overlay localStorage state.
+
+**Files modified:**
+- `src/contexts/DragCanvasContext.tsx`
+- `src/hooks/useGlobalDrag.ts`
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #animation #audio
+**Est. Avg. Human Dev Time:** 0.6 hours
+
+## Entry 62 – Semantic Defaults at Spawn Sites (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Set hand-origin draggable overlay cards to default to a Blue portal (save-to-memory semantic).
+- Added optional `portalColorMode` support to grid draggable cards so callers can mark Red when the semantic intent is “send outward/external”.
+
+**Files modified:**
+- `src/components/cards/DraggableHandCard.tsx`
+- `src/components/cards/DraggableGridCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay
+**Est. Avg. Human Dev Time:** 0.4 hours
+
+## Entry 63 – Hand Card Portal Color Override (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Updated `DraggableHandCard` to accept an optional `portalColorMode` prop (defaults to Blue) so future hand-card actions can explicitly use Red for external sends.
+
+**Files modified:**
+- `src/components/cards/DraggableHandCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay
+**Est. Avg. Human Dev Time:** 0.2 hours
+
+## Entry 64 – Grid-Level Semantic Portal Resolver (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Added `getPortalColorMode(card)` prop to `VirtualCardGrid` so pages can set semantic portal colors per grid context.
+- Passed the computed value into `DraggableGridCard.portalColorMode` (still defaults to Blue if undefined).
+
+**Files modified:**
+- `src/components/cards/VirtualCardGrid.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay
+**Est. Avg. Human Dev Time:** 0.3 hours
+
+## Entry 70 – Shoot Cards to Sidebar Locations + SQLite Recovery Hardening
+**Date**: Dec 13, 2025
+**Prompt:** "Fixing Card Shooting and Persistence" (shoot cards to menu items; thumbnails reverted to dots; Electron `SQLITE_IOERR_TRUNCATE` startup failure)
+
+**Summary of actions:**
+- Implemented a sidebar Location targeting UX where each menu item acts as a snap/drop zone and maintains an in-memory stack.
+- Added “select overlay card then click menu target” (click-to-shoot) interaction using a flying arc clone animation.
+- Improved snap resolution to prioritize menu targets on release (especially for minimal movement releases that previously triggered portal/return behavior).
+- Fixed a regression where landed menu stacks reverted to placeholder dots by normalizing thumbnail sources (including Windows local paths -> `file:///...`) and accepting image-like paths even when `mediaKind` is missing.
+- Hardened Electron persistence startup by adding a recoverable path for corrupted/truncated SQLite DB (`SQLITE_IOERR_TRUNCATE`): rename `persistence.db` (+ `-wal`/`-shm`) to timestamped backups and recreate the DB, then retry initialize.
+- Restarted `npm run dev` to ensure Electron compilation picked up the persistence recovery logic.
+
+**Files modified:**
+- `src/components/Layout.tsx`
+- `src/components/cards/FloatingCard.tsx`
+- `electron/persistence.ts`
+
+**Tags:** #feature #ux #cards #drag #sidebar #bugfix #electron #sqlite
+**Est. Avg. Human Dev Time:** 2.0 hours
+
+## Entry 68 – Fix DragCanvas Hook Order Crash + Firebase Config Parsing Hardening
+**Date**: Dec 13, 2025
+**Prompt:** [Screenshots] "Rendered more hooks than during the previous render" in `<DragCanvas>` + "Error initializing Firebase: invalid JSON config"
+
+**Summary of actions:**
+- Fixed React hook order mismatch in `DragCanvas` by removing early return before hooks; hooks now run consistently and rendering is gated afterward.
+- Hardened `initFirebase()` to handle whitespace-only config, and double-encoded JSON (JSON-stringified JSON blobs) without crashing the renderer.
+
+**Files modified:**
+- `src/components/DragCanvas.tsx`
+- `src/firebase.ts`
+
+**Tags:** #bugfix #react #hooks #firebase
+**Est. Avg. Human Dev Time:** 0.3 hours
+
+## Entry 69 – Settings: Validate Firebase Config + Prevent Saving Invalid JSON
+**Date**: Dec 13, 2025
+**Prompt:** "sure" (verify Firebase config end-to-end)
+
+**Summary of actions:**
+- Added a "Validate Firebase" button in Settings to attempt `initFirebase(firebaseConfig)` and show status.
+- Updated Settings save flow to refuse saving a non-empty Firebase config if it fails validation, preventing accidental overwrites with invalid JSON.
+- Added accessibility `aria-label`/`title` to Settings `<select>` controls (model/provider) to satisfy tooling requirements.
+
+**Files modified:**
+- `src/pages/Settings.tsx`
+- `src/firebase.ts`
+
+**Tags:** #feature #ux #firebase #settings #a11y
+**Est. Avg. Human Dev Time:** 0.4 hours
+
+## Entry 67 – Sidebar Menu Locations (V1 Targets + Stacks) (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Ok let's start by making hand-card-size targets out of the Left Menu bar..."
+
+**Summary of actions:**
+- Implemented per-menu-item **Location target pads** in the sidebar.
+- Each menu item registers a `SnapZone` (`menu-location:${path}`) using a DOM ref + `getBoundingClientRect()` with ResizeObserver/scroll/resize updates.
+- On snap, the overlay card is attached into an in-memory **stack** for that Location.
+- Sidebar renders:
+  - Top card thumbnail rotated 90° (“tapped”)
+  - Red steady-state target styling when occupied
+  - Stack count badge
+  - Hover popover showing the stack contents (preview)
+
+**Files modified:**
+- `src/components/Layout.tsx`
+- `Product_Requirements_Document.md`
+
+**Tags:** #feature #ux #cards #drag #sidebar
+**Est. Avg. Human Dev Time:** 1.2 hours
+
+## Entry 66 – Selectable Portal Target (Custom Point) (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "Can you make it so the user can select the target for the portal..."
+
+**Summary of actions:**
+- Added a persisted custom portal target point (`portalTargetPoint`) and a new portal target mode (`custom`).
+- Added a temporary HUD interaction to pick a portal destination by clicking anywhere in the UI.
+- Updated aiming reticle/laser and portal dismiss animation to use the chosen point when in custom mode.
+
+**Files modified:**
+- `src/contexts/DragCanvasContext.tsx`
+- `src/components/DragCanvas.tsx`
+- `src/components/cards/FloatingCard.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay #animation
+**Est. Avg. Human Dev Time:** 0.8 hours
+
+## Entry 65 – Card Library Semantic Portal Mapping (Main App)
+**Date**: Dec 12, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Wired `VirtualCardGrid.getPortalColorMode` in `CardLibrary`.
+- Set a first semantic mapping rule:
+  - Revid-origin cards (`provider === 'revid'`) => Red portal
+  - Everything else => Blue portal
+
+**Files modified:**
+- `src/pages/CardLibrary.tsx`
+
+**Tags:** #feature #ux #cards #drag #overlay
+**Est. Avg. Human Dev Time:** 0.3 hours
+

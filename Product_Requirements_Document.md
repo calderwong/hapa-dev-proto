@@ -76,6 +76,26 @@ Goals:
 - Generated images embedded in chat responses and saveable as cards.
 - Reference image support: attach images from library or sidebar to influence generation.
 
+### 2.8 Menu Locations (Sidebar Ledges)
+- The left sidebar navigation acts as a set of **Locations** (one per menu item).
+- Each Location exposes a subtle, hand-card-sized **target pad** used to attach cards.
+  - The affordance should be present but not visually intrusive.
+  - The pad becomes visually prominent when a card is being targeted/dragged, or when occupied.
+- Users can attach cards to Locations from both:
+  - Overlay cards spawned from the Hand
+  - Overlay cards spawned from the Card Library
+- Location stacks:
+  - Each Location maintains a stack of attached cards (top-down priority).
+  - UI displays the top card and a stack count.
+  - Hovering the Location reveals the full stack.
+- Visual language:
+  - While a Location is occupied, the docked card representation uses a **steady red glow**.
+
+Planned future work:
+- Persist each Location as a Hypercore-backed append-only ledger of placements.
+- Append to each card’s own Hypercore journal recording placements and outcomes.
+- Allow Location behavior/effects to be influenced by stacked card attributes/skills/canon, evaluated in priority order.
+
 ## 3. Non-Functional Requirements
 
 - **Platform**: Desktop (Electron; Windows-focused, but cross-platform where possible).

@@ -2,12 +2,36 @@
 let audioCtx: AudioContext | null = null;
 let isMuted = localStorage.getItem('hapa-audio-muted') === 'true';
 
+let masterGain: GainNode | null = null;
+let masterCompressor: DynamicsCompressorNode | null = null;
+
 const getAudioContext = () => {
     if (!audioCtx) {
         audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
     return audioCtx;
 };
+
+const getMasterOutput = (ctx: AudioContext) => {
+    if (!masterGain || !masterCompressor) {
+        masterGain = ctx.createGain();
+        masterCompressor = ctx.createDynamicsCompressor();
+
+        masterCompressor.threshold.setValueAtTime(-24, ctx.currentTime);
+        masterCompressor.knee.setValueAtTime(20, ctx.currentTime);
+        masterCompressor.ratio.setValueAtTime(6, ctx.currentTime);
+        masterCompressor.attack.setValueAtTime(0.003, ctx.currentTime);
+        masterCompressor.release.setValueAtTime(0.12, ctx.currentTime);
+
+        masterGain.gain.setValueAtTime(0.85, ctx.currentTime);
+
+        masterGain.connect(masterCompressor);
+        masterCompressor.connect(ctx.destination);
+    }
+    return masterGain;
+};
+
+const vary = (base: number, amount: number) => base * (1 + (Math.random() * 2 - 1) * amount);
 
 export const toggleMute = () => {
     isMuted = !isMuted;
@@ -39,7 +63,7 @@ const createTone = (
     const gain = ctx.createGain();
 
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(getMasterOutput(ctx));
 
     osc.type = type;
     osc.frequency.setValueAtTime(startFreq, ctx.currentTime);
@@ -66,6 +90,47 @@ export const playHoverSound = () => {
             duration: 0.05,
             startGain: 0.03,
         });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playCardPortalSound = (mode: 'blue' | 'red' = 'blue') => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        if (mode === 'red') {
+            createTone(ctx, {
+                type: 'sawtooth',
+                startFreq: vary(840, 0.01),
+                endFreq: vary(160, 0.01),
+                duration: 0.11,
+                startGain: 0.05,
+            });
+            createTone(ctx, {
+                type: 'sine',
+                startFreq: vary(1100, 0.01),
+                endFreq: vary(460, 0.01),
+                duration: 0.085,
+                startGain: 0.018,
+            });
+        } else {
+            createTone(ctx, {
+                type: 'sawtooth',
+                startFreq: vary(980, 0.01),
+                endFreq: vary(220, 0.01),
+                duration: 0.12,
+                startGain: 0.04,
+            });
+            createTone(ctx, {
+                type: 'sine',
+                startFreq: vary(1400, 0.01),
+                endFreq: vary(700, 0.01),
+                duration: 0.09,
+                startGain: 0.016,
+            });
+        }
     } catch (e) {
         console.error('Audio play failed', e);
     }
@@ -169,6 +234,120 @@ export const playDropSound = () => {
             endFreq: 80,
             duration: 0.15,
             startGain: 0.08,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playCardPickUpSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        createTone(ctx, {
+            type: 'triangle',
+            startFreq: 420,
+            endFreq: 980,
+            duration: 0.09,
+            startGain: 0.055,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playCardClickSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        createTone(ctx, {
+            type: 'sine',
+            startFreq: 900,
+            endFreq: 520,
+            duration: 0.05,
+            startGain: 0.035,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playCardMoveTickSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        const start = vary(620, 0.02);
+        const end = vary(740, 0.02);
+        createTone(ctx, {
+            type: 'sine',
+            startFreq: start,
+            endFreq: end,
+            duration: 0.018,
+            startGain: 0.012,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playCardDepthNudgeSound = (direction: 'in' | 'out') => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        const up = direction === 'in';
+        const start = vary(up ? 760 : 680, 0.015);
+        const end = vary(up ? 980 : 520, 0.015);
+        createTone(ctx, {
+            type: 'triangle',
+            startFreq: start,
+            endFreq: end,
+            duration: 0.03,
+            startGain: 0.02,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playCardDropSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        createTone(ctx, {
+            type: 'square',
+            startFreq: 260,
+            endFreq: 95,
+            duration: 0.11,
+            startGain: 0.06,
+        });
+    } catch (e) {
+        console.error('Audio play failed', e);
+    }
+};
+
+export const playCardSnapSound = () => {
+    if (isMuted) return;
+    try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+        createTone(ctx, {
+            type: 'sawtooth',
+            startFreq: 520,
+            endFreq: 940,
+            duration: 0.06,
+            startGain: 0.035,
+        });
+        createTone(ctx, {
+            type: 'sine',
+            startFreq: 1200,
+            endFreq: 840,
+            duration: 0.05,
+            startGain: 0.018,
         });
     } catch (e) {
         console.error('Audio play failed', e);

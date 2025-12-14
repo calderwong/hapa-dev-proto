@@ -12,6 +12,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useCardLoadQueue, getRevealAnimationClass } from '../../hooks/useCardLoadQueue';
 import type { QueuedCard, CardIndexEntry } from '../../hooks/useCardLoadQueue';
 import { DraggableGridCard } from './DraggableGridCard';
+import type { PortalColorMode } from '../../contexts/DragCanvasContext';
 
 interface VirtualCardGridProps {
   cards: CardIndexEntry[];
@@ -19,6 +20,7 @@ interface VirtualCardGridProps {
   onCardDragStart?: (event: React.DragEvent, card: CardIndexEntry) => void;
   selectedCardId?: string | null;
   renderCard: (card: CardIndexEntry, index: number) => React.ReactNode;
+  getPortalColorMode?: (card: CardIndexEntry) => PortalColorMode | undefined;
   className?: string;
   cardHeight?: number;    // Approx card height for virtual scroll calc
   columns?: number;       // Number of columns in grid
@@ -88,6 +90,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   onCardDragStart,
   selectedCardId,
   renderCard,
+  getPortalColorMode,
   className = '',
   cardHeight = 280,
   columns = 5,
@@ -232,6 +235,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
                   card={card}
                   renderPreview={() => renderCard(card, index)}
                   onClick={(e) => onCardClick?.(card, e)}
+                  portalColorMode={getPortalColorMode?.(card)}
                   className={`
                     group relative bg-gray-900/40 border-2 rounded-lg 
                     cursor-grab active:cursor-grabbing 

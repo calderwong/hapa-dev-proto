@@ -2,6 +2,7 @@ import React from 'react';
 import type { HandCard, CardState } from '../../contexts/HandContext';
 import { useGlobalDrag } from '../../hooks/useGlobalDrag';
 import { useDragCanvas } from '../../contexts/DragCanvasContext';
+import type { PortalColorMode } from '../../contexts/DragCanvasContext';
 
 interface DraggableHandCardProps {
   card: HandCard;
@@ -12,6 +13,7 @@ interface DraggableHandCardProps {
   isHovered: boolean;
   setHoveredIndex: (index: number | null) => void;
   setSelectedCard: (card: HandCard) => void;
+  portalColorMode?: PortalColorMode;
 }
 
 export const DraggableHandCard: React.FC<DraggableHandCardProps> = ({
@@ -23,6 +25,7 @@ export const DraggableHandCard: React.FC<DraggableHandCardProps> = ({
   isHovered,
   setHoveredIndex,
   setSelectedCard,
+  portalColorMode = 'blue',
 }) => {
   // Use global drag system
   const { items } = useDragCanvas();
@@ -59,7 +62,8 @@ export const DraggableHandCard: React.FC<DraggableHandCardProps> = ({
     type: 'HAND_CARD',
     data: card,
     render: renderDragPreview,
-    onClick: (e) => setSelectedCard(card),
+    onClick: () => setSelectedCard(card),
+    portalColorMode,
   });
 
   // If dragging, we can hide the original or dim it.
