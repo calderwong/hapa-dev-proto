@@ -913,7 +913,16 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                                     onClick={() => {
                                         setScopeMode((v) => {
                                             const next = v === 'global' ? 'local' : 'global';
-                                            if (next === 'global') setShowComponents(false);
+
+                                            if (next === 'local') {
+                                                setSearchQuery('');
+                                                setShowComponents(true);
+                                                setCameraPose(buildCameraPose([0, 0, 0], 'focus'));
+                                            } else {
+                                                setShowComponents(false);
+                                                lastAutoFocusedCardIdRef.current = null;
+                                            }
+
                                             return next;
                                         });
                                     }}

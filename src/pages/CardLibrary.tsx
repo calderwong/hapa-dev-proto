@@ -345,10 +345,10 @@ const CardLibrary: React.FC = () => {
 
     const openNexus = useCallback((cardId?: string | null) => {
         const qp = new URLSearchParams();
-        qp.set('from', '/cards');
+        qp.set('from', `${location.pathname}${location.search}`);
         if (cardId) qp.set('cardId', String(cardId));
         navigate(`/nexus?${qp.toString()}`);
-    }, [navigate]);
+    }, [location.pathname, location.search, navigate]);
 
     const emitWormholeRunEvent = (
         type: 'start' | 'end',
