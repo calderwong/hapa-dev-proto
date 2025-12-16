@@ -59,6 +59,14 @@ The app is built with **Electron**, **React + TypeScript**, and **Vite**.
   - View all entries for a core in a scrollable log.
   - Backed by **hypercore** and **hyperswarm** in the Electron process.
 
+- **3D Nexus (Card Constellation Viewer)**
+  - Immersive 3D visualization of your card library and relationships.
+  - **LOCAL mode**: Focused constellation with parent/child/sibling cards arranged around the selected card.
+  - **GLOBAL mode**: Spiral layout of all cards with search filtering and tunable edge rendering.
+  - Smooth camera navigation with focus, top, and wide presets.
+  - Deep-linkable from Chat, Wiki, and Card Library (`/nexus?cardId=...`).
+  - Distance-based label LOD for performance with large libraries.
+
 ---
 
 ## Tech Stack

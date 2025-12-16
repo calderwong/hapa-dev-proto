@@ -96,6 +96,16 @@ Planned future work:
 - Append to each card’s own Hypercore journal recording placements and outcomes.
 - Allow Location behavior/effects to be influenced by stacked card attributes/skills/canon, evaluated in priority order.
 
+### 2.9 3D Nexus (Card Constellation Viewer)
+- **Top-level route** (`/nexus`) accessible from the sidebar and deep-linkable from Chat, Wiki, and Card Library.
+- **Two scope modes**:
+  - **LOCAL**: Focused constellation showing the selected card at center with parent, children, siblings, and context cards arranged around it. Component nodes (images, videos, summaries) can be toggled on.
+  - **GLOBAL**: Spiral layout of all cards in the library with search filtering. Edges are capped for performance (0/150/450 selector).
+- **Smooth camera navigation**: Click a card to focus and recenter; preset buttons (FOCUS, TOP, WIDE) for quick reorientation.
+- **Distance-based label LOD**: Card labels hide when far from camera to reduce DOM pressure.
+- **Deep linking**: Navigate to `/nexus?cardId=...` from anywhere; global Back button returns to previous context.
+- **Keyboard shortcuts**: Arrow keys for lineage navigation, Escape to close, M to mute.
+
 ## 3. Non-Functional Requirements
 
 - **Platform**: Desktop (Electron; Windows-focused, but cross-platform where possible).

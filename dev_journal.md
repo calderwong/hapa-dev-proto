@@ -3240,6 +3240,21 @@ Body: {"operationName": "projects/.../operations/{uuid}"}
 **Tags:** #feature #ux #cards #drag #overlay
 **Est. Avg. Human Dev Time:** 0.3 hours
 
+## Entry 71 – 3D Nexus Redesign (Nexus OS) – Audit + Redesign Doc
+**Date**: Dec 14, 2025
+**Prompt:** "OK let's put this one aside for now... take a stab at going max creativity with the '3D Nexus' feature... start a new doc... research... form a redesign plan... then make changes before checking in again"
+
+**Summary of actions:**
+- Audited the current 3D Nexus implementation (Card Library launch path + `src/components/Card3DViewer/*`) including view modes, navigation model, and graph extraction strategy.
+- Reviewed relevant internal design context (3D viewer design, lineage/graph plans) and collected primary-source inspiration for large-graph UX and interaction patterns.
+- Authored a new redesign proposal doc: `docs/3D_NEXUS_REDESIGN.md` outlining "Nexus OS" (multi-view shell, layers, inspector, scale strategy, and phased implementation plan).
+
+**Files created:**
+- `docs/3D_NEXUS_REDESIGN.md`
+
+**Tags:** #design #nexus #3d #ux #graph
+**Est. Avg. Human Dev Time:** 1.5 hours
+
 ## Entry 70 – Shoot Cards to Sidebar Locations + SQLite Recovery Hardening
 **Date**: Dec 13, 2025
 **Prompt:** "Fixing Card Shooting and Persistence" (shoot cards to menu items; thumbnails reverted to dots; Electron `SQLITE_IOERR_TRUNCATE` startup failure)
@@ -3344,4 +3359,262 @@ Body: {"operationName": "projects/.../operations/{uuid}"}
 
 **Tags:** #feature #ux #cards #drag #overlay
 **Est. Avg. Human Dev Time:** 0.3 hours
+
+## Entry 68 – 3D Nexus Redesign (Nexus OS)
+**Date**: Dec 14, 2025
+**Prompt:** "3D Nexus Redesign and Navigation" + multiple continuation prompts
+
+**Summary of actions:**
+- **Promoted 3D Nexus to top-level route** (`/nexus`) with sidebar entry using `visibility` icon.
+- **Implemented global navigation history** (`NavigationHistoryContext`) with `goBack()`, `canGoBack`, and Alt+Left keyboard shortcut.
+- **Added global Back button** in the top status bar, wired to navigation history.
+- **Added deep-linking** from Card Library, Chat, and Wiki to `/nexus?cardId=...`.
+- **Implemented GLOBAL/LOCAL scope toggle**:
+  - LOCAL: Focused constellation (parent/children/siblings/context cards).
+  - GLOBAL: Spiral layout of all cards with search filtering.
+- **Added smooth camera navigation**:
+  - `CameraRig` component lerps camera position/target to focused card.
+  - Camera presets: FOCUS, TOP, WIDE.
+  - Auto-focus on card click in GLOBAL mode.
+  - Animation settles and releases OrbitControls.
+- **Added GLOBAL performance controls**:
+  - Edge cap selector (0/150/450).
+  - Distance-based label LOD in `Card3D.tsx` (hides Html overlays when far).
+- **Added "ENTER LOCAL CONSTELLATION"** action to jump from GLOBAL to LOCAL.
+- **Search filtering** never hides the focused card.
+- **Updated PRD and README** with 3D Nexus documentation.
+
+**Files created:**
+- `src/pages/Nexus.tsx`
+- `src/contexts/NavigationHistoryContext.tsx`
+
+**Files modified:**
+- `src/App.tsx` (NavigationHistoryProvider, /nexus route)
+- `src/components/Layout.tsx` (Back button, sidebar entry)
+- `src/pages/CardLibrary.tsx` (deep link to Nexus)
+- `src/pages/Chat.tsx` (openNexus helper, Nexus buttons)
+- `src/pages/Wiki.tsx` (handleOpenNexus, Nexus button)
+- `src/components/Card3DViewer/Card3DViewer.tsx` (scope toggle, camera rig, edge cap, search)
+- `src/components/Card3DViewer/Card3D.tsx` (label LOD)
+- `src/vite-env.d.ts` (Astro web component declarations)
+- `Product_Requirements_Document.md`
+- `README.md`
+
+**Tags:** #feature #3d #nexus #navigation #ux #performance
+**Est. Avg. Human Dev Time:** 4.0 hours
+
+
+## Entry 70 – 3D Nexus V2: Ship Mode + Card Materiality Pass
+**Date**: Dec 14, 2025
+**Prompt:** "can you give me a shape ship to optionally toggle on and fly around and shoot stuff?" + "mouse steer/target" + "invert y toggle" + "make cards feel more material/valuable + write v2 design doc"
+
+**Summary of actions:**
+- Added **Ship Mode** inside Nexus:
+  - Toggle in the Nexus rail.
+  - Flyable ship with third-person camera follow.
+  - Projectiles with lifetime + card hit detection.
+- Added **mouse aim/steer** and a **3D aim reticle** that matches the shot direction.
+- Added **Invert Y** toggle (default non-inverted) for ship mouse aim.
+- Wrote **Nexus V2 aesthetics/UX design doc**: `docs/NEXUS_V2_DESIGN.md`.
+- Started Phase A implementation: **Card3D materiality pass** (beveled chassis, tier trim, glass lens, improved hover parallax, upgraded overlay panel).
+
+**Files created:**
+- `src/components/Card3DViewer/Spaceship.tsx`
+- `docs/NEXUS_V2_DESIGN.md`
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+- `src/components/Card3DViewer/Card3D.tsx`
+
+**Tags:** #feature #3d #nexus #ux #visual-design #interaction
+**Est. Avg. Human Dev Time:** 2.5 hours
+
+
+## Entry 71 – Card3D V2: Premium Media Module + Optics Overlay
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Refined the Card3D media area to feel like a **premium inset module**:
+  - Added an inset rounded frame behind the media.
+  - Added a thin glass cover layer over the media.
+- Added a subtle **optics overlay** (vignette + faint scanlines) using a cached `CanvasTexture` shared across all cards to avoid per-card texture work.
+- Verified TypeScript build still passes.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3D.tsx`
+
+**Tags:** #feature #3d #nexus #visual-design
+**Est. Avg. Human Dev Time:** 45 minutes
+
+
+## Entry 72 – Nexus Edges V2: Semantic Line Styles
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Began Phase B relationship rendering improvements:
+  - Added per-edge-type style mapping (thickness, opacity, dash patterns).
+  - Reduced particles for structural edges; kept animated flow particles for flow edges.
+  - Tuned endpoint glow size/opacity per edge type.
+
+**Files modified:**
+- `src/components/Card3DViewer/CardConnections.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 35 minutes
+
+
+## Entry 73 – Nexus GLOBAL Rail: Edge Legend
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Added a compact edge legend under the GLOBAL edge cap controls so the new edge semantics are learnable.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 15 minutes
+## Entry 74 – Nexus GLOBAL Rail: Edge Filters (STRUCT/FLOW/PARTS)
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Added GLOBAL edge filter toggles:
+  - STRUCT: parent/child + sibling edges
+  - FLOW: extraction/derived/generated/reference edges
+  - PARTS: card-component edges (and component connections)
+- Applied filters by filtering the connections passed into `CardConnections`.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 25 minutes
+
+
+## Entry 75 – Nexus Edges V2: Flow Direction Arrowheads
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Added direction cues to FLOW edges by rendering a small arrowhead mesh near the target end of the curve.
+- Arrowheads are enabled for extraction/generated/reference/derived-from and inherit the edge color with additive blending.
+
+**Files modified:**
+- `src/components/Card3DViewer/CardConnections.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 20 minutes
+
+
+## Entry 76 – Nexus GLOBAL Rail: Legend Reflects Filters
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Updated the edge legend UI to dim legend items when their corresponding filter is disabled (STRUCT/FLOW/PARTS).
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 10 minutes
+
+
+## Entry 77 – Nexus LOCAL: Sibling Edges
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- In LOCAL constellation mode, added edges between the focused card and its siblings (type `sibling`) so lateral relationships are visible.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 10 minutes
+
+
+## Entry 78 – Nexus Rail: Edge Legend/Filters in GLOBAL + LOCAL
+**Date**: Dec 14, 2025
+**Prompt:** "A"
+
+**Summary of actions:**
+- Updated the Nexus rail so edge Legend + Filters appear in both GLOBAL and LOCAL, preventing "missing edges" confusion when filters are toggled in GLOBAL and then switching views.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 10 minutes
+
+
+## Entry 79 – Nexus: Render Existing Parent/Child Links From All Fields
+**Date**: Dec 14, 2025
+**Prompt:** "Can you just look up any relationships that exist and add them?"
+
+**Summary of actions:**
+- Updated relationship detection to use all currently-available schema signals:
+  - Child → parent: `parentCardId` and `parentId`
+  - Parent → children: `childCardIds` and `children[].cardId`
+- Updated GLOBAL edge construction to include parent→child edges from parent records.
+- Added edge de-duplication so the same link doesn't render twice.
+- Updated LOCAL edge construction to use the same edge de-duplication helper.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 25 minutes
+
+
+## Entry 80 – Nexus LOCAL: Component FLOW Edges (Derived-From)
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Extended component-edge rendering in LOCAL to include `derived-from` edges (in addition to `card-component`).
+- Wired filters so:
+  - PARTS controls `card-component`
+  - FLOW controls `derived-from`
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 15 minutes
+
+
+## Entry 81 – Nexus Rail: Legend Clarifies Component Flow
+**Date**: Dec 14, 2025
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Updated the Edges Legend to clarify that the FLOW filter also toggles component `derived-from` edges in LOCAL.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3DViewer.tsx`
+
+**Tags:** #feature #3d #nexus #ux
+**Est. Avg. Human Dev Time:** 10 minutes
+
+
+## Entry 82 – Nexus 3D Thumbnails: Electron file:// + R3F Material Remount Fix
+**Date**: Dec 15, 2025
+**Prompt:** "None of the images are showing up" / "looks green... but there should be a real image" / "Yes it worked!"
+
+**Summary of actions:**
+- Fixed Nexus thumbnails in Electron by resolving local Windows paths / `file://` URLs into `data:` URLs via `window.electronAPI.readFileAsBase64` before loading textures.
+- Ensured Three.js textures render consistently by forcing the thumbnail material to remount via keyed `meshBasicMaterial` branches (fixes a stale-material reuse case that produced a persistent white plane).
+- Kept a focused-card-only thumbnail status dot for quick diagnosis (missing URL vs resolved URL vs texture loaded vs load failure).
+- Removed all temporary thumbnail debug UI (debug plane/panels/probes) after confirming thumbnails render correctly.
+
+**Files modified:**
+- `src/components/Card3DViewer/Card3D.tsx`
+
+**Tags:** #bugfix #3d #nexus #thumbnails #electron
+**Est. Avg. Human Dev Time:** 90 minutes
 
