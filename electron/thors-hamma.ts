@@ -56,6 +56,115 @@ interface LeoAnalysis {
   forging_priority: string; // What Thor should prioritize based on hand context
 }
 
+function tryParseJsonFromText(raw: string): any {
+  const stripFences = (input: string) => {
+    const trimmed = input.trim();
+    const fenced = trimmed.match(/^```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n```\s*$/);
+    if (fenced && fenced[1]) return fenced[1].trim();
+
+    const start = trimmed.indexOf('```');
+    if (start >= 0) {
+      const end = trimmed.lastIndexOf('```');
+      if (end > start) {
+        const inner = trimmed.slice(start + 3, end);
+        const firstNewline = inner.indexOf('\n');
+        if (firstNewline >= 0) return inner.slice(firstNewline + 1).trim();
+        return inner.trim();
+      }
+    }
+
+    return trimmed;
+  };
+
+  const stripComments = (input: string) => {
+    const withoutBlock = input.replace(/\/\*[\s\S]*?\*\//g, '');
+    const withoutLine = withoutBlock.replace(/^\s*\/\/.*$/gm, '');
+    return withoutLine;
+  };
+
+  const removeTrailingCommas = (input: string) => {
+    return input.replace(/,(\s*[}\]])/g, '$1');
+  };
+
+  const basicRepair = (input: string) => {
+    const noBom = input.replace(/^\uFEFF/, '');
+    return removeTrailingCommas(stripComments(noBom));
+  };
+
+  const stripLeadingJsonWord = (input: string) => {
+    const trimmed = input.trimStart();
+    const match = trimmed.match(/^(json|JSON)\s*/);
+    if (!match) return trimmed;
+    const next = trimmed.slice(match[0].length).trimStart();
+    if (next.startsWith('{') || next.startsWith('[')) return next;
+    return trimmed;
+  };
+
+  const extractFirstJson = (input: string) => {
+    const firstObj = input.indexOf('{');
+    const firstArr = input.indexOf('[');
+    const start =
+      firstObj === -1
+        ? firstArr
+        : firstArr === -1
+          ? firstObj
+          : Math.min(firstObj, firstArr);
+    if (start < 0) return null;
+
+    const open = input[start];
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < input.length; i++) {
+      const ch = input[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === open) depth++;
+      if (ch === close) depth--;
+      if (depth === 0) return input.slice(start, i + 1);
+    }
+    return null;
+  };
+
+  const candidates: string[] = [];
+  candidates.push(raw ?? '');
+  candidates.push(stripFences(raw ?? ''));
+  candidates.push(stripLeadingJsonWord(stripFences(raw ?? '')));
+  candidates.push(basicRepair(stripLeadingJsonWord(stripFences(raw ?? ''))));
+
+  for (const candidate of candidates) {
+    const trimmed = (candidate ?? '').trim();
+    if (!trimmed) continue;
+    try {
+      return JSON.parse(trimmed);
+    } catch (_) {
+      const extracted = extractFirstJson(trimmed);
+      if (extracted) {
+        const repaired = basicRepair(extracted);
+        return JSON.parse(repaired);
+      }
+    }
+  }
+
+  throw new Error('Unable to parse JSON from model output');
+}
+
 export class ThorsHammaManager {
   private window: BrowserWindow | null = null;
   private currentUrl: string = '';
@@ -368,9 +477,11 @@ OUTPUT (JSON):
     }
 
     try {
-      return JSON.parse(text);
+      return tryParseJsonFromText(text);
     } catch (e) {
-      this.log('ERR', `AI JSON Parse Failed: ${text.slice(0, 100)}...`);
+      const raw = String(text ?? '');
+      const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 180);
+      this.log('ERR', `AI JSON Parse Failed: ${snippet}${snippet.length >= 180 ? '…' : ''}`);
       throw new Error("AI Output Malformed");
     }
   }
