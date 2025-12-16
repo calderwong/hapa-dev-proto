@@ -141,13 +141,16 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   }, [scrollTop, containerHeight, rowHeight, columns, bufferRows, totalRows, cards.length]);
   
   // Load cards ONCE when cards first arrive (not on every change)
-  const hasLoadedRef = useRef(false);
+  const lastLoadedLengthRef = useRef(0);
   useEffect(() => {
-    if (cards.length > 0 && !hasLoadedRef.current) {
-      hasLoadedRef.current = true;
-      loadCards(cards);
-    }
-  }, [cards.length]); // Only depend on length, not cards array reference
+    if (cards.length <= 0) return;
+    if (cards.length === lastLoadedLengthRef.current) return;
+
+    // When the parent increments the list over time (paged loads), re-sync the queue.
+    // This intentionally rehydrates the queue so newly appended cards can reveal.
+    lastLoadedLengthRef.current = cards.length;
+    loadCards(cards);
+  }, [cards.length, loadCards]); // Only depend on length, not cards array reference
   
   // Update visible range when scroll changes
   useEffect(() => {
