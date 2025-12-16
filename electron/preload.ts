@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     wormholeGetCardText: (params: { cardId: string }) =>
         ipcRenderer.invoke('wormhole-get-card-text', params),
     wormholeGetWikiIndex: () => ipcRenderer.invoke('wormhole-get-wiki-index'),
+    readFileAsBase64: (filePath: string) => ipcRenderer.invoke('read-file-as-base64', filePath),
     // Scroll attachment handlers
     attachCardScroll: (params: { cardId: string; scrollCardId: string; label?: string; includeInSummarization?: boolean; includeInKeyTerms?: boolean; includeInWikiUpdate?: boolean }) =>
         ipcRenderer.invoke('attach-card-scroll', params),

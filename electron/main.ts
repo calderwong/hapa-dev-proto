@@ -6096,6 +6096,30 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     return getCoreLength(name);
   });
 
+  ipcMain.handle('read-file-as-base64', async (_event, filePath: string) => {
+    const p = typeof filePath === 'string' ? filePath : '';
+    if (!p) {
+      throw new Error('read-file-as-base64 requires filePath');
+    }
+
+    const buf = await fs.promises.readFile(p);
+    const base64 = buf.toString('base64');
+    const ext = path.extname(p).toLowerCase();
+    const mimeType = (() => {
+      if (ext === '.png') return 'image/png';
+      if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+      if (ext === '.gif') return 'image/gif';
+      if (ext === '.webp') return 'image/webp';
+      if (ext === '.bmp') return 'image/bmp';
+      if (ext === '.svg') return 'image/svg+xml';
+      if (ext === '.mp4') return 'video/mp4';
+      if (ext === '.webm') return 'video/webm';
+      return 'application/octet-stream';
+    })();
+
+    return { base64, mimeType };
+  });
+
   // ============================================================================
   // CARD SETS IPC HANDLERS
   // ============================================================================

@@ -235,6 +235,7 @@ export interface ElectronAPI {
     p2pCreateCore: (name: string) => Promise<{ key: string; discoveryKey: string; length: number }>;
     p2pAppend: (data: { name: string; data: string }) => Promise<number>;
     p2pRead: (name: string) => Promise<string[]>;
+    readFileAsBase64?: (filePath: string) => Promise<{ base64: string; mimeType?: string } | string>;
     onChatStream?: (
         listener: (payload: { provider: 'gemini' | 'openai' | 'llama'; delta: string; done?: boolean }) => void,
     ) => void;
@@ -441,6 +442,7 @@ export interface ElectronAPI {
     p2pAppend: (data: { name: string; data: string }) => Promise<number>;
     p2pRead: (name: string, options?: any) => Promise<string[]>;
     p2pGetLength: (name: string) => Promise<number>;
+    readFileAsBase64?: (filePath: string) => Promise<{ base64: string; mimeType?: string } | string>;
     onChatStream?: (
         listener: (payload: { provider: 'gemini' | 'openai' | 'llama'; delta: string; done?: boolean; model?: string }) => void,
     ) => void;
