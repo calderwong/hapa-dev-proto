@@ -44,3 +44,34 @@
 
 **Tags:** #bugfix #pipeline #hellweek
 **Est. Avg. Human Dev Time:** 60 minutes
+
+## Entry 86 – Nexus Phase 2: paging, async search, seamless scope switch, richer card faces
+**Prompt:** "Can you work on performance/load-times for the 3D nexus feature now that's its MVP?"
+
+**Summary of actions:**
+- Authored a Phase 2 design doc defining scalable Nexus loading and perceived-performance goals.
+- Implemented Nexus Phase 2 Electron IPC “pipe” APIs:
+  - Paged/de-duped global feed loading (`nexus:index-page`).
+  - Batched latest-record hydration (`nexus:card-latest-batch`).
+  - Persisted Nexus settings (`nexus:get-settings`/`nexus:save-settings`) with defaults (cap=1000, pageSize=120).
+  - Async streaming search jobs (`nexus:search-start`/`nexus:search-cancel`) that emit incremental results via `nexus:search-update`.
+- Updated renderer Nexus page to stop doing full-library `p2pRead('card-library')` and instead:
+  - Load the index in pages.
+  - Hydrate missing thumbnails/records in batches.
+  - Perform search as “filter loaded immediately + async stream more matches”.
+- Added perceived-performance improvements in the 3D viewer:
+  - Scope switch overlay and deferred scope toggle (`requestAnimationFrame`) to avoid UI-freeze perception.
+  - UI affordances for searching and loading more global results.
+- Began upgrading the 3D card face overlay to show more content (skills, lore, facts, desires) with LOD.
+
+**Files modified/created:**
+- Created: `Nexus_Phase_2_Design_Doc.md`
+- Modified: `electron/main.ts`
+- Modified: `electron/preload.ts`
+- Modified: `src/pages/Nexus.tsx`
+- Modified: `src/components/Card3DViewer/Card3DViewer.tsx`
+- Modified: `src/components/Card3DViewer/Card3D.tsx`
+- Modified: `src/types.d.ts`
+
+**Tags:** #feature #nexus #performance
+**Est. Avg. Human Dev Time:** 2.5 hours

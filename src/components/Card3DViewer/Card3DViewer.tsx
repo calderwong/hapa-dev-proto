@@ -107,6 +107,12 @@ export interface CardData {
             summaries?: any[];
             keyTerms?: any[];
         };
+
+        // Hell Week / Thor-derived cards (common variants)
+        truthAnalysis?: { facts?: string[]; desires?: string[] };
+        truth_analysis?: { facts?: string[]; desires?: string[] };
+        cardData?: { name?: string; lore?: string; skills?: Array<{ name?: string; description?: string; type?: string }> };
+        card_data?: { name?: string; lore?: string; skills?: Array<{ name?: string; description?: string; type?: string }> };
     };
 }
 
@@ -1361,11 +1367,36 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                             .slice(0, 5);
                         
                         // Extract lore from summaries or content
-                        const loreText = card.cardRecord?.summaries?.[0]?.text 
+                        const loreText = (card.cardRecord as any)?.cardData?.lore
+                            || (card.cardRecord as any)?.card_data?.lore
+                            || card.cardRecord?.summaries?.[0]?.text
                             || card.cardRecord?.summaries?.[0]?.content
                             || card.cardRecord?.text
                             || card.cardRecord?.content
                             || undefined;
+
+                        const skillNames = (() => {
+                            const skillsAny = (card.cardRecord as any)?.cardData?.skills
+                                || (card.cardRecord as any)?.card_data?.skills
+                                || [];
+                            if (!Array.isArray(skillsAny)) return [];
+                            return skillsAny
+                                .map((s: any) => s?.name)
+                                .filter(Boolean)
+                                .slice(0, 6);
+                        })();
+
+                        const facts = (() => {
+                            const t = (card.cardRecord as any)?.truthAnalysis || (card.cardRecord as any)?.truth_analysis;
+                            const arr = Array.isArray(t?.facts) ? t.facts : [];
+                            return arr.filter(Boolean);
+                        })();
+
+                        const desires = (() => {
+                            const t = (card.cardRecord as any)?.truthAnalysis || (card.cardRecord as any)?.truth_analysis;
+                            const arr = Array.isArray(t?.desires) ? t.desires : [];
+                            return arr.filter(Boolean);
+                        })();
                         
                         return (
                             <Card3D
@@ -1387,6 +1418,9 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                                 childCount={cardChildCount}
                                 keyTerms={keyTermStrings}
                                 lore={loreText}
+                                skills={skillNames}
+                                facts={facts}
+                                desires={desires}
                                 onClick={() => {
                                     focusCard(card.cardId);
                                     onCardSelect?.(card.cardId);

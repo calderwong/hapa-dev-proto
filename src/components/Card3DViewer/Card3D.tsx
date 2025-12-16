@@ -92,6 +92,8 @@ interface Card3DProps {
     labelLodDistance?: number;
     skills?: string[];
     lore?: string;
+    facts?: string[];
+    desires?: string[];
     keyTerms?: string[];
     onClick?: () => void;
     onDoubleClick?: () => void;
@@ -116,6 +118,8 @@ export const Card3D: React.FC<Card3DProps> = ({
     labelLodDistance = 12,
     skills = [],
     lore,
+    facts = [],
+    desires = [],
     keyTerms = [],
     onClick,
     onDoubleClick,
@@ -284,6 +288,27 @@ export const Card3D: React.FC<Card3DProps> = ({
 
     const mediaWidth = cardWidth - 0.24;
     const mediaHeight = cardHeight * 0.56;
+
+    const detailLevel = isFocused ? 2 : hovered ? 1 : 0;
+
+    const lorePreview = useMemo(() => {
+        const raw = String(lore ?? '').replace(/\s+/g, ' ').trim();
+        if (!raw) return undefined;
+        const max = detailLevel >= 2 ? 110 : 60;
+        return raw.length > max ? `${raw.slice(0, max - 1)}…` : raw;
+    }, [detailLevel, lore]);
+
+    const factChips = useMemo(() => {
+        const arr = Array.isArray(facts) ? facts : [];
+        const max = detailLevel >= 2 ? 2 : 0;
+        return max > 0 ? arr.filter(Boolean).slice(0, max) : [];
+    }, [detailLevel, facts]);
+
+    const desireChips = useMemo(() => {
+        const arr = Array.isArray(desires) ? desires : [];
+        const max = detailLevel >= 2 ? 2 : 0;
+        return max > 0 ? arr.filter(Boolean).slice(0, max) : [];
+    }, [detailLevel, desires]);
     
     return (
         <group
@@ -512,18 +537,33 @@ export const Card3D: React.FC<Card3DProps> = ({
                     {/* Skills */}
                     {skills.length > 0 && (
                         <div className="mt-1 flex flex-wrap justify-center gap-0.5">
-                            {skills.slice(0, 2).map((skill, i) => (
+                            {skills.slice(0, detailLevel >= 2 ? 3 : 2).map((skill, i) => (
                                 <span key={i} className="text-[7px] bg-amber-900/60 text-amber-300 px-1 py-0.5 rounded font-bold">
                                     ⚡ {skill.length > 10 ? skill.slice(0, 8) + '…' : skill}
                                 </span>
                             ))}
                         </div>
                     )}
+
+                    {(factChips.length > 0 || desireChips.length > 0) && (
+                        <div className="mt-1 flex flex-wrap justify-center gap-0.5">
+                            {factChips.map((t, i) => (
+                                <span key={`f:${i}`} className="text-[7px] bg-cyan-900/50 text-cyan-200 px-1 py-0.5 rounded">
+                                    ✓ {String(t).length > 18 ? String(t).slice(0, 16) + '…' : String(t)}
+                                </span>
+                            ))}
+                            {desireChips.map((t, i) => (
+                                <span key={`d:${i}`} className="text-[7px] bg-fuchsia-900/45 text-fuchsia-200 px-1 py-0.5 rounded">
+                                    ⇢ {String(t).length > 18 ? String(t).slice(0, 16) + '…' : String(t)}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     
                     {/* Lore snippet */}
-                    {lore && (
+                    {lorePreview && detailLevel >= 1 && (
                         <div className="mt-1 text-[6px] text-gray-400 italic text-center leading-tight max-h-6 overflow-hidden">
-                            "{lore.length > 50 ? lore.slice(0, 47) + '…' : lore}"
+                            "{lorePreview}"
                         </div>
                     )}
                     </div>
