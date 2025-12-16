@@ -93,6 +93,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     p2pAppend: (data: { name: string; data: string }) => ipcRenderer.invoke('p2p-append', data),
     p2pRead: (name: string, options?: any) => ipcRenderer.invoke('p2p-read', name, options),
     p2pGetLength: (name: string) => ipcRenderer.invoke('p2p-get-length', name),
+
+    // Nexus (Phase 2)
+    nexusGetSettings: () => ipcRenderer.invoke('nexus:get-settings'),
+    nexusSaveSettings: (settings: any) => ipcRenderer.invoke('nexus:save-settings', settings),
+    nexusIndexPage: (payload: any) => ipcRenderer.invoke('nexus:index-page', payload),
+    nexusCardLatestBatch: (payload: any) => ipcRenderer.invoke('nexus:card-latest-batch', payload),
+    nexusSearchStart: (payload: any) => ipcRenderer.invoke('nexus:search-start', payload),
+    nexusSearchCancel: (payload: any) => ipcRenderer.invoke('nexus:search-cancel', payload),
+    onNexusSearchUpdate: (callback: (data: any) => void) => {
+        const listener = (_event: any, data: any) => callback(data);
+        ipcRenderer.on('nexus:search-update', listener);
+        return () => ipcRenderer.removeListener('nexus:search-update', listener);
+    },
+
     toggleDevTools: () => ipcRenderer.invoke('toggle-dev-tools'),
     getProfile: () => ipcRenderer.invoke('get-profile'),
     saveProfile: (profile: any) => ipcRenderer.invoke('save-profile', profile),

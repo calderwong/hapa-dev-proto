@@ -235,6 +235,13 @@ export interface ElectronAPI {
     p2pCreateCore: (name: string) => Promise<{ key: string; discoveryKey: string; length: number }>;
     p2pAppend: (data: { name: string; data: string }) => Promise<number>;
     p2pRead: (name: string) => Promise<string[]>;
+    nexusGetSettings?: () => Promise<{ globalRenderCap: number; globalPageSize: number }>;
+    nexusSaveSettings?: (settings: { globalRenderCap?: number; globalPageSize?: number }) => Promise<{ globalRenderCap: number; globalPageSize: number }>;
+    nexusIndexPage?: (payload: { coreName?: string; cursor?: number; limit?: number; direction?: 'reverse' | 'forward' }) => Promise<{ items: any[]; nextCursor: number; hasMore: boolean; totalLength: number }>;
+    nexusCardLatestBatch?: (payload: { entries: Array<{ cardId: string; coreName?: string }> }) => Promise<{ recordsById: Record<string, any> }>;
+    nexusSearchStart?: (payload: { query: string; coreName?: string; limit?: number }) => Promise<{ jobId: string }>;
+    nexusSearchCancel?: (payload: { jobId: string }) => Promise<{ ok: true }>;
+    onNexusSearchUpdate?: (callback: (data: any) => void) => () => void;
     readFileAsBase64?: (filePath: string) => Promise<{ base64: string; mimeType?: string } | string>;
     onChatStream?: (
         listener: (payload: { provider: 'gemini' | 'openai' | 'llama'; delta: string; done?: boolean }) => void,

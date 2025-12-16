@@ -135,6 +135,9 @@ interface Card3DViewerProps {
     focusedCardId?: string;
     onCardSelect?: (cardId: string) => void;
     onClose?: () => void;
+    onSearchQueryChange?: (q: string) => void;
+    isSearching?: boolean;
+    onRequestMoreGlobal?: () => void;
 }
 
 // Calculate positions for cards in constellation view
@@ -395,6 +398,9 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
     focusedCardId,
     onCardSelect,
     onClose,
+    onSearchQueryChange,
+    isSearching = false,
+    onRequestMoreGlobal,
 }) => {
     const { 
         viewMode, 
@@ -477,6 +483,7 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
     const [leftOpen, setLeftOpen] = useState(true);
     const [rightOpen, setRightOpen] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [isScopeSwitching, setIsScopeSwitching] = useState(false);
     const [globalEdgeCap, setGlobalEdgeCap] = useState<0 | 150 | 450>(450);
     const [edgeFilterStructural, setEdgeFilterStructural] = useState(true);
     const [edgeFilterFlow, setEdgeFilterFlow] = useState(true);
@@ -598,6 +605,10 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
         return matches;
     }, [cardsToRender, searchQuery]);
 
+    useEffect(() => {
+        onSearchQueryChange?.(searchQuery);
+    }, [onSearchQueryChange, searchQuery]);
+
     const orderedGlobalCards = useMemo(() => {
         if (!focusedCard) return filteredCards;
         const rest = filteredCards.filter((c) => c.cardId !== focusedCard.cardId);
@@ -655,6 +666,30 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
         // In local mode, the focused card is always at origin.
         setCameraPose(buildCameraPose([0, 0, 0], 'focus'));
     }, [buildCameraPose, focusedCard]);
+
+    const toggleScopeMode = useCallback(() => {
+        setIsScopeSwitching(true);
+        // Allow the overlay to paint before we do the heavy recompute/mount.
+        requestAnimationFrame(() => {
+            setScopeMode((v) => {
+                const next = v === 'global' ? 'local' : 'global';
+
+                if (next === 'local') {
+                    setSearchQuery('');
+                    setShowComponents(true);
+                    setCameraPose(buildCameraPose([0, 0, 0], 'focus'));
+                } else {
+                    setShowComponents(false);
+                    lastAutoFocusedCardIdRef.current = null;
+                }
+
+                return next;
+            });
+
+            // Prevent flicker.
+            setTimeout(() => setIsScopeSwitching(false), 250);
+        });
+    }, [buildCameraPose]);
 
     useEffect(() => {
         if (scopeMode !== 'global') return;
@@ -907,25 +942,15 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                                     placeholder="name or id"
                                     className="mt-1 w-full bg-gray-900/70 border border-gray-800 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-cyan-500/40"
                                 />
+                                {isSearching && (
+                                    <div className="mt-1 text-[9px] font-mono text-cyan-300/80 tracking-wider">
+                                        SEARCHING…
+                                    </div>
+                                )}
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => {
-                                        setScopeMode((v) => {
-                                            const next = v === 'global' ? 'local' : 'global';
-
-                                            if (next === 'local') {
-                                                setSearchQuery('');
-                                                setShowComponents(true);
-                                                setCameraPose(buildCameraPose([0, 0, 0], 'focus'));
-                                            } else {
-                                                setShowComponents(false);
-                                                lastAutoFocusedCardIdRef.current = null;
-                                            }
-
-                                            return next;
-                                        });
-                                    }}
+                                    onClick={toggleScopeMode}
                                     className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-mono border transition-all ${
                                         scopeMode === 'global'
                                             ? 'bg-purple-900/25 border-purple-500/30 text-purple-200'
@@ -961,6 +986,20 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                                     className="w-full px-2 py-2 rounded-lg text-[10px] font-mono bg-cyan-900/20 border border-cyan-500/25 text-cyan-200 hover:border-cyan-500/50 transition-all"
                                 >
                                     ENTER LOCAL CONSTELLATION
+                                </button>
+                            )}
+                            {scopeMode === 'global' && (
+                                <button
+                                    onClick={() => onRequestMoreGlobal?.()}
+                                    disabled={!onRequestMoreGlobal}
+                                    className={`w-full px-2 py-2 rounded-lg text-[10px] font-mono border transition-all ${
+                                        onRequestMoreGlobal
+                                            ? 'bg-gray-900/50 border-gray-800 text-gray-200 hover:border-cyan-500/30'
+                                            : 'bg-gray-900/10 border-gray-800 text-gray-600 cursor-not-allowed'
+                                    }`}
+                                    title="Load more cards into the global feed"
+                                >
+                                    LOAD MORE
                                 </button>
                             )}
                             {scopeMode === 'global' && (
@@ -1430,6 +1469,20 @@ export const Card3DViewer: React.FC<Card3DViewerProps> = ({
                     <Vignette eskil={false} offset={0.1} darkness={0.5} />
                 </EffectComposer>
             </Canvas>
+
+            {isScopeSwitching && (
+                <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm">
+                    <div className="rounded-xl border border-cyan-500/20 bg-gray-950/70 px-5 py-4">
+                        <div className="flex items-center gap-3">
+                            <div className="text-cyan-400 text-xl animate-pulse">◈</div>
+                            <div>
+                                <div className="text-cyan-200 font-mono text-xs font-bold tracking-widest">SWITCHING SCOPE</div>
+                                <div className="text-gray-400 font-mono text-[10px] mt-0.5">Stitching constellation…</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             
             {/* Navigation Panel */}
             <NexusNavigator

@@ -42,6 +42,7 @@ const LOCAL_VISION_SETTINGS_KEY = 'localVisionSettings';
 const WORMHOLE_SETTINGS_KEY = 'wormholeSettings';
 const CARD_LIBRARY_CORE_NAME = 'card-library';
 const WIKI_CORE_NAME = 'wormhole-wiki-entries';
+const NEXUS_SETTINGS_KEY = 'nexusSettings';
 
 type AudioMode = 'transcribe' | 'realtime';
 
@@ -55,11 +56,34 @@ interface PipelineSettings {
   mediaThrottleMs: number; // Delay between image generations (ms)
 }
 
+interface NexusSettings {
+  globalRenderCap?: number;
+  globalPageSize?: number;
+}
+
 interface AdminSettings {
   audioMode: AudioMode;
   imageGenSettings?: ImageGenSettings;
   pipelineSettings?: PipelineSettings;
 }
+
+const getNexusSettingsInternal = (): Required<NexusSettings> => {
+  const stored = (store.get(NEXUS_SETTINGS_KEY, {}) as Partial<NexusSettings>) || {};
+  return {
+    globalRenderCap: typeof stored.globalRenderCap === 'number' && stored.globalRenderCap > 0 ? stored.globalRenderCap : 1000,
+    globalPageSize: typeof stored.globalPageSize === 'number' && stored.globalPageSize > 0 ? stored.globalPageSize : 120,
+  };
+};
+
+const saveNexusSettingsInternal = (settings: Partial<NexusSettings>) => {
+  const current = getNexusSettingsInternal();
+  const next = {
+    ...current,
+    ...settings,
+  };
+  store.set(NEXUS_SETTINGS_KEY, next);
+  return next;
+};
 
 interface LlamaSettingsInternal {
   serverPath: string;
@@ -6071,6 +6095,260 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       // Return empty if core doesn't exist yet or other error
       return { entryList: [], metaMap: {} };
     }
+  });
+
+  // ============================================================================
+  // NEXUS (Phase 2) IPC HANDLERS
+  // ============================================================================
+
+  ipcMain.handle('nexus:get-settings', async () => {
+    return getNexusSettingsInternal();
+  });
+
+  ipcMain.handle('nexus:save-settings', async (_event, settings: Partial<NexusSettings>) => {
+    return saveNexusSettingsInternal(settings || {});
+  });
+
+  type NexusIndexEntry = {
+    cardId: string;
+    coreName?: string;
+    name?: string;
+    mediaKind?: string;
+    thumbnail?: string;
+    mediaLocalPath?: string;
+    parentCardId?: string;
+    createdAt?: string;
+  };
+
+  const normalizeIndexEntry = (parsed: any): NexusIndexEntry | null => {
+    if (!parsed || parsed.type !== 'card-index') return null;
+    const id = parsed.cardId || parsed.coreName;
+    if (!id) return null;
+    return {
+      cardId: String(id),
+      coreName: parsed.coreName ? String(parsed.coreName) : String(id),
+      name: parsed.name,
+      mediaKind: parsed.mediaKind,
+      thumbnail: parsed.thumbnail,
+      mediaLocalPath: parsed.mediaLocalPath,
+      parentCardId: parsed.parentCardId,
+      createdAt: parsed.createdAt,
+    };
+  };
+
+  ipcMain.handle(
+    'nexus:index-page',
+    async (
+      _event,
+      payload: {
+        coreName?: string;
+        cursor?: number;
+        limit?: number;
+        direction?: 'reverse' | 'forward';
+      },
+    ) => {
+      const coreName = payload?.coreName || CARD_LIBRARY_CORE_NAME;
+      const direction = payload?.direction || 'reverse';
+      const limit = typeof payload?.limit === 'number' && payload.limit > 0 ? payload.limit : getNexusSettingsInternal().globalPageSize;
+
+      const length = await getCoreLength(coreName);
+      const windowSize = Math.max(limit * 4, 400);
+
+      if (direction !== 'reverse') {
+        // Forward pagination is not currently used by the Nexus UI.
+        const start = typeof payload?.cursor === 'number' && payload.cursor >= 0 ? payload.cursor : 0;
+        const blocks = await readCore(coreName, { start, limit: windowSize });
+        const byId = new Map<string, NexusIndexEntry>();
+
+        for (const raw of blocks || []) {
+          try {
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            const entry = normalizeIndexEntry(parsed);
+            if (!entry) continue;
+            if (byId.has(entry.cardId)) continue;
+            byId.set(entry.cardId, entry);
+            if (byId.size >= limit) break;
+          } catch {
+            // ignore parse errors
+          }
+        }
+
+        const nextCursor = Math.min(length, start + windowSize);
+        return {
+          items: Array.from(byId.values()),
+          nextCursor,
+          hasMore: nextCursor < length,
+          totalLength: length,
+        };
+      }
+
+      let cursor = typeof payload?.cursor === 'number' && payload.cursor >= 0 ? payload.cursor : length;
+      const items: NexusIndexEntry[] = [];
+      const seen = new Set<string>();
+
+      while (cursor > 0 && items.length < limit) {
+        const blocks = await readCore(coreName, { reverse: true, start: cursor, limit: windowSize });
+        cursor = Math.max(0, cursor - windowSize);
+
+        for (const raw of blocks || []) {
+          try {
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            const entry = normalizeIndexEntry(parsed);
+            if (!entry) continue;
+            if (seen.has(entry.cardId)) continue;
+            seen.add(entry.cardId);
+            items.push(entry);
+            if (items.length >= limit) break;
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+
+      return {
+        items,
+        nextCursor: cursor,
+        hasMore: cursor > 0,
+        totalLength: length,
+      };
+    },
+  );
+
+  ipcMain.handle(
+    'nexus:card-latest-batch',
+    async (
+      _event,
+      payload: {
+        entries: Array<{ cardId: string; coreName?: string }>;
+      },
+    ) => {
+      const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+      const recordsById: Record<string, any> = {};
+
+      const concurrency = 6;
+      for (let i = 0; i < entries.length; i += concurrency) {
+        const slice = entries.slice(i, i + concurrency);
+        const batch = await Promise.all(
+          slice.map(async (e) => {
+            const cardId = String(e?.cardId || '');
+            const coreName = String(e?.coreName || e?.cardId || '');
+            if (!cardId || !coreName) return null;
+            try {
+              const blocks = await readCore(coreName, { reverse: true, limit: 1 });
+              const raw = Array.isArray(blocks) ? blocks[0] : undefined;
+              if (!raw) return { cardId, record: null };
+              const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+              return { cardId, record: parsed };
+            } catch {
+              return { cardId, record: null };
+            }
+          }),
+        );
+
+        for (const item of batch) {
+          if (!item) continue;
+          if (!item.record) continue;
+          recordsById[item.cardId] = item.record;
+        }
+      }
+
+      return { recordsById };
+    },
+  );
+
+  const nexusSearchJobs = new Map<
+    string,
+    {
+      cancelled: boolean;
+    }
+  >();
+
+  ipcMain.handle(
+    'nexus:search-start',
+    async (
+      _event,
+      payload: {
+        query: string;
+        coreName?: string;
+        limit?: number;
+      },
+    ) => {
+      const jobId = `nexus-search-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const query = String(payload?.query || '').trim().toLowerCase();
+      const coreName = payload?.coreName || CARD_LIBRARY_CORE_NAME;
+      const limit = typeof payload?.limit === 'number' && payload.limit > 0 ? payload.limit : getNexusSettingsInternal().globalRenderCap;
+
+      const job = { cancelled: false };
+      nexusSearchJobs.set(jobId, job);
+
+      const wc = win.webContents;
+      const safeSend = (data: any) => {
+        try {
+          if (!wc || wc.isDestroyed()) return;
+          wc.send('nexus:search-update', data);
+        } catch {
+          // ignore
+        }
+      };
+
+      (async () => {
+        const length = await getCoreLength(coreName);
+        let cursor = length;
+        const windowSize = 700;
+        const seen = new Set<string>();
+        const results: NexusIndexEntry[] = [];
+        let scanned = 0;
+
+        safeSend({ jobId, status: 'started', query, scanned, cursor, results: [], done: false });
+
+        while (!job.cancelled && cursor > 0 && results.length < limit) {
+          const blocks = await readCore(coreName, { reverse: true, start: cursor, limit: windowSize });
+          cursor = Math.max(0, cursor - windowSize);
+          scanned += Array.isArray(blocks) ? blocks.length : 0;
+
+          const batch: NexusIndexEntry[] = [];
+          for (const raw of blocks || []) {
+            if (job.cancelled) break;
+            try {
+              const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+              const entry = normalizeIndexEntry(parsed);
+              if (!entry) continue;
+              if (seen.has(entry.cardId)) continue;
+              seen.add(entry.cardId);
+
+              const name = String(entry.name || '').toLowerCase();
+              const id = String(entry.cardId || '').toLowerCase();
+              if (query && !name.includes(query) && !id.includes(query)) continue;
+
+              batch.push(entry);
+              results.push(entry);
+              if (results.length >= limit) break;
+            } catch {
+              // ignore
+            }
+          }
+
+          if (batch.length > 0) {
+            safeSend({ jobId, status: 'update', query, scanned, cursor, results: batch, done: false });
+          }
+
+          // Yield to keep main process responsive.
+          await new Promise((r) => setTimeout(r, 0));
+        }
+
+        safeSend({ jobId, status: 'done', query, scanned, cursor, results: [], done: true });
+        nexusSearchJobs.delete(jobId);
+      })();
+
+      return { jobId };
+    },
+  );
+
+  ipcMain.handle('nexus:search-cancel', async (_event, payload: { jobId: string }) => {
+    const jobId = String(payload?.jobId || '');
+    const job = nexusSearchJobs.get(jobId);
+    if (job) job.cancelled = true;
+    return { ok: true };
   });
 
   // P2P IPC handlers
