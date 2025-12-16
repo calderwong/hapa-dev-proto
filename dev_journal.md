@@ -9,3 +9,21 @@
 
 **Tags:** #docs #maintenance
 **Est. Avg. Human Dev Time:** 10 minutes
+
+## Entry 84 – Thor's Hamma: tolerate malformed AI JSON output
+**Prompt:** "Can you re-evaluate and fix the Thor's Hamma feature to be able to deal with anything like this? I keep getting this error back"
+
+**Summary of actions:**
+- Traced the failure to `electron/thors-hamma.ts` where Thor/Leo AI responses were parsed via `JSON.parse(text)`.
+- Implemented a robust JSON extraction/repair parser to handle common model-output variants:
+  - `json { ... }` / `JSON { ... }` prefixes.
+  - Markdown code fences.
+  - Trailing commas and JSONC-style comments.
+  - Extra surrounding text by extracting the first full JSON object/array.
+- Improved error logging to include a compact sanitized snippet of the model output for debugging.
+
+**Files modified/created:**
+- Modified: `electron/thors-hamma.ts`
+
+**Tags:** #bugfix #thor #ai
+**Est. Avg. Human Dev Time:** 45 minutes
