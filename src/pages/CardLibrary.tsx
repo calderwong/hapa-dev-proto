@@ -1,6 +1,6 @@
 // @ts-nocheck
-import React, { useEffect, useState, useMemo, lazy, Suspense, useRef, useCallback } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState, useMemo, Suspense, useRef, useCallback } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 import CardWorkspace from '../components/CardWorkspace';
 import { HoverVideoThumbnail, getCardVideoPath, getCardImagePath } from '../components/HoverVideoThumbnail';
@@ -10,8 +10,6 @@ import VirtualCardGrid from '../components/cards/VirtualCardGrid';
 // Feature flag for progressive loading (set to true to use new system)
 const USE_PROGRESSIVE_LOADING = true;
 
-// Lazy load 3D viewer for performance
-const Card3DViewer = lazy(() => import('../components/Card3DViewer/Card3DViewer').then(m => ({ default: m.Card3DViewer })));
 import {
     calculateCardQuality,
     getCardType,
@@ -181,6 +179,8 @@ const CardContent: React.FC<CardContentProps> = ({
 
 const CardLibrary: React.FC = () => {
     const location = useLocation();
+    const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [cards, setCards] = useState<CardIndexEntry[]>([]);
     const [selected, setSelected] = useState<CardIndexEntry | null>(null);
     const [loading, setLoading] = useState(false);
@@ -209,7 +209,6 @@ const CardLibrary: React.FC = () => {
     const [showFilters, setShowFilters] = useState(false);
 
     // Card Sets State
-    const [searchParams, setSearchParams] = useSearchParams();
     const [cardSets, setCardSets] = useState<any[]>([]);
     const [activeSetId, setActiveSetId] = useState<string | null>(null);
     const [activeSetCardIds, setActiveSetCardIds] = useState<string[]>([]);
@@ -344,8 +343,12 @@ const CardLibrary: React.FC = () => {
     const [navAnimation, setNavAnimation] = useState<'none' | 'zoom-to-child' | 'zoom-to-parent' | 'slide-left' | 'slide-right'>('none');
     const [pendingCard, setPendingCard] = useState<CardIndexEntry | null>(null);
 
-    // 3D Viewer State
-    const [show3DViewer, setShow3DViewer] = useState(false);
+    const openNexus = useCallback((cardId?: string | null) => {
+        const qp = new URLSearchParams();
+        qp.set('from', '/cards');
+        if (cardId) qp.set('cardId', String(cardId));
+        navigate(`/nexus?${qp.toString()}`);
+    }, [navigate]);
 
     const emitWormholeRunEvent = (
         type: 'start' | 'end',
@@ -2458,7 +2461,7 @@ const CardLibrary: React.FC = () => {
                             Recover
                         </rux-button>
                         <rux-button
-                            onClick={() => setShow3DViewer(true)}
+                            onClick={() => openNexus(selected?.cardId || null)}
                             disabled={cards.length === 0}
                             icon="view-in-ar"
                             size="small"
@@ -4457,35 +4460,7 @@ const CardLibrary: React.FC = () => {
                 </div>
             )}
 
-            {/* 3D Card Viewer */}
-            {show3DViewer && (
-                <Suspense fallback={
-                    <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
-                        <div className="text-center">
-                            <div className="text-cyan-400 text-4xl mb-4 animate-pulse">◈</div>
-                            <div className="text-cyan-300 font-mono">Loading Card Nexus...</div>
-                        </div>
-                    </div>
-                }>
-                    <Card3DViewer
-                        cards={cards.map(c => ({
-                            cardId: c.cardId,
-                            name: c.name,
-                            mediaKind: c.mediaKind,
-                            thumbnail: c.thumbnail,
-                            mediaLocalPath: c.mediaLocalPath,
-                            parentCardId: c.parentCardId,
-                            cardRecord: c.cardRecord,
-                        }))}
-                        focusedCardId={selected?.cardId}
-                        onCardSelect={(cardId) => {
-                            const card = cards.find(c => c.cardId === cardId);
-                            if (card) setSelected(card);
-                        }}
-                        onClose={() => setShow3DViewer(false)}
-                    />
-                </Suspense>
-            )}
+            
 
             {/* Scroll Picker Modal */}
             {showScrollPicker && selected && (

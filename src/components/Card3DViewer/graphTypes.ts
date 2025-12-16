@@ -354,18 +354,42 @@ function calculateSimpleTier(card: any): string {
     return 'common';
 }
 
+function toFileUrl(p?: string): string | undefined {
+    if (!p) return undefined;
+    const raw = String(p);
+    if (raw.startsWith('file://')) {
+        if (!raw.startsWith('file:///')) {
+            const after = raw.slice('file://'.length).replace(/\\/g, '/');
+            if (/^[A-Za-z]:\//.test(after)) return `file:///${encodeURI(after)}`;
+        }
+        return raw;
+    }
+    if (raw.startsWith('data:') || raw.startsWith('blob:') || raw.startsWith('http://') || raw.startsWith('https://')) {
+        return raw;
+    }
+    const normalized = raw.replace(/\\/g, '/');
+    return `file:///${encodeURI(normalized)}`;
+}
+
 function getCardThumbnail(card: any): string | undefined {
-    if (card.thumbnail) return card.thumbnail;
+    if (card.thumbnail) return toFileUrl(card.thumbnail);
     const rec = card.cardRecord || {};
+
+    if (rec.video?.thumbnailDataUrl) {
+        return String(rec.video.thumbnailDataUrl);
+    }
+    if (rec.video?.thumbnail) {
+        return toFileUrl(rec.video.thumbnail);
+    }
     
     if (rec.imageSet?.images?.[rec.imageSet.heroIndex || 0]?.localPath) {
-        return `file://${rec.imageSet.images[rec.imageSet.heroIndex || 0].localPath}`;
+        return toFileUrl(rec.imageSet.images[rec.imageSet.heroIndex || 0].localPath);
     }
     if (rec.image?.localPath) {
-        return `file://${rec.image.localPath}`;
+        return toFileUrl(rec.image.localPath);
     }
     if (card.mediaLocalPath && card.mediaKind === 'image') {
-        return `file://${card.mediaLocalPath}`;
+        return toFileUrl(card.mediaLocalPath);
     }
     return undefined;
 }

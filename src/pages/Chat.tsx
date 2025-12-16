@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import { ChatInput, type Attachment, type AttachedMessageCard } from '../components/ChatInput';
 import VeoOptionsPanel, { type VeoOptions } from '../components/VeoOptionsPanel';
@@ -173,6 +173,16 @@ const formatProviderLabel = (value: 'gemini' | 'openai' | 'llama' | 'aimlapi') =
 
 const Chat: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const openNexus = useCallback((cardId?: string | null) => {
+    if (!cardId) return;
+    const qp = new URLSearchParams();
+    qp.set('from', `${location.pathname}${location.search}`);
+    qp.set('cardId', String(cardId));
+    navigate(`/nexus?${qp.toString()}`);
+  }, [location.pathname, location.search, navigate]);
+
   const [threadId] = useState<string>(() => {
     if (typeof window === 'undefined') {
       return `thread-${Date.now()}`;
@@ -257,7 +267,7 @@ const Chat: React.FC = () => {
     negativePrompt: '',
     outputMimeType: 'image/png',
   });
-  
+
   // Drag-drop state for frame slots
   const [isDraggingFrame, setIsDraggingFrame] = useState(false);
   const [frameDropTarget, setFrameDropTarget] = useState<'start' | 'end' | null>(null);
@@ -1689,6 +1699,8 @@ const Chat: React.FC = () => {
                       : selectedLlamaModel || (llamaModels[0]?.name ?? '')
               }
               onChange={handleModelChange}
+              aria-label="Model"
+              title="Model"
               className="bg-gray-800 text-white text-sm rounded border border-gray-700 px-2 py-1 w-48 focus:outline-none focus:border-astro-primary"
             >
               {activeModels.map((m) => (
@@ -1799,19 +1811,27 @@ const Chat: React.FC = () => {
                               Referenced:
                             </span>
                             {msg.attachedMessageCards.map((card) => (
-                              <button
-                                key={card.cardId}
-                                onClick={() => navigate(`/cards?cardId=${card.coreName}`)}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-900/30 border border-purple-500/30 rounded text-[10px] text-purple-300 hover:bg-purple-500/30 hover:border-purple-400 transition-all"
-                                title={`View message card: ${card.preview}`}
-                              >
-                                <rux-icon 
-                                  icon={card.role === 'user' ? 'person' : 'smart-toy'} 
-                                  size="10px"
-                                  className={card.role === 'user' ? 'text-cyan-400' : 'text-purple-400'}
-                                ></rux-icon>
-                                <span className="max-w-[120px] truncate">{card.preview}</span>
-                              </button>
+                              <div key={card.cardId} className="inline-flex items-center gap-1">
+                                <button
+                                  onClick={() => navigate(`/cards?cardId=${card.coreName}`)}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-900/30 border border-purple-500/30 rounded text-[10px] text-purple-300 hover:bg-purple-500/30 hover:border-purple-400 transition-all"
+                                  title={`View message card: ${card.preview}`}
+                                >
+                                  <rux-icon 
+                                    icon={card.role === 'user' ? 'person' : 'smart-toy'} 
+                                    size="10px"
+                                    className={card.role === 'user' ? 'text-cyan-400' : 'text-purple-400'}
+                                  ></rux-icon>
+                                  <span className="max-w-[120px] truncate">{card.preview}</span>
+                                </button>
+                                <button
+                                  onClick={() => openNexus(card.coreName || card.cardId)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-black/30 border border-cyan-500/20 rounded text-[10px] text-cyan-300 hover:bg-cyan-500/15 hover:border-cyan-400/40 transition-all"
+                                  title="Step into 3D Nexus"
+                                >
+                                  <rux-icon icon="view-in-ar" size="10px"></rux-icon>
+                                </button>
+                              </div>
                             ))}
                           </div>
                         )}
@@ -1843,14 +1863,24 @@ const Chat: React.FC = () => {
                                       />
                                       {/* Card source badge */}
                                       {isFromCard && (
-                                        <button
-                                          onClick={() => navigate(`/cards?cardId=${att.fromCard?.coreName}`)}
-                                          className="absolute bottom-1 left-1 flex items-center gap-1 px-1.5 py-0.5 bg-purple-600/90 rounded text-[9px] text-white font-medium hover:bg-purple-500 transition-colors"
-                                          title={`From card: ${att.fromCard?.name || att.fromCard?.cardId}`}
-                                        >
-                                          <rux-icon icon="photo-library" size="10px"></rux-icon>
-                                          <span>Library</span>
-                                        </button>
+                                        <div className="absolute bottom-1 left-1 flex items-center gap-1">
+                                          <button
+                                            onClick={() => navigate(`/cards?cardId=${att.fromCard?.coreName}`)}
+                                            className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-600/90 rounded text-[9px] text-white font-medium hover:bg-purple-500 transition-colors"
+                                            title={`From card: ${att.fromCard?.name || att.fromCard?.cardId}`}
+                                          >
+                                            <rux-icon icon="photo-library" size="10px"></rux-icon>
+                                            <span>Library</span>
+                                          </button>
+                                          <button
+                                            onClick={() => openNexus(att.fromCard?.coreName || att.fromCard?.cardId)}
+                                            className="flex items-center gap-1 px-1.5 py-0.5 bg-cyan-700/90 rounded text-[9px] text-white font-medium hover:bg-cyan-600 transition-colors"
+                                            title="Step into 3D Nexus"
+                                          >
+                                            <rux-icon icon="view-in-ar" size="10px"></rux-icon>
+                                            <span>Nexus</span>
+                                          </button>
+                                        </div>
                                       )}
                                       {/* Upload badge for non-card attachments */}
                                       {!isFromCard && (
@@ -2745,6 +2775,8 @@ const Chat: React.FC = () => {
             <button
               onClick={() => setPreviewImage(null)}
               className="absolute -top-2 -right-2 bg-astro-surface text-white rounded-full p-2 border border-astro-border hover:bg-astro-hover transition-colors"
+              aria-label="Close preview"
+              title="Close preview"
             >
               <rux-icon icon="close" size="small"></rux-icon>
             </button>

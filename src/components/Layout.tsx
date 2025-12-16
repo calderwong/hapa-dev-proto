@@ -6,6 +6,7 @@ import CardHand from './cards/CardHand';
 import { DragCanvas } from './DragCanvas';
 import { useDragCanvas } from '../contexts/DragCanvasContext';
 import { createFlyingCardClone } from '../hooks/useAnime';
+import { useNavigationHistory } from '../contexts/NavigationHistoryContext';
 
 interface NavItemConfig {
     path: string;
@@ -19,6 +20,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     { path: '/forge', label: "Hapa's Forge", icon: 'whatshot' },
     { path: '/thors-hamma', label: "Thor's Hamma", icon: 'satellite' },
     { path: '/cards', label: 'Card Library', icon: 'photo-library' },
+    { path: '/nexus', label: '3D Nexus', icon: 'visibility' },
     { path: '/wormhole', label: 'Wormhole', icon: 'cloud-download' },
 
     { path: '/wiki', label: 'Wiki', icon: 'library-books' },
@@ -102,6 +104,7 @@ import {
 
 const Layout: React.FC = () => {
     const location = useLocation();
+    const navHistory = useNavigationHistory();
     const wormholeActivity = useWormholeActivity();
     const [isMuted, setIsMuted] = React.useState(getMuteState());
     const { registerSnapZone, unregisterSnapZone, items: overlayItems, removeItem, selectedItemId } = useDragCanvas();
@@ -123,23 +126,14 @@ const Layout: React.FC = () => {
         if (raw.startsWith('blob:')) return raw;
         if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
         const normalized = raw.replace(/\\/g, '/');
-        return `file:///${normalized}`;
+        return `file:///${encodeURI(normalized)}`;
     }, []);
 
     const getBestThumbnail = React.useCallback((data: any) => {
         const d: any = data || {};
-        const rec: any = d.cardRecord || d.raw || {};
-        const kind = String(d.mediaKind || rec.mediaKind || '');
-
-        const normalizeMaybeLocalUrl = (v: any) => {
-            if (!v) return null;
-            const s = String(v).trim();
-            if (!s) return null;
-            if (s.startsWith('file://') || s.startsWith('data:') || s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
-                return s;
-            }
-            return toFileUrl(s);
-        };
+        const cardRecord: any = d.cardRecord || {};
+        const rawRecord: any = d.raw || {};
+        const kind = String(d.mediaKind || cardRecord.mediaKind || rawRecord.mediaKind || '');
 
         const isImagePath = (p: any) => {
             if (!p) return false;
@@ -147,24 +141,109 @@ const Layout: React.FC = () => {
             return s.endsWith('.png') || s.endsWith('.jpg') || s.endsWith('.jpeg') || s.endsWith('.webp') || s.endsWith('.gif') || s.endsWith('.bmp') || s.endsWith('.svg');
         };
 
-        const direct = d.thumbnail || d.imageUrl || d.thumbUrl || d.thumbnailUrl || d.poster;
-        if (direct) return normalizeMaybeLocalUrl(direct);
+        const isVideoPath = (p: any) => {
+            if (!p) return false;
+            const s = String(p).toLowerCase();
+            return s.endsWith('.mp4') || s.endsWith('.webm') || s.endsWith('.mov') || s.endsWith('.m4v') || s.endsWith('.avi');
+        };
 
-        const recThumb = rec.thumbnail || rec.poster || rec.thumbUrl || rec.thumbnailUrl;
-        if (recThumb) return normalizeMaybeLocalUrl(recThumb);
+        const normalizeMaybeLocalUrl = (v: any) => {
+            if (!v) return null;
+            const s = String(v).trim();
+            if (!s) return null;
 
-        const sourceImagePath = rec.sourceImage?.localPath;
-        if (sourceImagePath) return toFileUrl(sourceImagePath);
+            if (s.startsWith('file://')) {
+                if (!s.startsWith('file:///')) {
+                    const after = s.slice('file://'.length).replace(/\\/g, '/');
+                    if (/^[A-Za-z]:\//.test(after)) return `file:///${encodeURI(after)}`;
+                }
+                return s;
+            }
 
-        const imageLocal = d.mediaLocalPath || rec.image?.localPath || rec.mediaLocalPath || rec.mediaPrompts?.generated_image_local;
-        if (imageLocal && (kind === 'image' || isImagePath(imageLocal))) return toFileUrl(imageLocal);
+            if (s.startsWith('data:') || s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
+                return s;
+            }
 
-        const imageRemote = d.mediaRemoteUrl || rec.image?.remoteUrl;
-        if (imageRemote && (kind === 'image' || isImagePath(imageRemote))) return String(imageRemote);
+            return toFileUrl(s);
+        };
 
-        const attachment = rec.attachments?.[0];
-        if (attachment?.dataUrl) return String(attachment.dataUrl);
-        if (attachment?.localPath) return toFileUrl(attachment.localPath);
+        const normalizeCandidate = (v: any) => {
+            if (!v) return null;
+            if (Array.isArray(v)) {
+                for (const x of v) {
+                    const got = normalizeCandidate(x);
+                    if (got) return got;
+                }
+                return null;
+            }
+
+            if (typeof v === 'object') {
+                const obj: any = v;
+                return (
+                    normalizeMaybeLocalUrl(obj.url) ||
+                    normalizeMaybeLocalUrl(obj.dataUrl) ||
+                    normalizeMaybeLocalUrl(obj.localPath) ||
+                    normalizeMaybeLocalUrl(obj.path) ||
+                    normalizeMaybeLocalUrl(obj.remoteUrl) ||
+                    normalizeMaybeLocalUrl(obj.uri) ||
+                    normalizeMaybeLocalUrl(obj.src)
+                );
+            }
+
+            return normalizeMaybeLocalUrl(v);
+        };
+
+        const records = [d, cardRecord, rawRecord];
+
+        for (const rec of records) {
+            const direct = rec?.thumbnail || rec?.imageUrl || rec?.thumbUrl || rec?.thumbnailUrl || rec?.poster;
+            const got = normalizeCandidate(direct);
+            if (got) return got;
+        }
+
+        for (const rec of records) {
+            const sourceImagePath = rec?.sourceImage?.localPath;
+            const got = normalizeCandidate(sourceImagePath);
+            if (got) return got;
+        }
+
+        for (const rec of records) {
+            const imageLocal = rec?.mediaLocalPath || rec?.image?.localPath || rec?.mediaPrompts?.generated_image_local;
+            if (imageLocal && (kind === 'image' || isImagePath(imageLocal))) {
+                const got = normalizeCandidate(imageLocal);
+                if (got) return got;
+            }
+        }
+
+        for (const rec of records) {
+            const imageRemote = rec?.mediaRemoteUrl || rec?.image?.remoteUrl;
+            if (imageRemote && (kind === 'image' || isImagePath(imageRemote))) {
+                const got = normalizeCandidate(imageRemote);
+                if (got) return got;
+            }
+        }
+
+        for (const rec of records) {
+            const videoLocal = rec?.video?.localPath || rec?.mediaLocalPath;
+            if (videoLocal && (kind === 'video' || isVideoPath(videoLocal))) {
+                const got = normalizeCandidate(videoLocal);
+                if (got) return got;
+            }
+        }
+
+        for (const rec of records) {
+            const videoRemote = rec?.video?.remoteUrl || rec?.mediaRemoteUrl;
+            if (videoRemote && (kind === 'video' || isVideoPath(videoRemote))) {
+                const got = normalizeCandidate(videoRemote);
+                if (got) return got;
+            }
+        }
+
+        for (const rec of records) {
+            const attachment = rec?.attachments?.[0];
+            const got = normalizeCandidate(attachment);
+            if (got) return got;
+        }
 
         return null;
     }, [toFileUrl]);
@@ -172,6 +251,17 @@ const Layout: React.FC = () => {
     const handleAttachToLocation = React.useCallback((to: string, item: any) => {
         const d = item?.data || {};
         const bestThumb = getBestThumbnail(d);
+        if ((import.meta as any)?.env?.DEV) {
+            console.log('[MenuStack] attach', {
+                to,
+                type: item?.type,
+                id: item?.id,
+                bestThumb,
+                dataThumb: d?.thumbnail,
+                cardRecordThumb: d?.cardRecord?.thumbnail,
+                rawThumb: d?.raw?.thumbnail,
+            });
+        }
         const entry = {
             id: item.id,
             type: item.type,
@@ -191,7 +281,7 @@ const Layout: React.FC = () => {
                 [to]: [entry, ...stack],
             };
         });
-    }, []);
+    }, [getBestThumbnail]);
 
     const shootSelectedToLocation = React.useCallback((to: string, targetRect: DOMRect) => {
         const id = selectedItemId || (overlayItems.length === 1 ? overlayItems[0]?.id : null);
@@ -413,6 +503,20 @@ const Layout: React.FC = () => {
                             <PetPortal />
                         </div>
 
+                        <button
+                            onClick={() => navHistory.goBack()}
+                            disabled={!navHistory.canGoBack}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-[10px] font-mono transition-all ${
+                                navHistory.canGoBack
+                                    ? 'border-cyan-500/30 bg-cyan-900/20 text-cyan-200 hover:border-cyan-400/50 hover:bg-cyan-900/30'
+                                    : 'border-gray-800 bg-gray-900/30 text-gray-600 cursor-not-allowed'
+                            }`}
+                            title={navHistory.canGoBack ? 'Back (Alt+←)' : 'Back'}
+                        >
+                            <rux-icon icon="chevron-left" size="extra-small" className={navHistory.canGoBack ? 'text-cyan-300' : 'text-gray-700'}></rux-icon>
+                            BACK
+                        </button>
+
                         {/* The Hand - Card Dock (next to Pet) */}
                         <div className="flex-shrink-0">
                             <CardHand />
@@ -528,6 +632,8 @@ const SidebarNavItem: React.FC<SidebarNavItemProps> = ({
     const padRef = React.useRef<HTMLButtonElement | null>(null);
     const stackCount = Array.isArray(stack) ? stack.length : 0;
     const top = stackCount > 0 ? stack![0] : null;
+    const topThumb = top?.thumbnail ? String(top.thumbnail) : '';
+    const topIsVideo = !!topThumb && (topThumb.toLowerCase().endsWith('.mp4') || topThumb.toLowerCase().endsWith('.webm') || topThumb.toLowerCase().endsWith('.mov') || topThumb.toLowerCase().endsWith('.m4v') || topThumb.toLowerCase().endsWith('.avi'));
 
     React.useEffect(() => {
         const el = containerRef.current;
@@ -613,12 +719,24 @@ const SidebarNavItem: React.FC<SidebarNavItemProps> = ({
 
                     {top?.thumbnail ? (
                         <div className="absolute inset-0">
-                            <img
-                                src={top.thumbnail}
-                                alt={top.name || top.cardId || 'Card'}
-                                className="absolute left-1/2 top-1/2 w-[72px] h-[54px] object-cover -translate-x-1/2 -translate-y-1/2 rotate-90"
-                                draggable={false}
-                            />
+                            {topIsVideo ? (
+                                <video
+                                    src={topThumb}
+                                    className="absolute left-1/2 top-1/2 w-[72px] h-[54px] object-cover -translate-x-1/2 -translate-y-1/2 rotate-90"
+                                    muted
+                                    playsInline
+                                    loop
+                                    autoPlay
+                                    preload="metadata"
+                                />
+                            ) : (
+                                <img
+                                    src={top.thumbnail}
+                                    alt={top.name || top.cardId || 'Card'}
+                                    className="absolute left-1/2 top-1/2 w-[72px] h-[54px] object-cover -translate-x-1/2 -translate-y-1/2 rotate-90"
+                                    draggable={false}
+                                />
+                            )}
                             <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-black/35" />
                             <div className="absolute inset-0 ring-1 ring-white/5" />
                         </div>
@@ -650,7 +768,9 @@ const SidebarNavItem: React.FC<SidebarNavItemProps> = ({
                                     <div key={`${c.cardId}-${idx}`} className="flex items-center gap-2 px-1 py-1 rounded-lg bg-gray-900/30 border border-gray-800/40">
                                         <div className="w-9 h-6 rounded-md overflow-hidden border border-red-400/20 bg-gray-900/30 flex-shrink-0">
                                             {c.thumbnail ? (
-                                                <img src={c.thumbnail} alt={c.name || c.cardId} className="w-full h-full object-cover" draggable={false} />
+                                                (String(c.thumbnail).toLowerCase().endsWith('.mp4') || String(c.thumbnail).toLowerCase().endsWith('.webm') || String(c.thumbnail).toLowerCase().endsWith('.mov') || String(c.thumbnail).toLowerCase().endsWith('.m4v') || String(c.thumbnail).toLowerCase().endsWith('.avi'))
+                                                    ? <video src={c.thumbnail} className="w-full h-full object-cover" muted playsInline loop autoPlay preload="metadata" />
+                                                    : <img src={c.thumbnail} alt={c.name || c.cardId} className="w-full h-full object-cover" draggable={false} />
                                             ) : (
                                                 <div className="w-full h-full" />
                                             )}

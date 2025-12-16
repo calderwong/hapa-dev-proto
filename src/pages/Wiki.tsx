@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 
 interface WikiEntryItem {
@@ -24,6 +24,7 @@ interface WikiTermMeta {
 const WIKI_CORE_NAME = 'wormhole-wiki-entries';
 
 const Wiki: React.FC = () => {
+    const location = useLocation();
     const navigate = useNavigate();
     const [entries, setEntries] = useState<WikiEntryItem[]>([]);
     const [loading, setLoading] = useState(false);
@@ -134,6 +135,14 @@ const Wiki: React.FC = () => {
     const handleOpenCard = (cardId: string | undefined) => {
         if (!cardId) return;
         navigate(`/cards?cardId=${encodeURIComponent(cardId)}`);
+    };
+
+    const handleOpenNexus = (cardId: string | undefined) => {
+        if (!cardId) return;
+        const qp = new URLSearchParams();
+        qp.set('from', `${location.pathname}${location.search}`);
+        qp.set('cardId', String(cardId));
+        navigate(`/nexus?${qp.toString()}`);
     };
 
     const handleSaveMeta = async () => {
@@ -442,14 +451,25 @@ const Wiki: React.FC = () => {
                                                         </span>
                                                     </div>
                                                     {entry.sourceCardId && (
-                                                        <rux-button
-                                                            size="small"
-                                                            secondary
-                                                            className="w-full justify-center"
-                                                            onClick={() => handleOpenCard(entry.sourceCardId)}
-                                                        >
-                                                            Open Source Card
-                                                        </rux-button>
+                                                        <div className="flex items-center gap-2">
+                                                            <rux-button
+                                                                size="small"
+                                                                secondary
+                                                                className="flex-1 justify-center"
+                                                                onClick={() => handleOpenCard(entry.sourceCardId)}
+                                                            >
+                                                                Open Source Card
+                                                            </rux-button>
+                                                            <rux-button
+                                                                size="small"
+                                                                secondary
+                                                                icon="view-in-ar"
+                                                                className="flex-1 justify-center"
+                                                                onClick={() => handleOpenNexus(entry.sourceCardId)}
+                                                            >
+                                                                Nexus
+                                                            </rux-button>
+                                                        </div>
                                                     )}
                                                 </div>
                                             ))}
