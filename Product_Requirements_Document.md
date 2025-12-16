@@ -100,11 +100,18 @@ Planned future work:
 - **Top-level route** (`/nexus`) accessible from the sidebar and deep-linkable from Chat, Wiki, and Card Library.
 - **Two scope modes**:
   - **LOCAL**: Focused constellation showing the selected card at center with parent, children, siblings, and context cards arranged around it. Component nodes (images, videos, summaries) can be toggled on.
-  - **GLOBAL**: Spiral layout of all cards in the library with search filtering. Edges are capped for performance (0/150/450 selector).
+  - **GLOBAL**: Feed-style spiral layout that loads cards incrementally (paged) for scalability. Search filters loaded results immediately and continues to stream additional matches in the background.
 - **Smooth camera navigation**: Click a card to focus and recenter; preset buttons (FOCUS, TOP, WIDE) for quick reorientation.
 - **Distance-based label LOD**: Card labels hide when far from camera to reduce DOM pressure.
 - **Deep linking**: Navigate to `/nexus?cardId=...` from anywhere; global Back button returns to previous context.
 - **Keyboard shortcuts**: Arrow keys for lineage navigation, Escape to close, M to mute.
+
+Phase 2 (Scalability & Performance):
+- **Paged global feed loading**: The Nexus must not require reading the entire card-library log in the renderer.
+- **Async streaming search**: Search should act as "filter loaded immediately" plus a background job that streams additional matching results over time.
+- **Nexus settings**: Global render cap and page size must be configurable and persisted locally.
+- **Seamless scope switching**: Switching between LOCAL and GLOBAL should show a themed loading overlay to avoid perceived UI freezes.
+- **Richer card faces**: Cards should display more than title (where available): lore, skills, and truth analysis (facts/desires) with LOD-based truncation.
 
 ## 3. Non-Functional Requirements
 
