@@ -175,6 +175,21 @@ function tryParseJsonFromText(raw: string, options?: { allowTextFallback?: boole
   throw new Error('Unable to parse JSON from model output');
 }
 
+function makeCardFingerprint(cardData: any): string {
+  try {
+    const lore = String(cardData?.lore ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const skills = Array.isArray(cardData?.skills)
+      ? cardData.skills
+        .map((s: any) => `${String(s?.name ?? '').toLowerCase().trim()}::${String(s?.description ?? '').toLowerCase().trim()}`)
+        .sort()
+        .join('|')
+      : '';
+    return `${lore}||${skills}`;
+  } catch {
+    return '';
+  }
+}
+
 // Pipeline settings key
 const PIPELINE_SETTINGS_KEY = 'pipelineSettings';
 
@@ -773,6 +788,7 @@ class PipelineManager {
 
       const processedCards: any[] = [];
       let processedCount = 0;
+      const seenFingerprints = new Set<string>();
 
       for (let i = 0; i < this.state.chunks.length; i++) {
           // Throttle between chunks to avoid rate limiting
@@ -784,17 +800,48 @@ class PipelineManager {
           this.log(`Processing Chunk ${i + 1}/${this.state.chunks.length}...`);
           this.updateState({ currentStep: `Thor: Analyzing Chunk ${i + 1}/${this.state.chunks.length}` });
 
-          const prompt = `
+          const leoContextLite = this.state.leoContext
+            ? {
+              summary: this.state.leoContext.summary,
+              audience_profiles: this.state.leoContext.audience_profiles,
+              objectives: this.state.leoContext.objectives,
+              yarn_context: this.state.leoContext.yarn_context,
+              suggested_set_name: this.state.leoContext.suggested_set_name,
+              suggested_set_description: this.state.leoContext.suggested_set_description,
+            }
+            : this.state.leoOutput;
+
+          const priorDigests = processedCards
+            .slice(-8)
+            .map((c) => {
+              const name = String(c?.card_data?.name ?? '').slice(0, 60);
+              const lore = String(c?.card_data?.lore ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+              const skills = Array.isArray(c?.card_data?.skills)
+                ? c.card_data.skills.map((s: any) => String(s?.name ?? '')).filter(Boolean).slice(0, 4).join(', ')
+                : '';
+              return `- ${name} | skills=[${skills}] | lore="${lore}"`;
+            })
+            .join('\n');
+
+          const chunkPrimary = buildArtifactSnippet(chunk, 12000);
+
+          const basePrompt = `
             You are "Thor" 🐈, the Truth-Seeker and Forge Master.
-            Your task is to extract a sovereign "Card" from this text chunk.
+            Your task is to extract a sovereign "Card" from the PRIMARY TEXT CHUNK below.
             
-            CONTEXT FROM LEO:
-            ${JSON.stringify(this.state.leoOutput)}
+            PRIMARY TEXT CHUNK (index ${i + 1}/${this.state.chunks.length}):
+            ${chunkPrimary}
+
+            LEO CONTEXT (secondary):
+            ${JSON.stringify(leoContextLite, null, 2)}
+
+            PRIOR CARDS (avoid repeating their lore/skills; must be meaningfully distinct):
+            ${priorDigests || '(none)'}
 
             INSTRUCTIONS:
-            1. Analyze the text chunk for a central concept, rule, or narrative beat.
-            2. Extract "Lore" (flavor text) and "Mechanics" (if any).
-            3. Define "Skills" or "Stats" if applicable (gamify the content).
+            1. The card MUST be specific to the PRIMARY TEXT CHUNK. Do not generalize across the whole artifact.
+            2. If the chunk is thin, focus on a small but real detail rather than repeating earlier cards.
+            3. Lore and skills must not be reused from prior cards.
             4. Design a visual prompt for this card ("base_image").
             5. Design a video loop prompt ("video_loop").
 
@@ -813,42 +860,55 @@ class PipelineManager {
                 "video_loop": "Motion description for video loop"
               }
             }
-
-            TEXT CHUNK:
-            ${chunk}
           `;
 
           try {
-              let jsonText: string;
-              let actualModelName: string;
+              let jsonText = '';
+              let actualModelName = thorModelName;
+              let cardData: any = null;
+              let attempt = 0;
               
-              if (useAimlApi && aimlClient) {
-                // PRIORITY 1: Use AIMLAPI.com
-                const result = await aimlClient.chatCompletion(
-                  [{ role: 'user', content: prompt }],
-                  thorModelName,
-                  { temperature: 0.7, max_tokens: 4000 }
-                );
-                jsonText = result.content;
-                actualModelName = thorModelName;
-              } else if (useVertex && vertexClient) {
-                // PRIORITY 2: Use Vertex AI
-                const result = await vertexClient.generateContent(prompt, thorModelShorthand, {
-                  responseMimeType: 'application/json'
-                });
-                jsonText = result.text;
-                actualModelName = thorModelName;
-              } else if (model) {
-                // PRIORITY 3: Use Google AI Studio
-                const result = await model.generateContent(prompt);
-                const response = await result.response;
-                jsonText = response.text();
-                actualModelName = this.getDefaultGeminiModel();
-              } else {
-                throw new Error('No AI model available');
+              while (attempt < 2) {
+                const prompt = attempt === 0
+                  ? basePrompt
+                  : `${basePrompt}\n\nCRITICAL RETRY: Your previous output was too similar to earlier cards. You MUST change lore and skills to reflect unique details from the PRIMARY TEXT CHUNK.`;
+              
+                if (useAimlApi && aimlClient) {
+                  const result = await aimlClient.chatCompletion(
+                    [{ role: 'user', content: prompt }],
+                    thorModelName,
+                    { temperature: 0.7, max_tokens: 4000 }
+                  );
+                  jsonText = result.content;
+                  actualModelName = thorModelName;
+                } else if (useVertex && vertexClient) {
+                  const result = await vertexClient.generateContent(prompt, thorModelShorthand, {
+                    responseMimeType: 'application/json'
+                  });
+                  jsonText = result.text;
+                  actualModelName = thorModelName;
+                } else if (model) {
+                  const result = await model.generateContent(prompt);
+                  const response = await result.response;
+                  jsonText = response.text();
+                  actualModelName = this.getDefaultGeminiModel();
+                } else {
+                  throw new Error('No AI model available');
+                }
+
+                cardData = tryParseJsonFromText(jsonText);
+                const fp = makeCardFingerprint(cardData?.card_data);
+                if (fp && seenFingerprints.has(fp)) {
+                  attempt++;
+                  continue;
+                }
+                break;
               }
-              
-              const cardData = tryParseJsonFromText(jsonText);
+
+              if (!cardData) {
+                throw new Error('No Thor output');
+              }
+
               const thorProvenance = createModelProvenance(thorCommonName, provider, actualModelName);
               
               // Add provenance to the card (legacy format)
@@ -885,6 +945,8 @@ class PipelineManager {
               }
               
               processedCards.push(cardData);
+              const fp = makeCardFingerprint(cardData?.card_data);
+              if (fp) seenFingerprints.add(fp);
               processedCount++;
               
               // Update progress
