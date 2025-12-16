@@ -20,9 +20,18 @@ const CONNECTION_COLORS: Record<string, string> = {
     'extraction': '#a855f7',    // Purple
     'generated': '#f59e0b',     // Amber
     'card-component': '#6b7280', // Gray - subtle for card->component
-    'derived-from': '#a855f7',  // Purple
+    'derived-from': '#c084fc',  // Purple
     'sibling': '#10b981',       // Green
     'reference': '#3b82f6',     // Blue
+};
+
+const EDGE_RENDER_ORDER = 5;
+
+const getCurveLift = (type: Connection['type']) => {
+    if (type === 'card-component') return 0.12;
+    if (type === 'sibling') return 0.16;
+    if (type === 'parent-child') return 0.22;
+    return 0.26;
 };
 
 const CONNECTION_STYLE: Record<Connection['type'], {
@@ -156,11 +165,11 @@ const ConnectionLine: React.FC<ConnectionLineProps> = ({ connection }) => {
         
         // Add some curve height based on distance
         const distance = start.distanceTo(end);
-        mid.z += distance * 0.2;
+        mid.z += distance * getCurveLift(type);
         
         const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
         return curve.getPoints(50);
-    }, [fromPosition, toPosition]);
+    }, [fromPosition, toPosition, type]);
 
     const arrowTransform = useMemo(() => {
         if (!style.arrowSize) return null;
@@ -215,6 +224,9 @@ const ConnectionLine: React.FC<ConnectionLineProps> = ({ connection }) => {
                 opacity={style.opacity}
                 dashed={style.dashed}
                 dashScale={style.dashScale}
+                depthTest={false}
+                depthWrite={false}
+                renderOrder={EDGE_RENDER_ORDER}
             />
             
             {/* Animated particles flowing along line */}
@@ -232,6 +244,9 @@ const ConnectionLine: React.FC<ConnectionLineProps> = ({ connection }) => {
                         transparent
                         opacity={0.8}
                         sizeAttenuation
+                        blending={THREE.AdditiveBlending}
+                        depthWrite={false}
+                        depthTest={false}
                     />
                 </points>
             )}
@@ -239,11 +254,25 @@ const ConnectionLine: React.FC<ConnectionLineProps> = ({ connection }) => {
             {/* Glow effect at connection points */}
             <mesh position={fromPosition}>
                 <sphereGeometry args={[style.endpointSize, 16, 16]} />
-                <meshBasicMaterial color={color} transparent opacity={style.endpointOpacity} />
+                <meshBasicMaterial
+                    color={color}
+                    transparent
+                    opacity={style.endpointOpacity}
+                    blending={THREE.AdditiveBlending}
+                    depthWrite={false}
+                    depthTest={false}
+                />
             </mesh>
             <mesh position={toPosition}>
                 <sphereGeometry args={[style.endpointSize, 16, 16]} />
-                <meshBasicMaterial color={color} transparent opacity={style.endpointOpacity} />
+                <meshBasicMaterial
+                    color={color}
+                    transparent
+                    opacity={style.endpointOpacity}
+                    blending={THREE.AdditiveBlending}
+                    depthWrite={false}
+                    depthTest={false}
+                />
             </mesh>
 
             {arrowTransform && (
@@ -255,6 +284,7 @@ const ConnectionLine: React.FC<ConnectionLineProps> = ({ connection }) => {
                         opacity={style.arrowOpacity}
                         blending={THREE.AdditiveBlending}
                         depthWrite={false}
+                        depthTest={false}
                     />
                 </mesh>
             )}

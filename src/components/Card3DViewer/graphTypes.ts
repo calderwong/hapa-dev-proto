@@ -22,6 +22,8 @@ export type EdgeType =
     | 'parent-child'       // Card parent → child relationship
     | 'card-component'     // Card → its internal component
     | 'derived-from'       // Component derived from another (e.g., video from images)
+    | 'extraction'
+    | 'generated'
     | 'sibling'            // Cards share same parent
     | 'reference'          // Reference/link between items
     ;
