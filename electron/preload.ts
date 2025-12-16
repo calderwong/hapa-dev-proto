@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onChatStream: (listener: (payload: any) => void) => {
         ipcRenderer.on('chat-stream', (_event, payload) => listener(payload));
     },
+    bootRendererReady: () => ipcRenderer.send('boot:renderer-ready'),
     openaiStartAudioSession: () => ipcRenderer.invoke('openai-audio-start-session'),
     openaiAppendAudioChunk: (params: { sessionId: string; base64: string; mimeType: string }) =>
         ipcRenderer.invoke('openai-audio-append-chunk', params),

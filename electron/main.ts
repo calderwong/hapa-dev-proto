@@ -34,6 +34,11 @@ import {
 
 const store: any = new Store();
 
+let mainWindow: BrowserWindow | null = null;
+let splashWindow: BrowserWindow | null = null;
+let rendererBootReady = false;
+let mainReadyToShow = false;
+
 const GEMINI_REQUEST_LOG_KEY = 'geminiRequestLog';
 const GEMINI_REQUEST_LOG_MAX_ENTRIES = 200;
 const ADMIN_SETTINGS_KEY = 'adminSettings';
@@ -1602,6 +1607,166 @@ const getAppIconPath = () => {
   return path.join(__dirname, base, 'Paramation_Logo.png');
 };
 
+const toFileUrl = (p: string) => {
+  const normalized = String(p || '').replace(/\\/g, '/');
+  return `file:///${encodeURI(normalized)}`;
+};
+
+const getVibesDir = () => {
+  const candidates = [
+    path.join(app.getAppPath(), '.vibes'),
+    path.join(process.cwd(), '.vibes'),
+    path.join(__dirname, '..', '.vibes'),
+    path.join(__dirname, '..', '..', '.vibes'),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c) && fs.statSync(c).isDirectory()) return c;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+};
+
+const getVibesVideoUrls = () => {
+  const dir = getVibesDir();
+  if (!dir) return [];
+  try {
+    const names = fs
+      .readdirSync(dir)
+      .filter((n) => /\.(mp4|webm)$/i.test(n))
+      .slice(0, 500);
+
+    const withSize = names
+      .map((n) => {
+        const full = path.join(dir, n);
+        try {
+          const st = fs.statSync(full);
+          return { full, size: st.size };
+        } catch {
+          return { full, size: Number.POSITIVE_INFINITY };
+        }
+      })
+      .filter((x) => Number.isFinite(x.size))
+      .sort((a, b) => a.size - b.size)
+      .slice(0, 20)
+      .map((x) => toFileUrl(x.full));
+
+    return withSize;
+  } catch {
+    return [];
+  }
+};
+
+const buildSplashHtml = (videoUrls: string[]) => {
+  const urls = Array.isArray(videoUrls) ? videoUrls.filter(Boolean) : [];
+  const urlsJson = JSON.stringify(urls);
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hapa Boot</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; width: 100%; background: #000; overflow: hidden; }
+      #wrap { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 50%, rgba(0,255,255,0.08), rgba(0,0,0,1) 60%); }
+      video { width: 100vw; height: 100vh; object-fit: cover; background: #000; }
+      #hud { position: fixed; left: 24px; bottom: 18px; font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(180,255,255,0.8); }
+      #hud2 { position: fixed; left: 24px; bottom: 2px; font: 10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; color: rgba(255,255,255,0.35); }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <video id="v" autoplay muted playsinline></video>
+      <div id="hud">LOADING…</div>
+      <div id="hud2">HAPA</div>
+    </div>
+    <script>
+      const urls = ${urlsJson};
+      const v = document.getElementById('v');
+      let idx = 0;
+      const pick = () => {
+        if (!urls.length) return null;
+        idx = (idx + 1) % urls.length;
+        return urls[idx];
+      };
+      const play = (u) => {
+        if (!u) return;
+        try {
+          v.src = u;
+          v.load();
+          const p = v.play();
+          if (p && p.catch) p.catch(() => {});
+        } catch {}
+      };
+      v.addEventListener('ended', () => play(pick()));
+      if (urls.length) {
+        idx = Math.floor(Math.random() * urls.length);
+        play(urls[idx]);
+      } else {
+        document.getElementById('hud2').textContent = 'NO .VIBES VIDEOS FOUND';
+      }
+      setInterval(() => {
+        if (!urls.length) return;
+        if (!v.paused) return;
+        play(pick());
+      }, 1200);
+    </script>
+  </body>
+</html>`;
+};
+
+const maybeShowMain = () => {
+  if (!mainWindow) return;
+  if (!rendererBootReady) return;
+  if (!mainReadyToShow) return;
+
+  try {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.close();
+    }
+  } catch {
+    // ignore
+  }
+  splashWindow = null;
+
+  try {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  } catch {
+    // ignore
+  }
+};
+
+function createSplashWindow() {
+  const videos = getVibesVideoUrls();
+  const html = buildSplashHtml(videos);
+  const splash = new BrowserWindow({
+    width: 980,
+    height: 620,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#000000',
+    resizable: false,
+    movable: true,
+    alwaysOnTop: true,
+    show: true,
+    icon: getAppIconPath(),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false,
+    },
+  });
+
+  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  splash.loadURL(dataUrl);
+  return splash;
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -1615,6 +1780,15 @@ function createWindow() {
       webviewTag: true, // Enable <webview> for portal cards
     },
     autoHideMenuBar: true,
+    show: false,
+    backgroundColor: '#000000',
+  });
+
+  mainWindow = win;
+  mainReadyToShow = false;
+  win.once('ready-to-show', () => {
+    mainReadyToShow = true;
+    maybeShowMain();
   });
 
   // Add F12 keyboard shortcut to toggle dev tools
@@ -1698,6 +1872,7 @@ function createWindow() {
   });
 
   win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
   });
 
   // Settings IPC handlers
@@ -6838,6 +7013,19 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
 app.on('ready', async () => {
   // Initialize P2P and optionally auto-start local llama.cpp server, then open the window
+  rendererBootReady = false;
+  try {
+    splashWindow = createSplashWindow();
+  } catch {
+    splashWindow = null;
+  }
+
+  ipcMain.removeAllListeners('boot:renderer-ready');
+  ipcMain.on('boot:renderer-ready', () => {
+    rendererBootReady = true;
+    maybeShowMain();
+  });
+
   initP2P();
 
   // Initialize persistence layer (SQLite projection engine)
@@ -6857,6 +7045,13 @@ app.on('ready', async () => {
   }
 
   createWindow();
+  if (splashWindow) {
+    try {
+      splashWindow.show();
+    } catch {
+      // ignore
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

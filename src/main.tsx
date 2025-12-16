@@ -31,6 +31,15 @@ async function init() {
     console.log('[main] Waiting for Astro...');
     await waitForAstro();
     console.log('[main] Rendering React');
+
+    // Tell Electron main process that the renderer is ready to be shown.
+    // We deliberately signal before/around React mount so the user sees the app as soon as
+    // the renderer is responsive (and the rest can hydrate in the background).
+    try {
+      (window as any).electronAPI?.bootRendererReady?.();
+    } catch {
+      // ignore
+    }
     
     createRoot(document.getElementById('root')!).render(
       <ErrorBoundary>

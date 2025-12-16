@@ -246,6 +246,7 @@ export interface ElectronAPI {
     onChatStream?: (
         listener: (payload: { provider: 'gemini' | 'openai' | 'llama'; delta: string; done?: boolean }) => void,
     ) => void;
+    bootRendererReady?: () => void;
     openaiStartAudioSession?: () => Promise<{ sessionId: string }>;
     openaiAppendAudioChunk?: (params: {
         sessionId: string;

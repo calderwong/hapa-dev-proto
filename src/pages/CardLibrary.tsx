@@ -359,10 +359,110 @@ const CardLibrary: React.FC = () => {
         window.dispatchEvent(new CustomEvent(eventName, { detail: { step } }));
     };
 
-    const enrichWithCardRecords = async (entries: CardIndexEntry[]): Promise<CardIndexEntry[]> => {
-        if (!window.electronAPI || !window.electronAPI.p2pRead) {
-            return entries;
+    const mergeEntryWithRecord = (entry: CardIndexEntry, rawRecord: any): CardIndexEntry => {
+        let cardRecord: any | null = null;
+        try {
+            if (rawRecord && rawRecord.type === 'card-state' && rawRecord.card) {
+                cardRecord = rawRecord.card;
+            } else if (rawRecord && typeof rawRecord === 'object') {
+                cardRecord = rawRecord;
+            }
+        } catch {
+            cardRecord = null;
         }
+
+        if (!cardRecord) return entry;
+
+        let mediaKind: 'image' | 'video' | 'audio' | 'message' | undefined;
+        let mediaLocalPath: string | undefined;
+        let mediaRemoteUrl: string | undefined;
+        let mediaMimeType: string | undefined;
+        let messageContent: string | undefined;
+        let messageRole: 'user' | 'model' | undefined;
+        let attachmentCount: number | undefined;
+        let hasVideo: boolean | undefined;
+
+        if (cardRecord.kind === 'message' || cardRecord.message) {
+            mediaKind = 'message';
+            messageContent = cardRecord.message?.content;
+            messageRole = cardRecord.message?.role;
+            attachmentCount = cardRecord.attachments?.length;
+            hasVideo = !!cardRecord.video;
+            if (cardRecord.attachments?.[0]?.dataUrl) {
+                mediaRemoteUrl = cardRecord.attachments[0].dataUrl;
+            }
+        } else if (cardRecord.image) {
+            mediaKind = 'image';
+            mediaLocalPath = cardRecord.image.localPath;
+            mediaRemoteUrl = cardRecord.image.remoteUrl || cardRecord.image.dataUrl;
+            mediaMimeType = cardRecord.image.mimeType;
+        } else if (cardRecord.video) {
+            mediaKind = 'video';
+            mediaLocalPath = cardRecord.video.localPath;
+            mediaRemoteUrl = cardRecord.video.remoteUrl;
+            mediaMimeType = cardRecord.video.mimeType;
+        } else if (cardRecord.mediaKind === 'video') {
+            mediaKind = 'video';
+            mediaLocalPath = cardRecord.mediaLocalPath;
+            mediaMimeType = 'video/mp4';
+        } else if (cardRecord.audio) {
+            mediaKind = 'audio';
+            mediaLocalPath = cardRecord.audio.localPath;
+            mediaRemoteUrl = cardRecord.audio.remoteUrl;
+            mediaMimeType = cardRecord.audio.mimeType;
+        }
+
+        const mergedCardRecord = {
+            ...(entry.cardRecord || {}),
+            ...cardRecord,
+            name: cardRecord.name || entry.cardRecord?.name,
+            lore: cardRecord.lore || entry.cardRecord?.lore,
+            skills: cardRecord.skills || entry.cardRecord?.skills,
+            stats: cardRecord.stats || entry.cardRecord?.stats,
+            abilities: cardRecord.abilities || entry.cardRecord?.abilities,
+            flavor_text: cardRecord.flavor_text || entry.cardRecord?.flavor_text,
+            type: cardRecord.type || entry.cardRecord?.type,
+            element: cardRecord.element || entry.cardRecord?.element,
+            rarity: cardRecord.rarity || entry.cardRecord?.rarity,
+            mediaPrompts: cardRecord.mediaPrompts || entry.cardRecord?.mediaPrompts,
+            truthAnalysis: cardRecord.truthAnalysis || entry.cardRecord?.truthAnalysis,
+        };
+
+        return {
+            ...entry,
+            mediaKind,
+            mediaLocalPath,
+            mediaRemoteUrl,
+            mediaMimeType,
+            messageContent,
+            messageRole,
+            attachmentCount,
+            hasVideo,
+            subType: cardRecord.subType,
+            derivedGif: cardRecord.derivedGif,
+            cardRecord: mergedCardRecord,
+        };
+    };
+
+    const enrichWithCardRecords = async (entries: CardIndexEntry[]): Promise<CardIndexEntry[]> => {
+        const api = (typeof window !== 'undefined' ? (window as any).electronAPI : null) as any;
+        if (!api) return entries;
+
+        if (api.nexusCardLatestBatch) {
+            try {
+                const batch = entries
+                    .map((e) => ({ cardId: e.cardId, coreName: e.coreName || e.cardId }))
+                    .filter((e) => !!e.cardId);
+                const res = await api.nexusCardLatestBatch({ entries: batch });
+                const byId = (res && typeof res === 'object' ? res.recordsById : null) as any;
+                if (!byId || typeof byId !== 'object') return entries;
+                return entries.map((e) => mergeEntryWithRecord(e, byId[e.cardId]));
+            } catch {
+                return entries;
+            }
+        }
+
+        if (!api.p2pRead) return entries;
 
         const enriched = await Promise.all(
             entries.map(async (entry) => {
@@ -371,115 +471,25 @@ const CardLibrary: React.FC = () => {
                 }
 
                 try {
-                    const records = await window.electronAPI.p2pRead(entry.coreName);
+                    const records = await api.p2pRead(entry.coreName);
                     if (!Array.isArray(records) || records.length === 0) {
                         return entry;
                     }
 
-                    let cardRecord: any | null = null;
+                    let rawRecord: any | null = null;
                     for (let i = records.length - 1; i >= 0; i -= 1) {
                         const raw = records[i];
                         if (!raw || typeof raw !== 'string') continue;
                         try {
-                            const parsed = JSON.parse(raw);
-                            // HELL WEEK CARDS: type === 'card-state' with data in .card property
-                            if (parsed && parsed.type === 'card-state' && parsed.card) {
-                                cardRecord = parsed.card;
-                                break;
-                            }
-                            // Accept various card types: traditional cards, pets, AND new media cards (videos, images)
-                            if (parsed && (
-                                parsed.type === 'card' ||
-                                parsed.type === 'pet' ||
-                                parsed.mediaKind ||  // NEW: loop videos and generated images
-                                parsed.cardId        // NEW: any record with cardId
-                            )) {
-                                cardRecord = parsed;
-                                break;
-                            }
+                            rawRecord = JSON.parse(raw);
+                            break;
                         } catch {
-                            // ignore parse errors for individual records
+                            // ignore
                         }
                     }
 
-                    if (!cardRecord) {
-                        return entry;
-                    }
-
-                    let mediaKind: 'image' | 'video' | 'audio' | 'message' | undefined;
-                    let mediaLocalPath: string | undefined;
-                    let mediaRemoteUrl: string | undefined;
-                    let mediaMimeType: string | undefined;
-                    let messageContent: string | undefined;
-                    let messageRole: 'user' | 'model' | undefined;
-                    let attachmentCount: number | undefined;
-                    let hasVideo: boolean | undefined;
-
-                    if (cardRecord.kind === 'message' || cardRecord.message) {
-                        // Message card
-                        mediaKind = 'message';
-                        messageContent = cardRecord.message?.content;
-                        messageRole = cardRecord.message?.role;
-                        attachmentCount = cardRecord.attachments?.length;
-                        hasVideo = !!cardRecord.video;
-                        // Use first attachment as thumbnail if available
-                        if (cardRecord.attachments?.[0]?.dataUrl) {
-                            mediaRemoteUrl = cardRecord.attachments[0].dataUrl;
-                        }
-                    } else if (cardRecord.image) {
-                        mediaKind = 'image';
-                        mediaLocalPath = cardRecord.image.localPath;
-                        mediaRemoteUrl = cardRecord.image.remoteUrl || cardRecord.image.dataUrl;
-                        mediaMimeType = cardRecord.image.mimeType;
-                    } else if (cardRecord.video) {
-                        mediaKind = 'video';
-                        mediaLocalPath = cardRecord.video.localPath;
-                        mediaRemoteUrl = cardRecord.video.remoteUrl;
-                        mediaMimeType = cardRecord.video.mimeType;
-                    } else if (cardRecord.mediaKind === 'video') {
-                        // NEW FORMAT: Loop videos and generated videos store mediaLocalPath directly
-                        mediaKind = 'video';
-                        mediaLocalPath = cardRecord.mediaLocalPath;
-                        mediaMimeType = 'video/mp4';
-                    } else if (cardRecord.audio) {
-                        mediaKind = 'audio';
-                        mediaLocalPath = cardRecord.audio.localPath;
-                        mediaRemoteUrl = cardRecord.audio.remoteUrl;
-                        mediaMimeType = cardRecord.audio.mimeType;
-                    }
-
-                    // Merge cardRecord from index (Hell Week data) with hypercore data
-                    const mergedCardRecord = {
-                        ...(entry.cardRecord || {}),  // Hell Week data from index
-                        ...cardRecord,  // Additional data from hypercore
-                        // Preserve Hell Week specific fields if not in hypercore
-                        name: cardRecord.name || entry.cardRecord?.name,
-                        lore: cardRecord.lore || entry.cardRecord?.lore,
-                        skills: cardRecord.skills || entry.cardRecord?.skills,
-                        stats: cardRecord.stats || entry.cardRecord?.stats,
-                        abilities: cardRecord.abilities || entry.cardRecord?.abilities,
-                        flavor_text: cardRecord.flavor_text || entry.cardRecord?.flavor_text,
-                        type: cardRecord.type || entry.cardRecord?.type,
-                        element: cardRecord.element || entry.cardRecord?.element,
-                        rarity: cardRecord.rarity || entry.cardRecord?.rarity,
-                        mediaPrompts: cardRecord.mediaPrompts || entry.cardRecord?.mediaPrompts,
-                        truthAnalysis: cardRecord.truthAnalysis || entry.cardRecord?.truthAnalysis,
-                    };
-
-                    return {
-                        ...entry,
-                        mediaKind,
-                        mediaLocalPath,
-                        mediaRemoteUrl,
-                        mediaMimeType,
-                        messageContent,
-                        messageRole,
-                        attachmentCount,
-                        hasVideo,
-                        subType: cardRecord.subType,
-                        derivedGif: cardRecord.derivedGif,
-                        cardRecord: mergedCardRecord,
-                    };
+                    if (!rawRecord) return entry;
+                    return mergeEntryWithRecord(entry, rawRecord);
                 } catch {
                     return entry;
                 }
@@ -490,7 +500,101 @@ const CardLibrary: React.FC = () => {
     };
 
     const loadCards = async (preferredCardId?: string | null) => {
-        if (typeof window === 'undefined' || !window.electronAPI || !window.electronAPI.p2pRead) {
+        if (typeof window === 'undefined' || !window.electronAPI) {
+            setError('Card Library requires the Electron backend.');
+            return;
+        }
+
+        const api = (window as any).electronAPI as any;
+
+        // Progressive / incremental path (preferred)
+        if (USE_PROGRESSIVE_LOADING && api.nexusIndexPage) {
+            setLoading(true);
+            setError(null);
+            setCards([]);
+            if (!preferredCardId) {
+                setSelected(null);
+            }
+
+            try {
+                let cursor: number | undefined = undefined;
+                let hasMore = true;
+                let loadedCount = 0;
+                const settings = api.nexusGetSettings ? await api.nexusGetSettings() : { globalRenderCap: 1000, globalPageSize: 120 };
+                const cap = typeof settings?.globalRenderCap === 'number' ? settings.globalRenderCap : 1000;
+                const pageSize = typeof settings?.globalPageSize === 'number' ? settings.globalPageSize : 120;
+                const parsedMap = new Map<string, CardIndexEntry>();
+
+                while (hasMore && loadedCount < cap) {
+                    const res = await api.nexusIndexPage({
+                        coreName: CARD_LIBRARY_CORE_NAME,
+                        cursor,
+                        limit: Math.min(pageSize, cap - loadedCount),
+                        direction: 'reverse',
+                    });
+
+                    const items = Array.isArray(res?.items) ? res.items : [];
+                    cursor = typeof res?.nextCursor === 'number' ? res.nextCursor : undefined;
+                    hasMore = !!res?.hasMore;
+
+                    if (!items.length) break;
+
+                    const pageEntries: CardIndexEntry[] = items
+                        .map((data: any) => {
+                            const cardId = String(data?.cardId || '');
+                            if (!cardId) return null;
+                            return {
+                                cardId,
+                                name: typeof data?.name === 'string' ? data.name : undefined,
+                                createdAt: typeof data?.createdAt === 'string' ? data.createdAt : '',
+                                coreName: typeof data?.coreName === 'string' ? data.coreName : data?.cardId,
+                                thumbnail: typeof data?.thumbnail === 'string' ? data.thumbnail : undefined,
+                                mediaKind: data?.mediaKind,
+                                mediaLocalPath: typeof data?.mediaLocalPath === 'string' ? data.mediaLocalPath : undefined,
+                                parentCardId: typeof data?.parentCardId === 'string' ? data.parentCardId : undefined,
+                                raw: data,
+                            } as CardIndexEntry;
+                        })
+                        .filter(Boolean) as CardIndexEntry[];
+
+                    for (const e of pageEntries) {
+                        const existing = parsedMap.get(e.cardId);
+                        parsedMap.set(e.cardId, existing ? { ...existing, ...e } : e);
+                    }
+
+                    const pageEnriched = await enrichWithCardRecords(pageEntries);
+                    for (const e of pageEnriched) {
+                        const existing = parsedMap.get(e.cardId);
+                        parsedMap.set(e.cardId, existing ? { ...existing, ...e } : e);
+                    }
+
+                    loadedCount = parsedMap.size;
+
+                    const merged = Array.from(parsedMap.values());
+                    merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+                    setCards(merged);
+
+                    const targetId = preferredCardId || (selected && selected.cardId) || null;
+                    if (targetId && !selected) {
+                        const match = merged.find((c) => c.cardId === targetId);
+                        if (match) {
+                            setSelected(match);
+                            setEditingName(match.name || '');
+                        }
+                    }
+
+                    await new Promise((r) => setTimeout(r, 0));
+                }
+            } catch (e: any) {
+                setError(e?.message || 'Failed to load Card Library');
+            } finally {
+                setLoading(false);
+            }
+            return;
+        }
+
+        // Legacy path
+        if (!api.p2pRead) {
             setError('Card Library requires the Electron P2P backend.');
             return;
         }
@@ -500,7 +604,7 @@ const CardLibrary: React.FC = () => {
         try {
             let items: string[] = [];
             try {
-                items = await window.electronAPI.p2pRead(CARD_LIBRARY_CORE_NAME);
+                items = await api.p2pRead(CARD_LIBRARY_CORE_NAME);
             } catch (inner: any) {
                 const msg = inner?.message || '';
                 if (msg.includes('not found')) {
@@ -513,20 +617,16 @@ const CardLibrary: React.FC = () => {
             }
 
             const parsedMap = new Map<string, CardIndexEntry>();
-
-            // Process in order, later entries overwrite earlier ones (allowing for updates)
             for (const raw of items) {
                 if (!raw || typeof raw !== 'string') continue;
                 try {
                     const data = JSON.parse(raw);
                     if (!data || data.type !== 'card-index') continue;
-
                     const cardId = String(data.cardId || data.id || '');
                     if (!cardId) continue;
-
                     const entry: CardIndexEntry = {
                         cardId,
-                        cardType: data.cardType,  // NEW: 'standard' | 'set' | 'merged-set'
+                        cardType: data.cardType,
                         name: typeof data.name === 'string' ? data.name : undefined,
                         createdAt: typeof data.createdAt === 'string' ? data.createdAt : '',
                         threadId: typeof data.threadId === 'string' ? data.threadId : undefined,
@@ -535,36 +635,23 @@ const CardLibrary: React.FC = () => {
                         model: typeof data.model === 'string' ? data.model : undefined,
                         coreName: typeof data.coreName === 'string' ? data.coreName : undefined,
                         coreKey: typeof data.coreKey === 'string' ? data.coreKey : undefined,
-                        coreDiscoveryKey:
-                            typeof data.coreDiscoveryKey === 'string' ? data.coreDiscoveryKey : undefined,
+                        coreDiscoveryKey: typeof data.coreDiscoveryKey === 'string' ? data.coreDiscoveryKey : undefined,
                         thumbnail: typeof data.thumbnail === 'string' ? data.thumbnail : undefined,
                         mediaKind: data.mediaKind,
                         tier: data.tier,
-                        // NEW: Self-contained relationships
                         parentCardId: data.parentCardId,
                         memberOfSets: data.memberOfSets,
-                        // NEW: Set Card specific
                         containedCards: data.containedCards,
                         containedCardCount: data.containedCardCount || data.containedCards?.length,
                         skills: data.skills,
                         description: data.description,
-                        // Hell Week card data
-                        cardRecord: data.cardData ? {
-                            ...data.cardData,
-                            mediaPrompts: data.mediaPrompts,
-                        } : undefined,
+                        cardRecord: data.cardData ? { ...data.cardData, mediaPrompts: data.mediaPrompts } : undefined,
                         raw: data,
                     };
-
-                    // Merge with existing to preserve fields if partial update (though we usually write full entries)
                     const existing = parsedMap.get(cardId);
-                    if (existing) {
-                        parsedMap.set(cardId, { ...existing, ...entry });
-                    } else {
-                        parsedMap.set(cardId, entry);
-                    }
+                    parsedMap.set(cardId, existing ? { ...existing, ...entry } : entry);
                 } catch {
-                    // ignore parse errors for individual entries
+                    // ignore
                 }
             }
 
@@ -581,14 +668,6 @@ const CardLibrary: React.FC = () => {
                     setSelected(match);
                     setEditingName(match.name || '');
                     return;
-                }
-            }
-
-            // Don't auto-select first item to keep the grid clean initially
-            if (!selected && preferredCardId) {
-                if (enriched.length > 0) {
-                    setSelected(enriched[0]);
-                    setEditingName(enriched[0].name || '');
                 }
             }
         } catch (e: any) {
