@@ -7026,24 +7026,7 @@ app.on('ready', async () => {
     maybeShowMain();
   });
 
-  initP2P();
-
-  // Initialize persistence layer (SQLite projection engine)
-  initPersistence().catch(err => {
-    console.error('[Persistence] Init error:', err);
-  });
-
-  try {
-    const llamaSettings = getLlamaSettingsInternal();
-    if (llamaSettings.autoStart) {
-      startLlamaServerInternal().catch((error) => {
-        console.error('Failed to auto-start llama server:', error);
-      });
-    }
-  } catch (error) {
-    console.error('Failed to read llama settings during auto-start:', error);
-  }
-
+  // Create windows first so the splash can paint immediately, then defer heavier init work.
   createWindow();
   if (splashWindow) {
     try {
@@ -7052,6 +7035,30 @@ app.on('ready', async () => {
       // ignore
     }
   }
+
+  setTimeout(() => {
+    try {
+      initP2P();
+    } catch (err) {
+      console.error('[P2P] Init error:', err);
+    }
+
+    // Initialize persistence layer (SQLite projection engine)
+    initPersistence().catch(err => {
+      console.error('[Persistence] Init error:', err);
+    });
+
+    try {
+      const llamaSettings = getLlamaSettingsInternal();
+      if (llamaSettings.autoStart) {
+        startLlamaServerInternal().catch((error) => {
+          console.error('Failed to auto-start llama server:', error);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to read llama settings during auto-start:', error);
+    }
+  }, 0);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

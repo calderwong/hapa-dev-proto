@@ -29,6 +29,7 @@ The app is built with **Electron**, **React + TypeScript**, and **Vite**.
   - **Status Badges**: Visual indicators on cards show which artifacts have been generated.
   - **Video Playback**: Native support for playing local video files directly within the workspace.
   - **Run Stats**: Inspect the generation counts for any card.
+  - **Incremental Loading**: The Card Library loads the index in pages and hydrates card records in batches to stay responsive with large libraries.
 
 - **Wiki Browser**
   - **Neural Index**: Browse a graph of terms and definitions generated from your content.
@@ -66,6 +67,10 @@ The app is built with **Electron**, **React + TypeScript**, and **Vite**.
   - Smooth camera navigation with focus, top, and wide presets.
   - Deep-linkable from Chat, Wiki, and Card Library (`/nexus?cardId=...`).
   - Distance-based label LOD for performance with large libraries.
+
+- **Boot Splash (Vibes)**
+  - On app launch, a lightweight splash screen plays videos from `.vibes` immediately.
+  - The main window loads hidden in the background and is only shown once the renderer signals it is ready.
 
 ---
 

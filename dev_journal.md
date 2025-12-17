@@ -75,3 +75,52 @@
 
 **Tags:** #feature #nexus #performance
 **Est. Avg. Human Dev Time:** 2.5 hours
+
+## Entry 87 – Boot splash: play .vibes videos while app loads (show app only when ready)
+**Prompt:** "Ok great, can you take a look at the initial statup/bootup process as well? It's also running very slow and I'd like you to add a \"loading screen\" that plays videos in the \".vibes\" folder immediately on-open, and then load the app behind the videos, only showing the app once it's ready"
+
+**Summary of actions:**
+- Implemented a dedicated splash `BrowserWindow` that loads a `data:` HTML page to loop videos found in `.vibes`.
+- Created the main app window hidden (`show: false`) and only revealed it after a two-phase gate:
+  - Electron `ready-to-show` for the main window.
+  - Renderer signal `boot:renderer-ready`.
+- Added a preload bridge method (`bootRendererReady`) and invoked it from the renderer entrypoint so the main process can safely swap from splash to app.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `electron/preload.ts`
+- Modified: `src/main.tsx`
+- Modified: `src/types.d.ts`
+
+**Tags:** #feature #boot #performance
+**Est. Avg. Human Dev Time:** 75 minutes
+
+## Entry 88 – Card Library: incremental paging + batched hydration (Phase 2 style)
+**Prompt:** "(and look for optimization opportunities on load as well, same for retrieving cards from the Card Library feature--I think that needs to move to what you did for the 3d nexus and load cards as they are found versus trying to load them all at once)."
+
+**Summary of actions:**
+- Refactored Card Library loading to prefer Phase 2 IPC APIs:
+  - Paged index loading via `nexus:index-page`.
+  - Batched latest-record hydration via `nexus:card-latest-batch`.
+- Updated the UI to progressively update the cards list as pages arrive, avoiding full-core blocking reads.
+- Fixed `VirtualCardGrid` to handle append-style updates so newly loaded pages are eligible for reveal.
+
+**Files modified/created:**
+- Modified: `src/pages/CardLibrary.tsx`
+- Modified: `src/components/cards/VirtualCardGrid.tsx`
+
+**Tags:** #feature #card_library #performance
+**Est. Avg. Human Dev Time:** 90 minutes
+
+## Entry 89 – Boot hot path: defer heavy initialization until after windows exist
+**Prompt:** "ready"
+
+**Summary of actions:**
+- Reordered the Electron boot sequence so the splash and hidden main window are created first.
+- Deferred heavier initialization (P2P init, persistence init, llama auto-start) to the next tick to reduce time-to-first-paint on the splash.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+
+**Tags:** #performance #boot
+**Est. Avg. Human Dev Time:** 20 minutes

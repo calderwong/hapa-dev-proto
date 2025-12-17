@@ -52,6 +52,7 @@ Goals:
   - Save messages, images, videos, audio, and configuration as "cards" with metadata.
   - Browse and search saved cards in a dedicated library view.
   - Cards support parent-child lineage tracking for provenance.
+  - Scalability requirement: Card Library loading must be incremental (paged index + batched hydration) to support very large libraries without blocking the UI.
 - **Message Cards**: Save any chat message as a card for later reference.
   - Automatically extracts and stores generated images from AI responses.
   - Displays image thumbnails in sidebar for visual identification.
@@ -112,6 +113,11 @@ Phase 2 (Scalability & Performance):
 - **Nexus settings**: Global render cap and page size must be configurable and persisted locally.
 - **Seamless scope switching**: Switching between LOCAL and GLOBAL should show a themed loading overlay to avoid perceived UI freezes.
 - **Richer card faces**: Cards should display more than title (where available): lore, skills, and truth analysis (facts/desires) with LOD-based truncation.
+
+### 2.10 Boot Splash (Vibes)
+- On app open, show an immediate loading experience that plays videos from the `.vibes` folder.
+- The main application window must load hidden in the background.
+- The app window should only be shown once the renderer signals it is ready and the window is ready-to-show, to avoid flicker and improve perceived performance.
 
 ## 3. Non-Functional Requirements
 
