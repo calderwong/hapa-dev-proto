@@ -4,7 +4,7 @@ import { FloatingCard } from './cards/FloatingCard';
 import { FormationHud } from './overlay/FormationHud';
 
 export const DragCanvas: React.FC = () => {
-  const { items, overlayLayout, setOverlayLayout, selectedItemId, setSelectedItemId, zOffsets, setZOffsets, snapZones } = useDragCanvas();
+  const { items, overlayLayout, setOverlayLayout, selectedItemId, setSelectedItemId, zOffsets, setZOffsets } = useDragCanvas();
 
   const [viewportTick, setViewportTick] = useState(0);
   const [recenterTick, setRecenterTick] = useState(0);
@@ -73,14 +73,12 @@ export const DragCanvas: React.FC = () => {
 
     const N = items.length;
     const vw = window.innerWidth;
-    const dock = snapZones.find(z => z.id === 'hand-dock');
-    const dockCx = dock ? dock.rect.left + dock.rect.width / 2 : undefined;
-    const dockTop = dock ? dock.rect.top : undefined;
+    const vh = window.innerHeight;
 
     const refW = items.reduce((sum, it) => sum + (it.initialRect?.width ?? 0), 0) / Math.max(N, 1);
 
-    const anchorX = dockCx ?? vw * 0.5;
-    const anchorY = Math.max(70, (dockTop ?? 110) - 160);
+    const anchorX = vw * 0.5;
+    const anchorY = Math.max(150, Math.floor(vh * 0.34));
     const gap = 28;
 
     const map = new Map<string, { tx: number; ty: number; tz: number; rotZ: number }>();
@@ -114,7 +112,7 @@ export const DragCanvas: React.FC = () => {
         targetCenterY = anchorY + (1 - Math.cos(a)) * 140;
         rotZ = -a * 22;
       } else if (overlayLayout.mode === 'ring') {
-        const radius = Math.min(220, vw * 0.18);
+        const radius = Math.min(220, Math.min(vw, vh) * 0.18);
         const a = (i / Math.max(N, 1)) * Math.PI * 2;
         targetCenterX = anchorX + Math.cos(a) * radius;
         targetCenterY = anchorY + Math.sin(a) * radius;
@@ -134,7 +132,7 @@ export const DragCanvas: React.FC = () => {
     }
 
     return map;
-  }, [hasItems, items, overlayLayout.hover, overlayLayout.mode, snapZones, viewportTick, recenterTick]);
+  }, [hasItems, items, overlayLayout.hover, overlayLayout.mode, viewportTick, recenterTick]);
 
   if (!hasItems) return null;
 
