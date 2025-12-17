@@ -10,6 +10,8 @@ export interface DragItem {
   startY: number;
   tx?: number;
   ty?: number;
+  homeTx?: number;
+  homeTy?: number;
   pointerId?: number; // For transferring drag
   onClick?: (e: React.MouseEvent | React.PointerEvent | PointerEvent) => void; // For handling clicks
   portalColorMode?: PortalColorMode;
@@ -36,6 +38,22 @@ export interface OverlayLayoutState {
   portalTargetPoint: { x: number; y: number };
 }
 
+export type CardPose = {
+  tiltX: number;
+  tiltY: number;
+  rotZ: number;
+  zoom: number;
+  cameraMode: boolean;
+};
+
+export const DEFAULT_CARD_POSE: CardPose = {
+  tiltX: 0,
+  tiltY: 0,
+  rotZ: 0,
+  zoom: 1,
+  cameraMode: false,
+};
+
 interface DragCanvasContextType {
   items: DragItem[];
   spawnItem: (item: DragItem) => void;
@@ -50,6 +68,8 @@ interface DragCanvasContextType {
   setSelectedItemId: React.Dispatch<React.SetStateAction<string | null>>;
   zOffsets: Record<string, number>;
   setZOffsets: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  poses: Record<string, CardPose>;
+  setPoses: React.Dispatch<React.SetStateAction<Record<string, CardPose>>>;
 }
 
 const OVERLAY_PERSIST_KEY = 'hapa.overlayCards.v1';
@@ -68,6 +88,7 @@ type PersistedOverlayState = {
   items: PersistedOverlayItem[];
   overlayLayout: OverlayLayoutState;
   zOffsets: Record<string, number>;
+  poses?: Record<string, CardPose>;
 };
 
 function renderPersistedCard(data: any) {
@@ -115,6 +136,7 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [overlayLayout, setOverlayLayout] = useState<OverlayLayoutState>({ mode: 'free', hover: false, portalTargetMode: 'bottom-center', portalColorMode: 'blue', portalTargetPoint: { x: window.innerWidth / 2, y: window.innerHeight - 26 } });
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [zOffsets, setZOffsets] = useState<Record<string, number>>({});
+  const [poses, setPoses] = useState<Record<string, CardPose>>({});
 
   const didHydrateRef = useRef(false);
 
@@ -133,7 +155,10 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const txAbs = (item.tx ?? 0) + baseLeft;
       const tyAbs = (item.ty ?? 0) + baseTop;
 
-      return [...prev, { ...item, initialRect: normalizedRect, tx: txAbs, ty: tyAbs }];
+      const homeTx = item.homeTx ?? txAbs;
+      const homeTy = item.homeTy ?? tyAbs;
+
+      return [...prev, { ...item, initialRect: normalizedRect, tx: txAbs, ty: tyAbs, homeTx, homeTy }];
     });
   }, []);
 
@@ -194,6 +219,8 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               startY: 0,
               tx: txAbs,
               ty: tyAbs,
+              homeTx: txAbs,
+              homeTy: tyAbs,
               portalColorMode: p.portalColorMode === 'red' ? 'red' : (p.portalColorMode === 'blue' ? 'blue' : undefined),
             };
           })
@@ -207,6 +234,7 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setOverlayLayout({ mode: o.mode ?? 'free', hover: !!o.hover, portalTargetMode, portalColorMode, portalTargetPoint });
       }
       if (parsed?.zOffsets) setZOffsets(parsed.zOffsets);
+      if (parsed?.poses) setPoses(parsed.poses);
       if (restoredItems.length > 0) setItems(restoredItems);
     } catch {
       // ignore
@@ -236,12 +264,13 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         })),
         overlayLayout,
         zOffsets,
+        poses,
       };
       window.localStorage.setItem(OVERLAY_PERSIST_KEY, JSON.stringify(persisted));
     } catch {
       // ignore
     }
-  }, [items, overlayLayout, zOffsets]);
+  }, [items, overlayLayout, zOffsets, poses]);
 
   return (
     <DragCanvasContext.Provider 
@@ -258,7 +287,9 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         selectedItemId,
         setSelectedItemId,
         zOffsets,
-        setZOffsets
+        setZOffsets,
+        poses,
+        setPoses
       }}
     >
       {children}

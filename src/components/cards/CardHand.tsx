@@ -15,11 +15,11 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { useHand } from '../../contexts/HandContext';
 import { useDragCanvas } from '../../contexts/DragCanvasContext';
 import type { DragItem } from '../../contexts/DragCanvasContext';
 import type { HandCard, CardState } from '../../contexts/HandContext';
+import { DEFAULT_CARD_POSE } from '../../contexts/DragCanvasContext';
 import { 
   animateCardState, 
   animateCardAddToHand, 
@@ -27,7 +27,7 @@ import {
   useAnimationCleanup,
   animate
 } from '../../hooks/useAnime';
-import HandCardView from './HandCardView';
+import { AttachedHandCardDetails } from './AttachedHandCardDetails';
 import { DraggableHandCard } from './DraggableHandCard';
 
 // State color configurations
@@ -46,17 +46,69 @@ interface CardHandProps {
 
 const CardHand: React.FC<CardHandProps> = ({ className = '' }) => {
   const { cards, isCollapsed, maxCapacity, removeCard, clearHand, toggleCollapse, hasCard, addCard } = useHand();
-  const { registerSnapZone, unregisterSnapZone } = useDragCanvas();
+  const { registerSnapZone, unregisterSnapZone, items: overlayItems, spawnItem, removeItem, overlayLayout, setOverlayLayout, poses, setPoses } = useDragCanvas();
   
   const [isDragOver, setIsDragOver] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [prevCardCount, setPrevCardCount] = useState(cards.length);
   const [selectedCard, setSelectedCard] = useState<HandCard | null>(null);
+  const [selectedAnchorRect, setSelectedAnchorRect] = useState<DOMRect | null>(null);
   
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
   const handContainerRef = useRef<HTMLDivElement>(null);
   const { track } = useAnimationCleanup();
+
+  useEffect(() => {
+    if (isCollapsed) {
+      setSelectedCard(null);
+      setSelectedAnchorRect(null);
+    }
+  }, [isCollapsed]);
+
+  useEffect(() => {
+    if (!selectedCard) {
+      setSelectedAnchorRect(null);
+      return;
+    }
+
+    const idx = cards.findIndex((c) => c.cardId === selectedCard.cardId);
+    const el = idx >= 0 ? slotRefs.current[idx] : null;
+    const rect = el?.getBoundingClientRect() || null;
+    setSelectedAnchorRect(rect);
+  }, [selectedCard, cards]);
+
+  const isSelectedCardInFormation = !!selectedCard && overlayItems.some((i) => i.id === selectedCard.cardId);
+
+  const selectedPose = selectedCard
+    ? {
+        ...DEFAULT_CARD_POSE,
+        ...(poses[selectedCard.cardId] || {}),
+      }
+    : DEFAULT_CARD_POSE;
+
+  const setSelectedPose = (next: any) => {
+    if (!selectedCard) return;
+    setPoses((prev) => {
+      const current = { ...DEFAULT_CARD_POSE, ...(prev[selectedCard.cardId] || {}) };
+      return {
+        ...prev,
+        [selectedCard.cardId]: { ...current, ...next },
+      };
+    });
+  };
+
+  const renderOverlayClone = (card: HandCard) => (
+    <div className="relative w-12 h-16 rounded-md overflow-hidden border border-cyan-500/30 bg-gray-900/80 shadow-[0_0_24px_rgba(34,211,238,0.25)]">
+      {card.thumbnail ? (
+        <img src={card.thumbnail} alt={card.name || 'Card'} className="w-full h-full object-cover" draggable={false} />
+      ) : (
+        <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-950 flex items-center justify-center">
+          <div className="w-4 h-4 rounded border border-gray-600 bg-gray-800/50" />
+        </div>
+      )}
+    </div>
+  );
 
   // Register Snap Zones for all 7 slots
   useEffect(() => {
@@ -305,11 +357,49 @@ const CardHand: React.FC<CardHandProps> = ({ className = '' }) => {
       )}
 
       {/* Hand Card View - appears when a card is clicked */}
-      <HandCardView 
+      <AttachedHandCardDetails
         card={selectedCard}
+        anchorRect={selectedAnchorRect}
+        isInFormation={isSelectedCardInFormation}
+        pose={selectedPose}
+        setPose={setSelectedPose}
         onClose={() => setSelectedCard(null)}
-        onViewFull={(card) => {
+        onReturnToHand={() => {
+          if (!selectedCard) return;
+          if (overlayItems.some((i) => i.id === selectedCard.cardId)) removeItem(selectedCard.cardId);
+        }}
+        onReturnToLibrary={() => {
+          if (!selectedCard) return;
+          if (overlayItems.some((i) => i.id === selectedCard.cardId)) removeItem(selectedCard.cardId);
+          removeCard(selectedCard.cardId);
           setSelectedCard(null);
+        }}
+        onEnterFormation={() => {
+          if (!selectedCard) return;
+          if (overlayItems.some((i) => i.id === selectedCard.cardId)) return;
+
+          const idx = cards.findIndex((c) => c.cardId === selectedCard.cardId);
+          const slotEl = idx >= 0 ? slotRefs.current[idx] : null;
+          const rect = slotEl?.getBoundingClientRect();
+          if (!rect) return;
+
+          if (overlayLayout.mode === 'free') {
+            setOverlayLayout((v) => ({ ...v, mode: 'fan' }));
+          }
+
+          spawnItem({
+            id: selectedCard.cardId,
+            type: 'HAND_CARD',
+            data: selectedCard,
+            render: () => renderOverlayClone(selectedCard),
+            initialRect: rect,
+            startX: rect.left + rect.width / 2,
+            startY: rect.top + rect.height / 2,
+          });
+        }}
+        onLeaveFormation={() => {
+          if (!selectedCard) return;
+          if (overlayItems.some((i) => i.id === selectedCard.cardId)) removeItem(selectedCard.cardId);
         }}
       />
     </div>

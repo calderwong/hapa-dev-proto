@@ -3,6 +3,7 @@ import { animate } from '../../hooks/useAnime';
 import type { DragItem } from '../../contexts/DragCanvasContext';
 import { useDragCanvas } from '../../contexts/DragCanvasContext';
 import type { OverlayLayoutState } from '../../contexts/DragCanvasContext';
+import { DEFAULT_CARD_POSE } from '../../contexts/DragCanvasContext';
 import { playCardClickSound, playCardDepthNudgeSound, playCardDropSound, playCardMoveTickSound, playCardPickUpSound, playCardPortalSound, playCardSnapSound } from '../../utils/audio';
 
 interface FloatingCardProps {
@@ -14,7 +15,8 @@ interface FloatingCardProps {
 export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarget, overlayLayout }) => {
   const dragRef = useRef<HTMLDivElement>(null);   // Controls Position (TranslateX/Y)
   const visualRef = useRef<HTMLDivElement>(null); // Controls Effects (Scale, Rotate, Glow)
-  const { removeItem, snapZones, setOverlayLayout, selectedItemId, setSelectedItemId, zOffsets, setZOffsets, updateItemPosition } = useDragCanvas();
+  const poseRef = useRef<HTMLDivElement>(null);   // Controls user pose (rotateX/rotateY/rotateZ + zoom)
+  const { removeItem, snapZones, setOverlayLayout, selectedItemId, setSelectedItemId, zOffsets, setZOffsets, updateItemPosition, poses } = useDragCanvas();
 
   const portalColorMode = item.portalColorMode ?? overlayLayout.portalColorMode;
 
@@ -34,6 +36,8 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
   const portalColorModeRef = useRef(overlayLayout.portalColorMode);
 
   const zOffsetsRef = useRef(zOffsets);
+
+  const posesRef = useRef(poses);
 
   const zDragRef = useRef({ startY: 0, startZ: 0, didAdjust: false, isAdjusting: false });
 
@@ -122,7 +126,10 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
     let lastTheme: string | null = null;
     const tick = () => {
       const rect = dragEl.getBoundingClientRect();
-      const isActive = selectedItemIdRef.current === item.id || dragStateRef.current.isDragging;
+      const isActive =
+        selectedItemIdRef.current === item.id ||
+        dragStateRef.current.isDragging ||
+        !!posesRef.current?.[item.id]?.cameraMode;
 
       if (!isActive) {
         laser.style.opacity = '0';
@@ -198,8 +205,43 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
   }, [item.id]);
 
   useEffect(() => {
+    const poseEl = poseRef.current;
+    if (!poseEl) return;
+
+    const base = poses[item.id] || DEFAULT_CARD_POSE;
+
+    const currentTy = dragStateRef.current.isDragging
+      ? state.current.currentTy
+      : (overlayLayout.mode === 'free' || !formationTarget)
+        ? (item.ty ?? state.current.currentTy)
+        : formationTarget.ty;
+
+    const homeTy = item.homeTy ?? item.ty ?? 0;
+    const lift = Math.max(0, homeTy - currentTy);
+    const autoTilt = Math.max(0, Math.min(14, lift / 18));
+
+    const tiltX = (base.tiltX ?? 0) - autoTilt;
+    const tiltY = base.tiltY ?? 0;
+    const rotZ = base.rotZ ?? 0;
+    const zoom = Math.max(0.6, Math.min(1.7, base.zoom ?? 1));
+
+    animate(poseEl, {
+      rotateX: tiltX,
+      rotateY: tiltY,
+      rotateZ: rotZ,
+      scale: zoom,
+      duration: dragStateRef.current.isDragging ? 0 : 160,
+      easing: 'outQuad',
+    });
+  }, [formationTarget, item.homeTy, item.id, item.ty, overlayLayout.mode, poses]);
+
+  useEffect(() => {
     zOffsetsRef.current = zOffsets;
   }, [zOffsets]);
+
+  useEffect(() => {
+    posesRef.current = poses;
+  }, [poses]);
 
   useEffect(() => {
     const dragEl = dragRef.current;
@@ -896,7 +938,17 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
           transformStyle: 'preserve-3d',
         }}
       >
-        {item.render(item.data)}
+        <div
+          ref={poseRef}
+          style={{
+            width: '100%',
+            height: '100%',
+            willChange: 'transform',
+            transformStyle: 'preserve-3d',
+          }}
+        >
+          {item.render(item.data)}
+        </div>
       </div>
     </div>
   );
