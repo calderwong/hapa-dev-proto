@@ -112,7 +112,7 @@ const DragCanvasContext = createContext<DragCanvasContextType | undefined>(undef
 export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [items, setItems] = useState<DragItem[]>([]);
   const [snapZones, setSnapZones] = useState<SnapZone[]>([]);
-  const [overlayLayout, setOverlayLayout] = useState<OverlayLayoutState>({ mode: 'free', hover: false, portalTargetMode: 'hand-dock', portalColorMode: 'blue', portalTargetPoint: { x: window.innerWidth / 2, y: window.innerHeight - 26 } });
+  const [overlayLayout, setOverlayLayout] = useState<OverlayLayoutState>({ mode: 'free', hover: false, portalTargetMode: 'bottom-center', portalColorMode: 'blue', portalTargetPoint: { x: window.innerWidth / 2, y: window.innerHeight - 26 } });
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [zOffsets, setZOffsets] = useState<Record<string, number>>({});
 
@@ -185,12 +185,9 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       if (parsed?.overlayLayout) {
         const o: any = parsed.overlayLayout;
-        const portalTargetMode: PortalTargetMode = o.portalTargetMode === 'bottom-center' ? 'bottom-center' : (o.portalTargetMode === 'custom' ? 'custom' : 'hand-dock');
+        const portalTargetMode: PortalTargetMode = 'bottom-center';
         const portalColorMode: PortalColorMode = o.portalColorMode === 'red' ? 'red' : 'blue';
-        const portalTargetPoint =
-          o.portalTargetPoint && typeof o.portalTargetPoint.x === 'number' && typeof o.portalTargetPoint.y === 'number'
-            ? { x: o.portalTargetPoint.x, y: o.portalTargetPoint.y }
-            : { x: window.innerWidth / 2, y: window.innerHeight - 26 };
+        const portalTargetPoint = { x: window.innerWidth / 2, y: window.innerHeight - 26 };
         setOverlayLayout({ mode: o.mode ?? 'free', hover: !!o.hover, portalTargetMode, portalColorMode, portalTargetPoint });
       }
       if (parsed?.zOffsets) setZOffsets(parsed.zOffsets);

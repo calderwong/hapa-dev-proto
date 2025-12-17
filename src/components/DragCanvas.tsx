@@ -4,8 +4,6 @@ import { FloatingCard } from './cards/FloatingCard';
 
 export const DragCanvas: React.FC = () => {
   const { items, overlayLayout, setOverlayLayout, selectedItemId, setSelectedItemId, zOffsets, setZOffsets, snapZones } = useDragCanvas();
-  const [isPickingPortalTarget, setIsPickingPortalTarget] = useState(false);
-  const [pickCursor, setPickCursor] = useState<{ x: number; y: number } | null>(null);
 
   const hasItems = items.length > 0;
 
@@ -19,10 +17,6 @@ export const DragCanvas: React.FC = () => {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || t?.isContentEditable) return;
 
       if (e.key === 'Escape') {
-        if (isPickingPortalTarget) {
-          setIsPickingPortalTarget(false);
-          return;
-        }
         setSelectedItemId(null);
         return;
       }
@@ -61,7 +55,7 @@ export const DragCanvas: React.FC = () => {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isPickingPortalTarget, setIsPickingPortalTarget, setOverlayLayout, setSelectedItemId]);
+  }, [setOverlayLayout, setSelectedItemId]);
 
   const targets = useMemo(() => {
     if (!hasItems) return new Map<string, any>();
@@ -136,36 +130,6 @@ export const DragCanvas: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-[99999] pointer-events-none" style={{ perspective: '1200px' }}>
-      {isPickingPortalTarget && (
-        <div
-          className="fixed inset-0 z-[100010] pointer-events-auto"
-          onMouseMove={(e) => setPickCursor({ x: e.clientX, y: e.clientY })}
-          onMouseLeave={() => setPickCursor(null)}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setOverlayLayout(v => ({ ...v, portalTargetMode: 'custom', portalTargetPoint: { x: e.clientX, y: e.clientY } }));
-            setIsPickingPortalTarget(false);
-          }}
-        >
-          <div className="absolute inset-0 bg-black/30" />
-          <div className="absolute top-16 left-1/2 -translate-x-1/2 px-3 py-2 rounded-xl bg-gray-950/90 border border-cyan-500/20 shadow-[0_0_20px_rgba(34,211,238,0.15)] backdrop-blur-sm">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-cyan-200">Pick Portal Target</div>
-            <div className="text-[10px] font-mono text-gray-400">Click anywhere to set “That Place”.</div>
-            <div className="text-[10px] font-mono text-gray-500">Esc to cancel</div>
-          </div>
-          {pickCursor && (
-            <div
-              className="absolute pointer-events-none"
-              style={{ left: pickCursor.x, top: pickCursor.y, transform: 'translate(-50%, -50%)' }}
-            >
-              <div className="w-10 h-10 rounded-full border border-cyan-300/60 shadow-[0_0_20px_rgba(34,211,238,0.25)]" />
-              <div className="absolute left-1/2 top-0 w-px h-full -translate-x-1/2 bg-cyan-300/25" />
-              <div className="absolute top-1/2 left-0 h-px w-full -translate-y-1/2 bg-cyan-300/25" />
-            </div>
-          )}
-        </div>
-      )}
       <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[100000] pointer-events-auto">
         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-950/80 border border-cyan-500/20 shadow-[0_0_20px_rgba(34,211,238,0.15)] backdrop-blur-sm">
           <button
@@ -211,23 +175,6 @@ export const DragCanvas: React.FC = () => {
             className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.mode === 'ring' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
           >
             Ring
-          </button>
-
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, portalTargetMode: v.portalTargetMode === 'hand-dock' ? 'bottom-center' : 'hand-dock' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.portalTargetMode === 'hand-dock' ? 'bg-purple-600 text-white border-purple-400' : 'bg-purple-600/10 text-purple-200 border-purple-500/40'}`}
-          >
-            Portal: {overlayLayout.portalTargetMode === 'hand-dock' ? 'Hand' : 'Bottom'}
-          </button>
-
-          <button
-            onClick={() => {
-              setOverlayLayout(v => ({ ...v, portalTargetMode: 'custom' }));
-              setIsPickingPortalTarget(true);
-            }}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.portalTargetMode === 'custom' ? 'bg-cyan-600 text-white border-cyan-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Target
           </button>
 
           <button
