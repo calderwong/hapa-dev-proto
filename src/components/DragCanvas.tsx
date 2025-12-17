@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useDragCanvas } from '../contexts/DragCanvasContext';
 import { FloatingCard } from './cards/FloatingCard';
 

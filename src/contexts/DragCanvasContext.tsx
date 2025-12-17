@@ -122,7 +122,18 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setItems(prev => {
       const existing = prev.some(p => p.id === item.id);
       if (existing) return prev;
-      return [...prev, { ...item, tx: item.tx ?? 0, ty: item.ty ?? 0 }];
+
+      // Normalize coordinate system so overlay positions are absolute in viewport space.
+      // We do this by folding any base left/top into tx/ty and pinning initialRect.left/top to 0.
+      const baseLeft = item.initialRect?.left ?? 0;
+      const baseTop = item.initialRect?.top ?? 0;
+      const w = item.initialRect?.width ?? 0;
+      const h = item.initialRect?.height ?? 0;
+      const normalizedRect = new DOMRect(0, 0, w, h);
+      const txAbs = (item.tx ?? 0) + baseLeft;
+      const tyAbs = (item.ty ?? 0) + baseTop;
+
+      return [...prev, { ...item, initialRect: normalizedRect, tx: txAbs, ty: tyAbs }];
     });
   }, []);
 
@@ -167,7 +178,12 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const parsed = JSON.parse(raw) as PersistedOverlayState;
       const restoredItems: DragItem[] = Array.isArray(parsed?.items)
         ? parsed.items.map((p) => {
-            const rect = new DOMRect(p.rect.left, p.rect.top, p.rect.width, p.rect.height);
+            // Migrate persisted items to absolute viewport positioning.
+            // Older persisted state used (rect.left/top + tx/ty) as a two-part position.
+            // New state uses tx/ty as absolute viewport space; rect.left/top is always 0.
+            const rect = new DOMRect(0, 0, p.rect.width, p.rect.height);
+            const txAbs = (p.tx ?? 0) + (p.rect?.left ?? 0);
+            const tyAbs = (p.ty ?? 0) + (p.rect?.top ?? 0);
             return {
               id: p.id,
               type: p.type,
@@ -176,8 +192,8 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               initialRect: rect,
               startX: 0,
               startY: 0,
-              tx: p.tx,
-              ty: p.ty,
+              tx: txAbs,
+              ty: tyAbs,
               portalColorMode: p.portalColorMode === 'red' ? 'red' : (p.portalColorMode === 'blue' ? 'blue' : undefined),
             };
           })
@@ -209,8 +225,8 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           type: i.type,
           data: minimizeData(i.type, i.data),
           rect: {
-            left: i.initialRect.left,
-            top: i.initialRect.top,
+            left: 0,
+            top: 0,
             width: i.initialRect.width,
             height: i.initialRect.height,
           },
