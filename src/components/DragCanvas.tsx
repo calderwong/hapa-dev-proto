@@ -1,9 +1,13 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useDragCanvas } from '../contexts/DragCanvasContext';
 import { FloatingCard } from './cards/FloatingCard';
+import { FormationHud } from './overlay/FormationHud';
 
 export const DragCanvas: React.FC = () => {
   const { items, overlayLayout, setOverlayLayout, selectedItemId, setSelectedItemId, zOffsets, setZOffsets, snapZones } = useDragCanvas();
+
+  const [viewportTick, setViewportTick] = useState(0);
+  const [recenterTick, setRecenterTick] = useState(0);
 
   const hasItems = items.length > 0;
 
@@ -56,6 +60,12 @@ export const DragCanvas: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [setOverlayLayout, setSelectedItemId]);
+
+  useEffect(() => {
+    const onResize = () => setViewportTick((v) => v + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const targets = useMemo(() => {
     if (!hasItems) return new Map<string, any>();
@@ -124,101 +134,22 @@ export const DragCanvas: React.FC = () => {
     }
 
     return map;
-  }, [hasItems, items, overlayLayout.hover, overlayLayout.mode, snapZones]);
+  }, [hasItems, items, overlayLayout.hover, overlayLayout.mode, snapZones, viewportTick, recenterTick]);
 
   if (!hasItems) return null;
 
   return (
     <div className="fixed inset-0 z-[99999] pointer-events-none" style={{ perspective: '1200px' }}>
-      <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[100000] pointer-events-auto">
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-950/80 border border-cyan-500/20 shadow-[0_0_20px_rgba(34,211,238,0.15)] backdrop-blur-sm">
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, hover: !v.hover }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.hover ? 'bg-cyan-500/10 text-cyan-200 border-cyan-500/40' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Hover
-          </button>
-
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, mode: 'free' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.mode === 'free' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Free
-          </button>
-
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, mode: 'fan' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.mode === 'fan' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Fan
-          </button>
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, mode: 'line' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.mode === 'line' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Line
-          </button>
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, mode: 'stack' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.mode === 'stack' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Stack
-          </button>
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, mode: 'arc' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.mode === 'arc' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Arc
-          </button>
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, mode: 'ring' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.mode === 'ring' ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800'}`}
-          >
-            Ring
-          </button>
-
-          <button
-            onClick={() => setOverlayLayout(v => ({ ...v, portalColorMode: v.portalColorMode === 'blue' ? 'red' : 'blue' }))}
-            className={`px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${overlayLayout.portalColorMode === 'red' ? 'bg-red-600 text-white border-red-400' : 'bg-cyan-600 text-white border-cyan-400'}`}
-          >
-            Color: {overlayLayout.portalColorMode === 'red' ? 'Red' : 'Blue'}
-          </button>
-
-          <div className="w-px h-6 bg-gray-700/60 mx-1" />
-
-          <div className="flex items-center gap-2">
-            <div className="text-[10px] font-mono text-gray-400 whitespace-nowrap">
-              {selectedItemId ? (
-                <>SEL: <span className="text-cyan-300">{selectedItemId.slice(0, 8)}</span> Z: <span className="text-cyan-300">{Math.round(zOffsets[selectedItemId] ?? 0)}</span></>
-              ) : (
-                <>SEL: <span className="text-gray-500">none</span> (Shift+Click)</>
-              )}
-            </div>
-
-            <button
-              onClick={() => {
-                if (!selectedItemId) return;
-                setZOffsets(prev => {
-                  const { [selectedItemId]: _removed, ...rest } = prev;
-                  return rest;
-                });
-              }}
-              className={`px-2 py-1 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${selectedItemId ? 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800' : 'bg-gray-900/30 text-gray-600 border-gray-800 cursor-not-allowed'}`}
-              disabled={!selectedItemId}
-            >
-              Z Reset
-            </button>
-
-            <button
-              onClick={() => setSelectedItemId(null)}
-              className={`px-2 py-1 rounded-lg border text-[10px] font-bold uppercase tracking-widest transition-all ${selectedItemId ? 'bg-gray-800/50 text-gray-300 border-gray-700 hover:bg-gray-800' : 'bg-gray-900/30 text-gray-600 border-gray-800 cursor-not-allowed'}`}
-              disabled={!selectedItemId}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      </div>
+      <FormationHud
+        overlayLayout={overlayLayout}
+        setOverlayLayout={setOverlayLayout}
+        selectedItemId={selectedItemId}
+        setSelectedItemId={setSelectedItemId}
+        zOffsets={zOffsets}
+        setZOffsets={setZOffsets}
+        itemCount={items.length}
+        onRecenter={() => setRecenterTick((v) => v + 1)}
+      />
 
       {items.map(item => (
         <FloatingCard key={item.id} item={item} formationTarget={targets.get(item.id)} overlayLayout={overlayLayout} />
