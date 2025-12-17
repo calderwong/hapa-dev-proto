@@ -157,3 +157,18 @@
 
 **Tags:** #ui #overlay #polish
 **Est. Avg. Human Dev Time:** 25 minutes
+
+## Entry 92 – Hand card click behavior + attached Card Details sub-menu redesign
+**Prompt:** "Ok can you remove the functionality that makes it so when you click a hand card, it flies to the bottom and disappears... Create a doc, plan out the change, review, and implement."
+
+**Summary of actions:**
+- Identified the root cause of the "click → fly away/disappear" conflict: hand cards were spawning overlay `FloatingCard`s immediately on pointer down; `FloatingCard` treats short gestures as a click and runs a portal animation that removes the overlay.
+- Updated `useGlobalDrag` so overlay spawn only occurs after a small drag threshold; a plain click now invokes `onClick` without spawning an overlay.
+- Authored a design doc for an attached, glass-plane Card Details sub-menu anchored next to the clicked hand card, including the required control surface (return, formation toggle, pose, camera/reticle + zoom).
+
+**Files modified/created:**
+- Modified: `src/hooks/useGlobalDrag.ts`
+- Created: `Card_Details_Attached_Submenu_Redesign.md`
+
+**Tags:** #feature #ui #hand #cards
+**Est. Avg. Human Dev Time:** 2 hours
