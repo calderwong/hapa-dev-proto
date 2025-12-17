@@ -143,3 +143,17 @@
 
 **Tags:** #feature #ui #overlay #bugfix
 **Est. Avg. Human Dev Time:** 2 hours
+
+## Entry 91 – Formation HUD polish: tighter glass UI + recenter pulse
+**Prompt:** "proceed"
+
+**Summary of actions:**
+- Polished the compact glass Formation HUD: tightened spacing/typography, added subtle active-mode glow, and emphasized `RECENTER`.
+- Added a brief recenter pulse/reticle indicator at the formation anchor point when `RECENTER` is pressed.
+
+**Files modified/created:**
+- Modified: `src/components/overlay/FormationHud.tsx`
+- Modified: `src/components/DragCanvas.tsx`
+
+**Tags:** #ui #overlay #polish
+**Est. Avg. Human Dev Time:** 25 minutes

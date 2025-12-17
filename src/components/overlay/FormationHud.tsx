@@ -28,7 +28,7 @@ const ModeButton: React.FC<{
   variant?: 'mode' | 'toggle' | 'tool' | 'color';
 }> = ({ active, label, onClick, variant = 'mode' }) => {
   const base =
-    'px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-[0.18em] transition-all select-none';
+    'px-2 py-[5px] rounded-md border text-[9px] font-bold uppercase tracking-[0.22em] transition-all select-none leading-none';
 
   const palette = (() => {
     if (variant === 'color') {
@@ -39,20 +39,20 @@ const ModeButton: React.FC<{
 
     if (variant === 'toggle') {
       return active
-        ? 'bg-cyan-500/10 text-cyan-200 border-cyan-500/40'
-        : 'bg-gray-800/40 text-gray-300 border-gray-700 hover:bg-gray-800/70';
+        ? 'bg-cyan-500/10 text-cyan-100 border-cyan-400/45 shadow-[0_0_16px_rgba(34,211,238,0.20)]'
+        : 'bg-gray-900/30 text-gray-300 border-gray-700/70 hover:bg-gray-800/60';
     }
 
     if (variant === 'tool') {
       return active
         ? 'bg-gray-800/70 text-gray-100 border-gray-600'
-        : 'bg-gray-800/40 text-gray-300 border-gray-700 hover:bg-gray-800/70';
+        : 'bg-gray-900/30 text-gray-300 border-gray-700/70 hover:bg-gray-800/60';
     }
 
     // mode
     return active
-      ? 'bg-blue-600 text-white border-blue-400'
-      : 'bg-gray-800/40 text-gray-300 border-gray-700 hover:bg-gray-800/70';
+      ? 'bg-blue-600 text-white border-blue-400 shadow-[0_0_18px_rgba(59,130,246,0.35)]'
+      : 'bg-gray-900/30 text-gray-300 border-gray-700/70 hover:bg-gray-800/60';
   })();
 
   return (
@@ -76,7 +76,7 @@ export const FormationHud: React.FC<FormationHudProps> = ({
 
   return (
     <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[100000] pointer-events-auto">
-      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-950/60 border border-cyan-500/15 shadow-[0_0_20px_rgba(34,211,238,0.12)] backdrop-blur-md">
+      <div className="flex items-center gap-2 px-2.5 py-2 rounded-xl bg-gradient-to-b from-gray-950/70 to-gray-950/45 border border-cyan-500/15 shadow-[0_0_24px_rgba(34,211,238,0.10)] backdrop-blur-md">
         <ModeButton
           variant="toggle"
           active={overlayLayout.hover}
@@ -84,15 +84,15 @@ export const FormationHud: React.FC<FormationHudProps> = ({
           onClick={() => setOverlayLayout((v) => ({ ...v, hover: !v.hover }))}
         />
 
-        <div className="flex items-center rounded-lg border border-gray-800/70 bg-gray-900/30 overflow-hidden">
+        <div className="flex items-center rounded-lg border border-gray-800/70 bg-gray-900/20 overflow-hidden">
           {MODE_ORDER.map(({ mode, label }) => (
             <button
               key={mode}
               onClick={() => setOverlayLayout((v) => ({ ...v, mode }))}
-              className={`px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] transition-all border-r border-gray-800/70 last:border-r-0 ${
+              className={`px-2 py-[5px] text-[9px] font-bold uppercase tracking-[0.22em] leading-none transition-all border-r border-gray-800/70 last:border-r-0 ${
                 overlayLayout.mode === mode
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-gray-800/60'
+                  ? 'bg-blue-600 text-white shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]'
+                  : 'text-gray-300 hover:bg-gray-800/50'
               }`}
             >
               {label}
@@ -131,7 +131,12 @@ export const FormationHud: React.FC<FormationHudProps> = ({
             )}
           </div>
 
-          <ModeButton variant="tool" active={false} label="RECENTER" onClick={onRecenter} />
+          <button
+            onClick={onRecenter}
+            className="px-2 py-[5px] rounded-md border text-[9px] font-bold uppercase tracking-[0.22em] leading-none transition-all select-none bg-cyan-500/10 text-cyan-100 border-cyan-400/40 shadow-[0_0_18px_rgba(34,211,238,0.18)] hover:bg-cyan-500/15"
+          >
+            RECENTER
+          </button>
 
           <ModeButton
             variant="tool"
