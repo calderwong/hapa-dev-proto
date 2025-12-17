@@ -124,3 +124,22 @@
 
 **Tags:** #performance #boot
 **Est. Avg. Human Dev Time:** 20 minutes
+
+## Entry 90 – Overlay Formation HUD redesign + formation centering reliability
+**Prompt:** "OK can you focus on re-designing and cleaning up the top nav now? ... formation feature seems to be a little broken ..." + "remove the target/anchor functionality for now"
+
+**Summary of actions:**
+- Authored a design doc for a compact, glass-plane Formation HUD and a more deterministic formation engine (`Top_Nav_Formation_Redesign.md`).
+- Temporarily removed the portal target/anchor UX (toggle + target picker overlay) to reduce confusion and clunkiness.
+- Fixed formation drift/centering issues by normalizing overlay card coordinates to absolute viewport space (persisting `initialRect.left/top` as 0 and folding offsets into `tx/ty`).
+- Made formation anchoring deterministic (viewport-based anchor + stable Y) and added `RECENTER` + resize recompute support.
+- Extracted the top bar into a dedicated component (`src/components/overlay/FormationHud.tsx`) for a cleaner, more compact glass UI.
+
+**Files modified/created:**
+- Created: `Top_Nav_Formation_Redesign.md`
+- Created: `src/components/overlay/FormationHud.tsx`
+- Modified: `src/components/DragCanvas.tsx`
+- Modified: `src/contexts/DragCanvasContext.tsx`
+
+**Tags:** #feature #ui #overlay #bugfix
+**Est. Avg. Human Dev Time:** 2 hours
