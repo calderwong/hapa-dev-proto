@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { useReactFlow } from 'reactflow';
-import { Plus, Minus, Maximize, Lock, Unlock } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Plus, Minus, Maximize } from 'lucide-react';
 
 const ControlButton = ({
     onClick,
@@ -9,7 +10,7 @@ const ControlButton = ({
     active = false
 }: {
     onClick: () => void;
-    icon: React.ElementType;
+    icon: LucideIcon;
     label: string;
     active?: boolean;
 }) => (
@@ -33,7 +34,6 @@ const ControlButton = ({
 
 const CustomControls: React.FC = () => {
     const { zoomIn, zoomOut, fitView } = useReactFlow();
-    const [isLocked, setIsLocked] = React.useState(false);
 
     // We can't actually lock the viewport easily without controlling the ReactFlow props from here, 
     // but standard controls usually just offer zoom/fit. 

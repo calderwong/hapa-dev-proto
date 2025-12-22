@@ -3,8 +3,6 @@ import PageContainer from '../components/PageContainer';
 // @ts-ignore
 import defaultProtoHtml from '../../docs/features/card_set_battler_proto.html?raw';
 
-const PROTOTYPES_KEY = 'hapa_prototypes';
-
 interface PrototypeEntry {
     id: string;
     title: string;
@@ -215,7 +213,7 @@ const Prototypes: React.FC = () => {
                         />
                         <button
                             onClick={handleGenerate}
-                            disabled={isGenerating || !prompt}
+                            disabled={isGenerating || isLoadingList || !prompt}
                             className={`w-full py-2 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${isGenerating
                                 ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
                                 : 'bg-astro-primary hover:bg-blue-600 text-white shadow-lg shadow-blue-900/50 relative overflow-hidden group'
