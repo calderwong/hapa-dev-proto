@@ -12,21 +12,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import type { CardIndexEntry } from '../types/cardIndexEntry';
 
-// Re-use the existing CardIndexEntry type
-export interface CardIndexEntry {
-  cardId: string;
-  name?: string;
-  thumbnail?: string;
-  mediaKind?: string;
-  createdAt?: string;
-  tier?: number;
-  cardType?: string;
-  cardRecord?: any;
-  raw?: any;
-  mediaRemoteUrl?: string;
-  [key: string]: any;
-}
+export type { CardIndexEntry } from '../types/cardIndexEntry';
 
 export type CardLoadState = 
   | 'skeleton'      // Placeholder shimmer

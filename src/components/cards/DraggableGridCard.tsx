@@ -8,6 +8,8 @@ interface DraggableGridCardProps {
   children: React.ReactNode;
   renderPreview: () => React.ReactNode;
   onClick?: (e: React.MouseEvent) => void;
+  onDragStart?: (e: React.DragEvent) => void;
+  draggable?: boolean;
   className?: string;
   portalColorMode?: PortalColorMode;
 }
@@ -17,6 +19,8 @@ export const DraggableGridCard: React.FC<DraggableGridCardProps> = ({
   children,
   renderPreview,
   onClick,
+  onDragStart,
+  draggable = false,
   className = '',
   portalColorMode,
 }) => {
@@ -33,6 +37,8 @@ export const DraggableGridCard: React.FC<DraggableGridCardProps> = ({
     <div
       {...dragHandlers}
       onClick={onClick}
+      draggable={draggable}
+      onDragStart={onDragStart}
       className={`relative touch-none ${className}`}
     >
       {children}

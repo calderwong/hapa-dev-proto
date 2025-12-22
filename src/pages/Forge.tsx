@@ -4,18 +4,8 @@ import PageContainer from '../components/PageContainer';
 import CardWorkspace from '../components/CardWorkspace';
 import { calculateCardQuality, getTierBadge } from '../utils/cardQuality';
 import { playPickUpSound, playDropSound, playForgeHoverSound } from '../utils/audio';
+import type { CardIndexEntry } from '../types/cardIndexEntry';
 // import { useToast } from '../context/ToastContext';
-
-interface CardIndexEntry {
-    cardId: string;
-    name?: string;
-    createdAt: string;
-    coreName?: string;
-    thumbnail?: string;
-    mediaKind?: 'image' | 'video' | 'audio' | 'message' | 'pet';
-    cardRecord?: any;
-    raw?: any;
-}
 
 // Triad Types
 type TriadPillar = 'love' | 'truth' | 'conviction';
@@ -810,27 +800,89 @@ OUTPUT THE JSON NOW:`;
         try {
             const cardId = inspectingCard.cardId;
             const coreName = inspectingCard.coreName || cardId;
+            const nowIso = new Date().toISOString();
 
             // Fetch latest to get current state
             const records = await window.electronAPI.p2pRead(coreName);
-            let latestRecord: any = {};
-            for (const r of records) {
+            let latestWrapper: any = null;
+            let latestCard: any = null;
+            let wrapperKind: 'card-state' | 'card' | 'raw' = 'raw';
+
+            for (let i = records.length - 1; i >= 0; i--) {
+                const raw = records[i];
+                if (!raw || typeof raw !== 'string') continue;
                 try {
-                    const p = JSON.parse(r);
-                    if (p.type === 'card') latestRecord = p;
+                    const parsed = JSON.parse(raw);
+                    if (parsed?.type === 'card-state' && parsed?.card) {
+                        latestWrapper = parsed;
+                        latestCard = parsed.card;
+                        wrapperKind = 'card-state';
+                        break;
+                    }
+                    if (parsed?.type === 'card') {
+                        latestWrapper = parsed;
+                        latestCard = parsed;
+                        wrapperKind = 'card';
+                        break;
+                    }
+                    if (parsed?.cardId || parsed?.id) {
+                        latestWrapper = parsed;
+                        latestCard = parsed;
+                        wrapperKind = 'raw';
+                        break;
+                    }
                 } catch { }
             }
 
-            const updatedRecord = {
-                ...latestRecord,
-                text: newContent, // Update text content
-                updatedAt: new Date().toISOString()
+            const base = latestCard && typeof latestCard === 'object' ? latestCard : {};
+            const updatedCard: any = {
+                ...base,
+                text: newContent,
+                updatedAt: nowIso,
             };
 
+            if (typeof base?.content !== 'undefined') {
+                updatedCard.content = newContent;
+            }
+
+            if (typeof base?.messageContent !== 'undefined') {
+                updatedCard.messageContent = newContent;
+            }
+
+            const nextAppendRecord = wrapperKind === 'card-state'
+                ? {
+                    ...(latestWrapper && typeof latestWrapper === 'object' ? latestWrapper : {}),
+                    type: 'card-state',
+                    card: updatedCard,
+                    updatedAt: nowIso,
+                }
+                : updatedCard;
+
+            await window.electronAPI.p2pAppend({ name: coreName, data: JSON.stringify(nextAppendRecord) });
+
             await window.electronAPI.p2pAppend({
-                name: coreName,
-                data: JSON.stringify(updatedRecord)
+                name: 'card-library',
+                data: JSON.stringify({
+                    type: 'card-index',
+                    cardId,
+                    name: inspectingCard.name,
+                    createdAt: inspectingCard.createdAt,
+                    updatedAt: nowIso,
+                    coreName,
+                    coreKey: inspectingCard.coreKey,
+                    coreDiscoveryKey: inspectingCard.coreDiscoveryKey,
+                    thumbnail: inspectingCard.thumbnail,
+                    mediaKind: inspectingCard.mediaKind,
+                    mediaLocalPath: inspectingCard.mediaLocalPath,
+                    mediaRemoteUrl: inspectingCard.mediaRemoteUrl,
+                    tier: inspectingCard.tier,
+                    cardType: inspectingCard.cardType,
+                    parentCardId: inspectingCard.parentCardId,
+                    memberOfSets: inspectingCard.memberOfSets,
+                })
             });
+
+            setInspectingCard(prev => prev ? ({ ...prev, cardRecord: updatedCard }) : null);
 
             // Refresh inventory to show update
             loadInventory();
@@ -875,10 +927,16 @@ OUTPUT THE JSON NOW:`;
                      {card.mediaKind === 'video' && (card.mediaLocalPath || card.mediaRemoteUrl) ? (
                         <video 
                             src={card.mediaLocalPath ? `file:///${card.mediaLocalPath.replace(/\\/g, '/')}` : card.mediaRemoteUrl} 
+                            title={card.name ? `Preview video: ${card.name}` : 'Preview video'}
                             autoPlay muted loop className="w-full h-full object-cover opacity-80" 
                         />
                     ) : card.thumbnail || card.mediaRemoteUrl ? (
-                        <img src={card.thumbnail || card.mediaRemoteUrl} className="w-full h-full object-cover opacity-80" />
+                        <img
+                            src={card.thumbnail || card.mediaRemoteUrl}
+                            alt={card.name ? `Preview: ${card.name}` : 'Preview image'}
+                            title={card.name ? `Preview image: ${card.name}` : 'Preview image'}
+                            className="w-full h-full object-cover opacity-80"
+                        />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-600 bg-gray-950">
                             <rux-icon icon="article" size="large"></rux-icon>
@@ -1010,9 +1068,9 @@ OUTPUT THE JSON NOW:`;
                                     {(() => {
                                         const mediaUrl = getCardMediaUrl(item.card);
                                         if (mediaUrl && isVideoMedia(mediaUrl)) {
-                                            return <video src={mediaUrl} className="w-full h-full object-cover" muted />;
+                                            return <video src={mediaUrl} title="Card media" className="w-full h-full object-cover" muted />;
                                         } else if (mediaUrl) {
-                                            return <img src={mediaUrl} className="w-full h-full object-cover" />;
+                                            return <img src={mediaUrl} alt={item.card.name ? `Card media: ${item.card.name}` : 'Card media'} title="Card media" className="w-full h-full object-cover" />;
                                         } else {
                                             return (
                                                 <div className="w-full h-full flex items-center justify-center text-gray-600">
@@ -1041,6 +1099,8 @@ OUTPUT THE JSON NOW:`;
                                 {/* Remove Button */}
                                 <button 
                                     onClick={() => removeFromStack(pillar, item.uid)}
+                                    title="Remove from stack"
+                                    aria-label="Remove from stack"
                                     className="w-6 h-6 rounded hover:bg-red-900/50 text-gray-500 hover:text-red-400 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
                                 >
                                     <rux-icon icon="close" size="small"></rux-icon>
@@ -1069,6 +1129,41 @@ OUTPUT THE JSON NOW:`;
                                 card={adapterForWorkspace(inspectingCard)} 
                                 onClose={() => setInspectingCard(null)}
                                 onSave={handleSaveCardContent}
+                                onUpdate={async () => {
+                                    loadInventory();
+
+                                    if (!window.electronAPI?.p2pRead) return;
+                                    const coreName = inspectingCard.coreName || inspectingCard.cardId;
+
+                                    try {
+                                        const records = await window.electronAPI.p2pRead(coreName);
+                                        let latestCard: any = {};
+
+                                        for (let i = records.length - 1; i >= 0; i--) {
+                                            const raw = records[i];
+                                            if (!raw || typeof raw !== 'string') continue;
+                                            try {
+                                                const parsed = JSON.parse(raw);
+                                                if (parsed?.type === 'card-state' && parsed?.card) {
+                                                    latestCard = parsed.card;
+                                                    break;
+                                                }
+                                                if (parsed?.type === 'card') {
+                                                    latestCard = parsed;
+                                                    break;
+                                                }
+                                                if (parsed?.cardId || parsed?.id) {
+                                                    latestCard = parsed;
+                                                    break;
+                                                }
+                                            } catch { }
+                                        }
+
+                                        setInspectingCard(prev => prev ? ({ ...prev, cardRecord: latestCard }) : null);
+                                    } catch (e) {
+                                        console.error("Failed to refresh workspace card", e);
+                                    }
+                                }}
                             />
                         </div>
                     </div>
@@ -1150,9 +1245,9 @@ OUTPUT THE JSON NOW:`;
                                         {(() => {
                                             const mediaUrl = getCardMediaUrl(card);
                                             if (mediaUrl && isVideoMedia(mediaUrl)) {
-                                                return <video src={mediaUrl} className="w-full h-full object-cover" muted />;
+                                                return <video src={mediaUrl} title="Card media" className="w-full h-full object-cover" muted />;
                                             } else if (mediaUrl) {
-                                                return <img src={mediaUrl} className="w-full h-full object-cover" />;
+                                                return <img src={mediaUrl} alt={card.name ? `Card media: ${card.name}` : 'Card media'} title="Card media" className="w-full h-full object-cover" />;
                                             } else {
                                                 return (
                                                     <div className="w-full h-full flex items-center justify-center">
@@ -1216,6 +1311,8 @@ OUTPUT THE JSON NOW:`;
                                     <select
                                         value={selectedModel}
                                         onChange={(e) => setSelectedModel(e.target.value)}
+                                        aria-label="Model"
+                                        title="Model"
                                         className="appearance-none bg-black/40 border border-purple-500/30 text-purple-300 text-xs font-mono py-2 pl-3 pr-8 rounded uppercase tracking-wider hover:border-purple-500/60 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
                                     >
                                         {availableModels.length > 0 ? (

@@ -23,44 +23,7 @@ import { calculateAllLineage, type LineageInfo } from '../utils/cardLineage';
 import { LineageBadgePair } from '../components/cards/LineageBadge';
 import { useHand } from '../contexts/HandContext';
 import { useMediaDownload } from '../hooks/useMediaDownload';
-
-interface CardIndexEntry {
-    cardId: string;
-    cardType?: 'standard' | 'set' | 'merged-set';  // NEW: Card type
-    name?: string; // Added Name field
-    createdAt: string;
-    threadId?: string;
-    messageId?: string;
-    provider?: string;
-    model?: string;
-    coreName?: string;
-    coreKey?: string;
-    coreDiscoveryKey?: string;
-    thumbnail?: string;
-    raw: any;
-    mediaKind?: 'image' | 'video' | 'audio' | 'message' | 'pet';
-    mediaLocalPath?: string;
-    mediaRemoteUrl?: string;
-    mediaMimeType?: string;
-    subType?: string;
-    tier?: number;
-    // Message card specific fields
-    messageContent?: string;
-    messageRole?: 'user' | 'model';
-    attachmentCount?: number;
-    hasVideo?: boolean;
-    derivedGif?: { localPath: string; cardId: string };
-    cardRecord?: any;
-    // Parent-child relationship
-    parentCardId?: string;
-    // Self-contained relationships (NEW)
-    memberOfSets?: Array<{ setCardId: string; setName?: string; joinedAt: string; addedBy: string }>;
-    // Set Card specific (NEW)
-    containedCards?: Array<{ cardId: string; cardName?: string; addedAt: string; order?: number }>;
-    containedCardCount?: number;
-    skills?: Array<{ id: string; name: string; type: string; description: string; icon?: string }>;
-    description?: string;
-}
+import type { CardIndexEntry } from '../types/cardIndexEntry';
 
 const CARD_LIBRARY_CORE_NAME = 'card-library';
 
@@ -182,6 +145,11 @@ const CardLibrary: React.FC = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [cards, setCards] = useState<CardIndexEntry[]>([]);
+    const [indexHasMore, setIndexHasMore] = useState(false);
+    const [indexCursor, setIndexCursor] = useState<number | undefined>(undefined);
+    const [indexTotalLength, setIndexTotalLength] = useState<number | null>(null);
+    const [isFetchingMore, setIsFetchingMore] = useState(false);
+    const indexMapRef = useRef<Map<string, CardIndexEntry>>(new Map());
     const [selected, setSelected] = useState<CardIndexEntry | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -512,78 +480,74 @@ const CardLibrary: React.FC = () => {
             setLoading(true);
             setError(null);
             setCards([]);
+            setIndexHasMore(false);
+            setIndexCursor(undefined);
+            setIndexTotalLength(null);
+            setIsFetchingMore(false);
+            indexMapRef.current = new Map();
             if (!preferredCardId) {
                 setSelected(null);
             }
 
             try {
-                let cursor: number | undefined = undefined;
-                let hasMore = true;
-                let loadedCount = 0;
                 const settings = api.nexusGetSettings ? await api.nexusGetSettings() : { globalRenderCap: 1000, globalPageSize: 120 };
-                const cap = typeof settings?.globalRenderCap === 'number' ? settings.globalRenderCap : 1000;
                 const pageSize = typeof settings?.globalPageSize === 'number' ? settings.globalPageSize : 120;
-                const parsedMap = new Map<string, CardIndexEntry>();
+                const res = await api.nexusIndexPage({
+                    coreName: CARD_LIBRARY_CORE_NAME,
+                    cursor: undefined,
+                    limit: pageSize,
+                    direction: 'reverse',
+                });
 
-                while (hasMore && loadedCount < cap) {
-                    const res = await api.nexusIndexPage({
-                        coreName: CARD_LIBRARY_CORE_NAME,
-                        cursor,
-                        limit: Math.min(pageSize, cap - loadedCount),
-                        direction: 'reverse',
-                    });
+                const items = Array.isArray(res?.items) ? res.items : [];
+                const nextCursor = typeof res?.nextCursor === 'number' ? res.nextCursor : undefined;
+                const hasMore = !!res?.hasMore;
+                const totalLength = typeof res?.totalLength === 'number' ? res.totalLength : null;
 
-                    const items = Array.isArray(res?.items) ? res.items : [];
-                    cursor = typeof res?.nextCursor === 'number' ? res.nextCursor : undefined;
-                    hasMore = !!res?.hasMore;
+                setIndexCursor(nextCursor);
+                setIndexHasMore(hasMore);
+                setIndexTotalLength(totalLength);
 
-                    if (!items.length) break;
+                const pageEntries: CardIndexEntry[] = items
+                    .map((data: any) => {
+                        const cardId = String(data?.cardId || '');
+                        if (!cardId) return null;
+                        return {
+                            cardId,
+                            name: typeof data?.name === 'string' ? data.name : undefined,
+                            createdAt: typeof data?.createdAt === 'string' ? data.createdAt : '',
+                            coreName: typeof data?.coreName === 'string' ? data.coreName : data?.cardId,
+                            thumbnail: typeof data?.thumbnail === 'string' ? data.thumbnail : undefined,
+                            mediaKind: data?.mediaKind,
+                            mediaLocalPath: typeof data?.mediaLocalPath === 'string' ? data.mediaLocalPath : undefined,
+                            parentCardId: typeof data?.parentCardId === 'string' ? data.parentCardId : undefined,
+                            raw: data,
+                        } as CardIndexEntry;
+                    })
+                    .filter(Boolean) as CardIndexEntry[];
 
-                    const pageEntries: CardIndexEntry[] = items
-                        .map((data: any) => {
-                            const cardId = String(data?.cardId || '');
-                            if (!cardId) return null;
-                            return {
-                                cardId,
-                                name: typeof data?.name === 'string' ? data.name : undefined,
-                                createdAt: typeof data?.createdAt === 'string' ? data.createdAt : '',
-                                coreName: typeof data?.coreName === 'string' ? data.coreName : data?.cardId,
-                                thumbnail: typeof data?.thumbnail === 'string' ? data.thumbnail : undefined,
-                                mediaKind: data?.mediaKind,
-                                mediaLocalPath: typeof data?.mediaLocalPath === 'string' ? data.mediaLocalPath : undefined,
-                                parentCardId: typeof data?.parentCardId === 'string' ? data.parentCardId : undefined,
-                                raw: data,
-                            } as CardIndexEntry;
-                        })
-                        .filter(Boolean) as CardIndexEntry[];
+                for (const e of pageEntries) {
+                    const existing = indexMapRef.current.get(e.cardId);
+                    indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
+                }
 
-                    for (const e of pageEntries) {
-                        const existing = parsedMap.get(e.cardId);
-                        parsedMap.set(e.cardId, existing ? { ...existing, ...e } : e);
+                const pageEnriched = await enrichWithCardRecords(pageEntries);
+                for (const e of pageEnriched) {
+                    const existing = indexMapRef.current.get(e.cardId);
+                    indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
+                }
+
+                const merged = Array.from(indexMapRef.current.values());
+                merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+                setCards(merged);
+
+                const targetId = preferredCardId || (selected && selected.cardId) || null;
+                if (targetId && !selected) {
+                    const match = merged.find((c) => c.cardId === targetId);
+                    if (match) {
+                        setSelected(match);
+                        setEditingName(match.name || '');
                     }
-
-                    const pageEnriched = await enrichWithCardRecords(pageEntries);
-                    for (const e of pageEnriched) {
-                        const existing = parsedMap.get(e.cardId);
-                        parsedMap.set(e.cardId, existing ? { ...existing, ...e } : e);
-                    }
-
-                    loadedCount = parsedMap.size;
-
-                    const merged = Array.from(parsedMap.values());
-                    merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-                    setCards(merged);
-
-                    const targetId = preferredCardId || (selected && selected.cardId) || null;
-                    if (targetId && !selected) {
-                        const match = merged.find((c) => c.cardId === targetId);
-                        if (match) {
-                            setSelected(match);
-                            setEditingName(match.name || '');
-                        }
-                    }
-
-                    await new Promise((r) => setTimeout(r, 0));
                 }
             } catch (e: any) {
                 setError(e?.message || 'Failed to load Card Library');
@@ -683,6 +647,72 @@ const CardLibrary: React.FC = () => {
         loadCards(preferredCardId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [location.search]);
+
+    const requestMoreCards = useCallback(async () => {
+        if (typeof window === 'undefined' || !window.electronAPI) return;
+        const api = (window as any).electronAPI as any;
+        if (!USE_PROGRESSIVE_LOADING || !api?.nexusIndexPage) return;
+        if (isFetchingMore) return;
+        if (!indexHasMore) return;
+
+        try {
+            setIsFetchingMore(true);
+            const settings = api.nexusGetSettings ? await api.nexusGetSettings() : { globalPageSize: 120 };
+            const pageSize = typeof settings?.globalPageSize === 'number' ? settings.globalPageSize : 120;
+            const res = await api.nexusIndexPage({
+                coreName: CARD_LIBRARY_CORE_NAME,
+                cursor: indexCursor,
+                limit: pageSize,
+                direction: 'reverse',
+            });
+
+            const items = Array.isArray(res?.items) ? res.items : [];
+            const nextCursor = typeof res?.nextCursor === 'number' ? res.nextCursor : undefined;
+            const hasMore = !!res?.hasMore;
+            const totalLength = typeof res?.totalLength === 'number' ? res.totalLength : null;
+
+            setIndexCursor(nextCursor);
+            setIndexHasMore(hasMore);
+            setIndexTotalLength(totalLength);
+
+            if (!items.length) return;
+
+            const pageEntries: CardIndexEntry[] = items
+                .map((data: any) => {
+                    const cardId = String(data?.cardId || '');
+                    if (!cardId) return null;
+                    return {
+                        cardId,
+                        name: typeof data?.name === 'string' ? data.name : undefined,
+                        createdAt: typeof data?.createdAt === 'string' ? data.createdAt : '',
+                        coreName: typeof data?.coreName === 'string' ? data.coreName : data?.cardId,
+                        thumbnail: typeof data?.thumbnail === 'string' ? data.thumbnail : undefined,
+                        mediaKind: data?.mediaKind,
+                        mediaLocalPath: typeof data?.mediaLocalPath === 'string' ? data.mediaLocalPath : undefined,
+                        parentCardId: typeof data?.parentCardId === 'string' ? data.parentCardId : undefined,
+                        raw: data,
+                    } as CardIndexEntry;
+                })
+                .filter(Boolean) as CardIndexEntry[];
+
+            for (const e of pageEntries) {
+                const existing = indexMapRef.current.get(e.cardId);
+                indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
+            }
+
+            const pageEnriched = await enrichWithCardRecords(pageEntries);
+            for (const e of pageEnriched) {
+                const existing = indexMapRef.current.get(e.cardId);
+                indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
+            }
+
+            const merged = Array.from(indexMapRef.current.values());
+            merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+            setCards(merged);
+        } finally {
+            setIsFetchingMore(false);
+        }
+    }, [indexCursor, indexHasMore, isFetchingMore]);
 
     useEffect(() => {
         const loadGeminiModels = async () => {
@@ -2343,6 +2373,39 @@ const CardLibrary: React.FC = () => {
             cardRecord: card.cardRecord,
             type: 'card-transfer'
         }));
+
+        if (card.mediaKind === 'pet') {
+            const record: any = card.cardRecord || {};
+            const fallbackPetCard: any = {
+                type: 'pet',
+                id: card.cardId,
+                coreName: card.coreName,
+                name: card.name || record.name || 'Unknown Pet',
+                species: record.species || 'custom',
+                color: record.color || 'black',
+                thumbnail: card.thumbnail || record.thumbnail || '',
+                animations: record.animations || { idle: '' },
+                behavior: record.behavior || { speed: 1, scale: 1, restFrequency: 0.3, playfulness: 0.5 },
+                location: record.location || { zone: 'library', enteredAt: Date.now() },
+                createdAt: record.createdAt || Date.now(),
+                updatedAt: record.updatedAt || Date.now(),
+                version: record.version || 1,
+                capabilities: record.capabilities,
+                activeCapabilityId: record.activeCapabilityId,
+                agentStateAnimations: record.agentStateAnimations,
+            };
+
+            const petDragPayload = JSON.stringify({
+                type: 'pet-card',
+                petId: card.cardId,
+                coreName: card.coreName,
+                sourceZone: 'library',
+                petCard: record && record.type === 'pet' ? record : fallbackPetCard,
+            });
+
+            e.dataTransfer.setData('application/x-pet-card', petDragPayload);
+            e.dataTransfer.setData('text/plain', petDragPayload);
+        }
         e.dataTransfer.effectAllowed = 'copyMove';
     };
 
@@ -2367,21 +2430,124 @@ const CardLibrary: React.FC = () => {
     };
 
     const handleWorkspaceSave = async (newContent: string) => {
-        if (!activeWorkspaceCard || !window.electronAPI?.p2pAppend) return;
+        if (!activeWorkspaceCard || !window.electronAPI?.p2pAppend || !window.electronAPI?.p2pRead) return;
 
-        // In a real implementation, we would append to the 'card-updates' core or similar.
-        // For now, we'll just log it or simulate an append to the card's core if possible.
-        // Since we don't have a specific 'update' schema defined in the backend yet for text content updates 
-        // that propagates back to the card record, we will simulate it by appending a new message 
-        // to the card's specific core if it exists, or just the library index.
-
-        // Let's assume we are updating the 'text' field of the card record.
         try {
-            // This is a placeholder for the actual update logic
-            console.log("Saving content for card:", activeWorkspaceCard.cardId, newContent);
+            const cardId = activeWorkspaceCard.cardId;
+            const coreName = activeWorkspaceCard.coreName || cardId;
+            const nowIso = new Date().toISOString();
 
-            // TODO: Implement actual P2P append logic here
-            // await window.electronAPI.p2pAppend({ ... });
+            const records = await window.electronAPI.p2pRead(coreName);
+
+            let latestWrapper: any = null;
+            let latestCard: any = null;
+            let wrapperKind: 'card-state' | 'card' | 'raw' = 'raw';
+
+            for (let i = records.length - 1; i >= 0; i--) {
+                const raw = records[i];
+                if (!raw || typeof raw !== 'string') continue;
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (parsed?.type === 'card-state' && parsed?.card) {
+                        latestWrapper = parsed;
+                        latestCard = parsed.card;
+                        wrapperKind = 'card-state';
+                        break;
+                    }
+                    if (parsed?.type === 'card') {
+                        latestWrapper = parsed;
+                        latestCard = parsed;
+                        wrapperKind = 'card';
+                        break;
+                    }
+                    if (parsed?.cardId || parsed?.id) {
+                        latestWrapper = parsed;
+                        latestCard = parsed;
+                        wrapperKind = 'raw';
+                        break;
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+
+            const base = latestCard && typeof latestCard === 'object' ? latestCard : {};
+            const updatedCard: any = {
+                ...base,
+                text: newContent,
+                updatedAt: nowIso,
+            };
+
+            if (typeof base?.content !== 'undefined') {
+                updatedCard.content = newContent;
+            }
+
+            if (typeof base?.messageContent !== 'undefined') {
+                updatedCard.messageContent = newContent;
+            }
+
+            const nextAppendRecord = wrapperKind === 'card-state'
+                ? {
+                    ...(latestWrapper && typeof latestWrapper === 'object' ? latestWrapper : {}),
+                    type: 'card-state',
+                    card: updatedCard,
+                    updatedAt: nowIso,
+                }
+                : updatedCard;
+
+            await window.electronAPI.p2pAppend({
+                name: coreName,
+                data: JSON.stringify(nextAppendRecord),
+            });
+
+            await window.electronAPI.p2pAppend({
+                name: CARD_LIBRARY_CORE_NAME,
+                data: JSON.stringify({
+                    type: 'card-index',
+                    cardId,
+                    name: activeWorkspaceCard.name,
+                    createdAt: activeWorkspaceCard.createdAt,
+                    updatedAt: nowIso,
+                    coreName,
+                    coreKey: activeWorkspaceCard.coreKey,
+                    coreDiscoveryKey: activeWorkspaceCard.coreDiscoveryKey,
+                    thumbnail: activeWorkspaceCard.thumbnail,
+                    mediaKind: activeWorkspaceCard.mediaKind,
+                    mediaLocalPath: activeWorkspaceCard.mediaLocalPath,
+                    mediaRemoteUrl: activeWorkspaceCard.mediaRemoteUrl,
+                    tier: activeWorkspaceCard.tier,
+                    cardType: activeWorkspaceCard.cardType,
+                    parentCardId: activeWorkspaceCard.parentCardId,
+                    memberOfSets: activeWorkspaceCard.memberOfSets,
+                }),
+            });
+
+            try {
+                const refreshed = await window.electronAPI.p2pRead(coreName);
+                let latest: any = null;
+                for (let i = refreshed.length - 1; i >= 0; i--) {
+                    const raw = refreshed[i];
+                    if (!raw || typeof raw !== 'string') continue;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        if (parsed?.type === 'card-state' && parsed?.card) {
+                            latest = parsed.card;
+                            break;
+                        }
+                        if (parsed?.type === 'card') {
+                            latest = parsed;
+                            break;
+                        }
+                    } catch {
+                        // ignore
+                    }
+                }
+                setActiveWorkspaceCard(prev => prev ? ({ ...prev, cardRecord: latest || prev.cardRecord }) : null);
+            } catch {
+                // ignore
+            }
+
+            loadCards();
         } catch (e) {
             console.error("Failed to save workspace changes", e);
         }
@@ -2507,6 +2673,14 @@ const CardLibrary: React.FC = () => {
                                 if (!window.electronAPI?.pipelineRecoverCards) return;
                                 try {
                                     setLoading(true);
+
+                                    try {
+                                        const stats = await window.electronAPI.getSystemStats?.();
+                                        console.log('[Recover] SystemStats', stats);
+                                    } catch (e) {
+                                        console.log('[Recover] SystemStats unavailable', e);
+                                    }
+
                                     // Run orphaned card recovery
                                     const result = await window.electronAPI.pipelineRecoverCards();
                                     console.log('[Recovery]', result);
@@ -2799,6 +2973,8 @@ const CardLibrary: React.FC = () => {
                                 getPortalColorMode={(card) => (card?.provider === 'revid' ? 'red' : 'blue')}
                                 selectedCardId={selected?.cardId}
                                 className="flex-1 pb-10"
+                                onRequestMore={requestMoreCards}
+                                isFetchingMore={isFetchingMore}
                                 renderCard={(card) => {
                                     const quality = calculateCardQuality(card);
                                     const isSetCard = card.cardType === 'set';

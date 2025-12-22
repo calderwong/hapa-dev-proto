@@ -41,12 +41,16 @@ export function useGlobalDrag(options: UseGlobalDragOptions) {
       if (pointerId !== undefined && ev.pointerId !== pointerId) return;
       if (didSpawn) return;
 
+      // If the button is no longer pressed, don't treat this as a drag intent.
+      if (typeof (ev as any).buttons === 'number' && (ev as any).buttons === 0) return;
+
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
       const dist = Math.hypot(dx, dy);
 
-      // Small threshold so click does not spawn an overlay item.
-      if (dist < 6) return;
+      // Threshold so click does not spawn an overlay item.
+      // Trackpads/mice often report tiny movement on click; keep this forgiving.
+      if (dist < 14) return;
 
       didSpawn = true;
 
@@ -90,10 +94,6 @@ export function useGlobalDrag(options: UseGlobalDragOptions) {
   return {
     dragHandlers: {
       onPointerDown: handlePointerDown,
-      onDragStart: (e: React.DragEvent) => {
-        e.preventDefault();
-        return false;
-      }
     }
   };
 }

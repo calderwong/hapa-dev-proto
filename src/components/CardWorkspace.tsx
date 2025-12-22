@@ -42,6 +42,13 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
     // Check if this is a sprite-animation card (can have audio)
     const isSpriteAnimation = card.data?.subType === 'sprite-animation' || card.subType === 'sprite-animation';
 
+    const emitUpdate = () => {
+        try {
+            window.dispatchEvent(new CustomEvent('hapa.cardWorkspace.updated', { detail: { id: card?.id, coreName: card?.coreName || card?.id } }));
+        } catch {
+        }
+    };
+
     // Initialize versions (simulated for now, would fetch from P2P in real app)
     useEffect(() => {
         setVersions([
@@ -68,6 +75,9 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
             setOriginalContent(content);
             setActiveVersionId(newVersion.id);
             setIsEditing(false);
+
+            emitUpdate();
+            if (onUpdate) onUpdate();
         } catch (error) {
             console.error("Failed to save:", error);
         } finally {
@@ -122,6 +132,7 @@ const CardWorkspace: React.FC<CardWorkspaceProps> = ({ card, onClose, onSave, on
         // Or just alert/toast.
         // Since we don't have a refresh prop, we rely on the parent re-rendering or polling.
         
+        emitUpdate();
         if (onUpdate) onUpdate();
     };
 
@@ -731,6 +742,7 @@ USER REQUEST: {{USER_PROMPT}}`;
                         {card.type === 'image' && (
                             <SecondaryButton 
                                 onClick={() => setShowSpriteConverter(!showSpriteConverter)}
+                                title={showSpriteConverter ? 'Close GIF maker' : 'Make GIF'}
                                 className={showSpriteConverter ? "border-cyan-500 text-cyan-400" : ""}
                             >
                                 <rux-icon icon={showSpriteConverter ? "close" : "animation"} size="small" className="mr-2"></rux-icon>
@@ -743,7 +755,12 @@ USER REQUEST: {{USER_PROMPT}}`;
                                 {isEditing ? "PREVIEW" : "EDIT"}
                             </SecondaryButton>
                         )}
-                        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white">
+                        <button
+                            onClick={onClose}
+                            title="Close"
+                            aria-label="Close"
+                            className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white"
+                        >
                             <rux-icon icon="close" size="small"></rux-icon>
                         </button>
                     </div>
