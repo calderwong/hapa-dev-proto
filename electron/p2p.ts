@@ -4,6 +4,8 @@ import * as b4a from 'b4a';
 import * as path from 'path';
 import * as fs from 'fs';
 
+import { emitCardDeleted, emitCardEvent } from './persistence';
+
 const cores = new Map<string, any>();
 let swarm: any;
 let swarmInitialized = false;
@@ -141,6 +143,56 @@ export async function appendToCore(name: string, data: string) {
         const msg = err?.message || String(err);
         throw new Error(`[appendToCore] Failed (core=${name}, storageDir=${storageDir}, code=${code}): ${msg}`);
     }
+
+    // Project card-library index updates into local persistence.
+    // This runs at the Hypercore append layer so pipeline/recovery writes are captured.
+    try {
+        if (name === 'card-library' && typeof data === 'string' && data.trim().length > 0) {
+            let parsed: any = null;
+            try {
+                parsed = JSON.parse(data);
+            } catch {
+                parsed = null;
+            }
+
+            if (parsed && (parsed.type === 'card-index' || parsed.cardId || parsed.coreName)) {
+                const id = String(parsed.cardId || parsed.coreName || '').trim();
+                if (id) {
+                    const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
+                    if (deleted) {
+                        await emitCardDeleted({
+                            id,
+                            deletedAt: parsed.deletedAt || new Date().toISOString(),
+                        } as any);
+                    } else {
+                        await emitCardEvent('CARD_CREATED', {
+                            id,
+                            type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
+                            mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                            name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                            tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
+                            hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
+                            parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                            createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
+                            metadata: {
+                                coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
+                                thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
+                                mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
+                                parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                                mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                                name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                                createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+                                updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+                            },
+                        } as any);
+                    }
+                }
+            }
+        }
+    } catch {
+        // ignore
+    }
+
     return { length: core.length };
 }
 

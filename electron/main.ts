@@ -29,8 +29,6 @@ import {
 import {
   initPersistence,
   getPersistence,
-  emitCardEvent,
-  emitCardDeleted,
   getPersistenceMetaValue,
   setPersistenceMetaValue
 } from './persistence';
@@ -7219,58 +7217,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       _event,
       { name, data }: { name: string; data: string },
     ) => {
-      const res = await appendToCore(name, data);
-
-      // Project card-library index updates into local persistence.
-      // This makes the local node DB the durable "seen cards" ledger.
-      try {
-        if (name === CARD_LIBRARY_CORE_NAME && typeof data === 'string' && data.trim().length > 0) {
-          let parsed: any = null;
-          try {
-            parsed = JSON.parse(data);
-          } catch {
-            parsed = null;
-          }
-
-          if (parsed && (parsed.type === 'card-index' || parsed.cardId || parsed.coreName)) {
-            const id = String(parsed.cardId || parsed.coreName || '').trim();
-            if (id) {
-              const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
-              if (deleted) {
-                await emitCardDeleted({
-                  id,
-                  deletedAt: parsed.deletedAt || new Date().toISOString(),
-                } as any);
-              } else {
-                await emitCardEvent('CARD_CREATED', {
-                  id,
-                  type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
-                  mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-                  name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                  tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
-                  hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
-                  parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-                  createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
-                  metadata: {
-                    coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
-                    thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
-                    mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
-                    parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-                    mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-                    name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                    createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
-                    updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
-                  },
-                } as any);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[p2p-append] Persistence projection failed:', (err as any)?.message || err);
-      }
-
-      return res;
+      return appendToCore(name, data);
     },
   );
 
@@ -7881,95 +7828,95 @@ app.on('ready', async () => {
     }
 
     try {
-      initPersistence().catch((err) => {
-        console.error('[Persistence] Init error:', err);
-      });
-    } catch (err) {
-      console.error('[Persistence] Init error:', err);
-    }
-
-    // After persistence is initialized, reconcile card-library index entries into SQLite.
-    // This makes the local DB a durable "seen cards" ledger and enables DB-first paging.
-    setTimeout(() => {
-      try {
-        const adapter: any = getPersistence();
-        if (!adapter || !adapter.isReady || !adapter.isReady()) return;
-
-        const checkpointKey = 'card_library_index_last_seq';
-        const lastSeqStr = getPersistenceMetaValue(checkpointKey);
-        const lastSeq = lastSeqStr ? Number.parseInt(lastSeqStr, 10) : 0;
-        const start = Number.isFinite(lastSeq) && lastSeq > 0 ? lastSeq : 0;
-
-        getCoreLength(CARD_LIBRARY_CORE_NAME)
-          .then(async (len) => {
-            const end = typeof len === 'number' ? len : 0;
-            if (end <= start) return;
-
-            const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start, end });
-            if (!Array.isArray(blocks) || blocks.length === 0) {
-              setPersistenceMetaValue(checkpointKey, String(end));
-              return;
-            }
-
-            for (const raw of blocks) {
-              if (!raw || typeof raw !== 'string') continue;
-              let parsed: any = null;
-              try {
-                parsed = JSON.parse(raw);
-              } catch {
-                parsed = null;
-              }
-
-              if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
-
-              const id = String(parsed.cardId || parsed.coreName || '').trim();
-              if (!id) continue;
-
-              const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
-              if (deleted) {
-                await emitCardDeleted({
-                  id,
-                  deletedAt: parsed.deletedAt || new Date().toISOString(),
-                } as any);
-              } else {
-                await emitCardEvent('CARD_CREATED', {
-                  id,
-                  type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
-                  mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-                  name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                  tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
-                  hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
-                  parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-                  createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
-                  metadata: {
-                    coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
-                    thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
-                    mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
-                    parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-                    mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-                    name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                    createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
-                    updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
-                  },
-                } as any);
-              }
-            }
-
-            setPersistenceMetaValue(checkpointKey, String(end));
-          })
-          .catch((err) => {
-            console.warn('[Persistence] card-library reconcile failed:', err);
-          });
-      } catch (err) {
-        // ignore
-      }
-    }, 0);
-
-    try {
       initP2P();
     } catch (err) {
       console.error('[P2P] Init error:', err);
     }
+
+    // Initialize persistence and then reconcile card-library index entries into SQLite.
+    // Ordering matters: P2P must be initialized before we can open/read Hypercores.
+    initPersistence()
+      .then(async () => {
+        try {
+          const adapter: any = getPersistence();
+          if (!adapter || !adapter.isReady || !adapter.isReady()) return;
+
+          const checkpointKey = 'card_library_index_last_seq';
+          const lastSeqStr = getPersistenceMetaValue(checkpointKey);
+          const lastSeq = lastSeqStr ? Number.parseInt(lastSeqStr, 10) : 0;
+          const start = Number.isFinite(lastSeq) && lastSeq > 0 ? lastSeq : 0;
+
+          const len = await getCoreLength(CARD_LIBRARY_CORE_NAME);
+          const end = typeof len === 'number' ? len : 0;
+          if (end <= start) return;
+
+          // readCore will lazily open/create the core now that P2P is initialized.
+          await readCore(CARD_LIBRARY_CORE_NAME, { start, end });
+
+          // The actual projection is done inside appendToCore for new writes.
+          // For existing historical blocks, we need to re-append to persistence;
+          // simplest approach is to replay blocks through the p2p layer's projection
+          // by parsing and emitting events here.
+          const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start, end });
+          if (!Array.isArray(blocks)) {
+            setPersistenceMetaValue(checkpointKey, String(end));
+            return;
+          }
+
+          for (const raw of blocks) {
+            if (!raw || typeof raw !== 'string') continue;
+            let parsed: any = null;
+            try {
+              parsed = JSON.parse(raw);
+            } catch {
+              parsed = null;
+            }
+
+            if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
+
+            // Emit via persistence functions indirectly by calling appendToCore projection?
+            // Since projection logic lives in appendToCore for new appends only, we emit here
+            // by reusing the same persistence entrypoints via dynamic import.
+            const id = String(parsed.cardId || parsed.coreName || '').trim();
+            if (!id) continue;
+
+            const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
+            if (deleted) {
+              const { emitCardDeleted } = await import('./persistence');
+              await emitCardDeleted({ id, deletedAt: parsed.deletedAt || new Date().toISOString() } as any);
+            } else {
+              const { emitCardEvent } = await import('./persistence');
+              await emitCardEvent('CARD_CREATED', {
+                id,
+                type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
+                mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
+                hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
+                parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
+                metadata: {
+                  coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
+                  thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
+                  mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
+                  parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                  mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                  name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                  createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+                  updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+                },
+              } as any);
+            }
+          }
+
+          setPersistenceMetaValue(checkpointKey, String(end));
+        } catch (err) {
+          console.warn('[Persistence] card-library reconcile failed:', err);
+        }
+      })
+      .catch((err) => {
+        console.error('[Persistence] Init error:', err);
+      });
   }, 0);
 
   app.on('activate', () => {
