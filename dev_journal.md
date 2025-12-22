@@ -1725,3 +1725,23 @@
 
 **Tags:** #bugfix #react #overlay
 **Est. Avg. Human Dev Time:** 45 minutes
+
+## Entry 170 – Bugfix: hook-order crash on floating-card click (details panel)
+**Prompt:** "still crashing when clicking on a floating card"
+
+**Summary of actions:**
+- Fixed a Rules-of-Hooks violation in `AttachedOverlayCardDetails.tsx`.
+- Root cause: component had an early `return null` (`if (!item || !panelPos) return null;`) *before* later hook calls (`useCallback`/`useMemo`). When selecting/deselecting a floating card, React would render a different number of hooks and crash.
+- Refactor:
+  - Always execute hooks, using safe defaults when no item is selected.
+  - Only `return null` at the end via `shouldRender`.
+
+**Verification:**
+- `npm run typecheck` and `npm test` passing.
+
+**Files modified/created:**
+- Modified: `src/components/cards/AttachedOverlayCardDetails.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #react #overlay
+**Est. Avg. Human Dev Time:** 15 minutes
