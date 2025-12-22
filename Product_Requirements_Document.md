@@ -19,6 +19,7 @@ Goals:
 ### 2.4 Multi-provider Chat & Audio Modes
 - Allow the user to configure multiple LLM providers (at minimum Google Gemini and OpenAI) via Settings.
 - In the chat UI, allow selection of provider family (Gemini vs OpenAI) and model within that family.
+- When a Phamiliar (pet) is set active, the chat UI should reflect the pet's active capability by automatically selecting the corresponding provider/model.
 - Support multi-modal messages (text + images + audio) with provider-specific formatting handled in the Electron main process.
 - Provide an admin-only setting to control audio handling mode ("transcribe first" vs a future "realtime" mode stub) stored locally and applied consistently across providers.
 
@@ -96,6 +97,12 @@ Planned future work:
 - Persist each Location as a Hypercore-backed append-only ledger of placements.
 - Append to each card’s own Hypercore journal recording placements and outcomes.
 - Allow Location behavior/effects to be influenced by stacked card attributes/skills/canon, evaluated in priority order.
+
+### 2.8.1 Overlay Formations & Card Details (UX)
+- Provide a cockpit-style formation controller for overlay cards (ring/square/rect formations plus existing modes), with a draggable HUD.
+- The formation HUD should support a depth (z-axis) affordance so it can feel like a floating UI object.
+- When an overlay card is selected, its Card Details panel should visually attach to the card and move with it while the card is repositioned.
+- Card Details should be compact and show richer metadata when available (skills, lore, desires).
 
 ### 2.9 3D Nexus (Card Constellation Viewer)
 - **Top-level route** (`/nexus`) accessible from the sidebar and deep-linkable from Chat, Wiki, and Card Library.

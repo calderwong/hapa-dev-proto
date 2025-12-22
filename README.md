@@ -199,10 +199,16 @@ npm run lint
 
 - **Testing**
 
-Tests are not yet set up. Recommended next steps:
+Unit tests are intentionally lightweight and use Node's built-in test runner.
 
-- Add unit tests for critical logic (IPC handlers, P2P helpers, Firebase initialization).
-- Add component tests for the Chat and P2P pages.
+```bash
+npm test
+```
+
+Notes:
+
+- The `test` script runs `node --test tests`.
+- Keep tests pure (no network, no Electron runtime) unless explicitly writing an integration smoke test.
 
 ---
 
