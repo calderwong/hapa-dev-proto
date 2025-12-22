@@ -1698,3 +1698,30 @@
 
 **Tags:** #bugfix #electron #aimlapi
 **Est. Avg. Human Dev Time:** 10 minutes
+
+## Entry 169 – Bugfix: prevent React hook-order crash when dragging/clicking overlay cards
+**Prompt:** "crashing when trying to click/move a card"
+
+**Summary of actions:**
+- Fixed the runtime error: `Rendered more hooks than during the previous render` triggered by overlay card interactions.
+- Root cause: overlay items stored a `render(data)` function and `FloatingCard` invoked it directly (`item.render(item.data)`), which can accidentally execute hook-using components as plain functions.
+- Refactored overlay rendering so `render` is a component type and is rendered via JSX.
+  - `DragCanvasContext.tsx`: `DragItem.render` is now `React.ComponentType<{ data: any }>`; updated persisted fallback renderer.
+  - `FloatingCard.tsx`: renders with `<Render data={item.data} />`.
+  - Updated call sites to pass component renderers (hand cards, library grid cards, and global drag).
+
+**Verification:**
+- `npm run typecheck` and `npm test` passing.
+
+**Files modified/created:**
+- Modified: `src/contexts/DragCanvasContext.tsx`
+- Modified: `src/hooks/useGlobalDrag.ts`
+- Modified: `src/components/cards/FloatingCard.tsx`
+- Modified: `src/components/cards/DraggableGridCard.tsx`
+- Modified: `src/components/cards/VirtualCardGrid.tsx`
+- Modified: `src/components/cards/DraggableHandCard.tsx`
+- Modified: `src/components/cards/CardHand.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #react #overlay
+**Est. Avg. Human Dev Time:** 45 minutes
