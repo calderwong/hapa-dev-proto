@@ -107,6 +107,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(800);
   const requestMoreLockRef = useRef(false);
+  const resumeTimeoutRef = useRef<number | null>(null);
   const [measuredColumns, setMeasuredColumns] = useState(columns);
   const effectiveColumns = Math.max(1, measuredColumns || columns || 1);
   
@@ -181,10 +182,26 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
     
     // Pause reveals during scroll, resume after
     pauseReveals();
-    // Debounced resume
-    const timeoutId = setTimeout(() => resumeReveals(), 150);
-    return () => clearTimeout(timeoutId);
+
+    if (resumeTimeoutRef.current !== null) {
+      window.clearTimeout(resumeTimeoutRef.current);
+      resumeTimeoutRef.current = null;
+    }
+
+    resumeTimeoutRef.current = window.setTimeout(() => {
+      resumeTimeoutRef.current = null;
+      resumeReveals();
+    }, 150);
   }, [pauseReveals, resumeReveals]);
+
+  useEffect(() => {
+    return () => {
+      if (resumeTimeoutRef.current !== null) {
+        window.clearTimeout(resumeTimeoutRef.current);
+        resumeTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (isFetchingMore) return;
@@ -239,6 +256,23 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
     
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const maxScrollTop = Math.max(0, totalHeight - containerHeight);
+    const actualScrollTop = container.scrollTop;
+    const next = Math.max(0, Math.min(actualScrollTop, maxScrollTop));
+
+    if (actualScrollTop !== next) {
+      container.scrollTop = next;
+    }
+
+    if (scrollTop !== next) {
+      setScrollTop(next);
+    }
+  }, [containerHeight, scrollTop, totalHeight]);
   
   // Get visible cards to render
   const visibleCards = useMemo(() => {
