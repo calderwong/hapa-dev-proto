@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"npm run electron\"",
     "electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && electron .",
+    "stress:memory": "cross-env HAPA_STRESS_MEMORY=1 HAPA_STRESS_HEADLESS=1 tsc -p electron/tsconfig.json && electron . --stress-memory --stress-headless",
     "build": "tsc -b && vite build && tsc -p electron/tsconfig.json && electron-builder",
     "lint": "eslint .",
     "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "test:openai": "node scripts/test-openai-chat.js",
     "test:gemini": "node scripts/test-gemini-chat.js"
   },
