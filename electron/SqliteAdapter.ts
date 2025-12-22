@@ -46,12 +46,18 @@ CREATE TABLE IF NOT EXISTS cards (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL DEFAULT 'standard',
   media_kind TEXT,
+  core_name TEXT,
   name TEXT,
   tier INTEGER,
   hellweek_run_id TEXT,
   parent_id TEXT,
+  thumbnail TEXT,
+  media_local_path TEXT,
   lore TEXT,
   content_text TEXT,
+  is_deleted INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT,
+  last_seen_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   metadata_json TEXT
@@ -62,6 +68,8 @@ CREATE INDEX IF NOT EXISTS idx_cards_parent ON cards(parent_id);
 CREATE INDEX IF NOT EXISTS idx_cards_run ON cards(hellweek_run_id);
 CREATE INDEX IF NOT EXISTS idx_cards_tier ON cards(tier);
 CREATE INDEX IF NOT EXISTS idx_cards_created ON cards(created_at);
+CREATE INDEX IF NOT EXISTS idx_cards_deleted ON cards(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_cards_last_seen ON cards(last_seen_at);
 
 -- ============================================================
 -- Full-Text Search for Cards
@@ -162,6 +170,8 @@ export class SqliteAdapter implements PersistenceAdapter {
     
     // Run schema
     this.db.exec(SCHEMA_SQL);
+
+    this.ensureCardsSchema();
     
     // Check if we need to rebuild
     const storedVersion = await this.getProjectionVersion();
@@ -173,6 +183,30 @@ export class SqliteAdapter implements PersistenceAdapter {
     
     this.ready = true;
     console.log(`[SqliteAdapter] Initialized at ${this.dbPath}`);
+  }
+
+  private ensureCardsSchema(): void {
+    if (!this.db) return;
+
+    const cols = new Set(
+      (this.db.prepare(`PRAGMA table_info(cards)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+
+    const ensureCol = (name: string, sqlType: string) => {
+      if (cols.has(name)) return;
+      this.db!.exec(`ALTER TABLE cards ADD COLUMN ${name} ${sqlType}`);
+      cols.add(name);
+    };
+
+    ensureCol('core_name', 'TEXT');
+    ensureCol('thumbnail', 'TEXT');
+    ensureCol('media_local_path', 'TEXT');
+    ensureCol('is_deleted', 'INTEGER NOT NULL DEFAULT 0');
+    ensureCol('deleted_at', 'TEXT');
+    ensureCol('last_seen_at', 'TEXT');
+
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_cards_deleted ON cards(is_deleted)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_cards_last_seen ON cards(last_seen_at)`);
   }
 
   async close(): Promise<void> {
@@ -230,37 +264,58 @@ export class SqliteAdapter implements PersistenceAdapter {
   private handleCardCreated(payload: CardCreatedPayload): void {
     if (!this.db) return;
     
-    const metadataJson = JSON.stringify(payload.metadata ?? {});
-    const now = payload.createdAt || new Date().toISOString();
+    const metadata = payload.metadata ?? {};
+    const metadataJson = JSON.stringify(metadata);
+    const createdAt = payload.createdAt || new Date().toISOString();
+    const updatedAt = (payload as any).updatedAt || createdAt;
+
+    const coreName = (metadata as any)?.coreName ? String((metadata as any).coreName) : null;
+    const thumbnail = (metadata as any)?.thumbnail ? String((metadata as any).thumbnail) : null;
+    const mediaLocalPath = (metadata as any)?.mediaLocalPath ? String((metadata as any).mediaLocalPath) : null;
+    const lastSeenAt = new Date().toISOString();
     
     // Upsert into cards
     this.db.prepare(`
-      INSERT INTO cards (id, type, media_kind, name, tier, hellweek_run_id, 
-                         parent_id, lore, content_text, created_at, updated_at, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO cards (id, type, media_kind, core_name, name, tier, hellweek_run_id,
+                         parent_id, thumbnail, media_local_path, lore, content_text,
+                         is_deleted, deleted_at, last_seen_at,
+                         created_at, updated_at, metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         type = excluded.type,
         media_kind = excluded.media_kind,
+        core_name = COALESCE(excluded.core_name, cards.core_name),
         name = excluded.name,
         tier = excluded.tier,
         hellweek_run_id = excluded.hellweek_run_id,
         parent_id = excluded.parent_id,
+        thumbnail = COALESCE(excluded.thumbnail, cards.thumbnail),
+        media_local_path = COALESCE(excluded.media_local_path, cards.media_local_path),
         lore = excluded.lore,
         content_text = excluded.content_text,
+        is_deleted = 0,
+        deleted_at = NULL,
+        last_seen_at = excluded.last_seen_at,
         updated_at = excluded.updated_at,
         metadata_json = excluded.metadata_json
     `).run(
       payload.id,
       payload.type || 'standard',
       payload.mediaKind || null,
+      coreName,
       payload.name || null,
       payload.tier || null,
       payload.hellweekRunId || null,
       payload.parentId || null,
+      thumbnail,
+      mediaLocalPath,
       payload.lore || null,
       payload.contentText || null,
-      now,
-      now,
+      0,
+      null,
+      lastSeenAt,
+      createdAt,
+      updatedAt,
       metadataJson
     );
 
@@ -281,7 +336,7 @@ export class SqliteAdapter implements PersistenceAdapter {
     // Reuse create logic (upsert)
     this.handleCardCreated({
       ...payload,
-      createdAt: payload.updatedAt,
+      createdAt: payload.createdAt || payload.updatedAt,
     } as CardCreatedPayload);
   }
 
@@ -291,7 +346,29 @@ export class SqliteAdapter implements PersistenceAdapter {
     const id = payload?.id;
     if (!id) return;
 
-    this.db.prepare(`DELETE FROM cards WHERE id = ?`).run(id);
+    const deletedAt = payload?.deletedAt || new Date().toISOString();
+    const updatedAt = new Date().toISOString();
+
+    // Tombstone semantics: do not hard-delete cards.
+    // If the card does not exist yet in the DB, create a stub tombstone row.
+    this.db.prepare(`
+      INSERT INTO cards (
+        id,
+        type,
+        is_deleted,
+        deleted_at,
+        last_seen_at,
+        created_at,
+        updated_at,
+        metadata_json
+      ) VALUES (?, 'standard', 1, ?, ?, ?, ?, '{}')
+      ON CONFLICT(id) DO UPDATE SET
+        is_deleted = 1,
+        deleted_at = excluded.deleted_at,
+        last_seen_at = excluded.last_seen_at,
+        updated_at = excluded.updated_at
+    `).run(id, deletedAt, updatedAt, updatedAt, updatedAt);
+
     this.db.prepare(`DELETE FROM card_fts WHERE id = ?`).run(id);
   }
 
@@ -384,6 +461,7 @@ export class SqliteAdapter implements PersistenceAdapter {
       FROM card_fts
       JOIN cards c ON c.id = card_fts.id
       WHERE card_fts MATCH ?
+        AND c.is_deleted = 0
     `;
     
     const params: unknown[] = [ftsQuery];
@@ -433,7 +511,7 @@ export class SqliteAdapter implements PersistenceAdapter {
   ): CardSearchResult[] {
     if (!this.db) return [];
     
-    let sql = `SELECT id, type, name, tier, metadata_json FROM cards WHERE 1=1`;
+    let sql = `SELECT id, type, name, tier, metadata_json FROM cards WHERE is_deleted = 0`;
     const params: unknown[] = [];
     
     if (filters?.cardType) {
@@ -644,7 +722,7 @@ export class SqliteAdapter implements PersistenceAdapter {
   async getStats(): Promise<ProjectionStats> {
     if (!this.db) throw new Error('Database not initialized');
     
-    const cardCount = (this.db.prepare(`SELECT COUNT(*) as c FROM cards`).get() as any).c;
+    const cardCount = (this.db.prepare(`SELECT COUNT(*) as c FROM cards WHERE is_deleted = 0`).get() as any).c;
     const wikiNodeCount = (this.db.prepare(`SELECT COUNT(*) as c FROM wiki_nodes`).get() as any).c;
     const wikiEdgeCount = (this.db.prepare(`SELECT COUNT(*) as c FROM wiki_edges`).get() as any).c;
     const embeddingCount = (this.db.prepare(`SELECT COUNT(*) as c FROM embeddings`).get() as any).c;
@@ -669,6 +747,74 @@ export class SqliteAdapter implements PersistenceAdapter {
       projectionVersion: version || 0,
       lastUpdated: new Date().toISOString(),
     };
+  }
+
+  getMetaValue(key: string): string | null {
+    if (!this.db) return null;
+    const k = String(key || '').trim();
+    if (!k) return null;
+    const row = this.db
+      .prepare(`SELECT value FROM projection_meta WHERE key = ?`)
+      .get(k) as { value: string } | undefined;
+    return row ? row.value : null;
+  }
+
+  setMetaValue(key: string, value: string): void {
+    if (!this.db) return;
+    const k = String(key || '').trim();
+    if (!k) return;
+    const v = value == null ? '' : String(value);
+    this.db
+      .prepare(
+        `INSERT INTO projection_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(k, v);
+  }
+
+  listIndexPage(params: { offset: number; limit: number }): { items: any[]; total: number } {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const limit = Math.max(1, Math.min(500, Number.isFinite(params?.limit) ? params.limit : 120));
+    const offset = Math.max(0, Number.isFinite(params?.offset) ? params.offset : 0);
+
+    const total = (this.db.prepare(`SELECT COUNT(*) as c FROM cards WHERE is_deleted = 0`).get() as any).c as number;
+
+    const rows = this.db
+      .prepare(
+        `SELECT id, type, media_kind, core_name, name, thumbnail, media_local_path, parent_id, created_at, updated_at, metadata_json
+         FROM cards
+         WHERE is_deleted = 0
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(limit, offset) as any[];
+
+    const items = rows.map((row) => {
+      let meta: any = {};
+      try {
+        meta = row.metadata_json ? JSON.parse(row.metadata_json) : {};
+      } catch {
+        meta = {};
+      }
+
+      const cardId = String(row.id);
+      const coreName = row.core_name ? String(row.core_name) : meta?.coreName ? String(meta.coreName) : cardId;
+
+      return {
+        cardId,
+        coreName,
+        name: row.name || meta?.name,
+        mediaKind: row.media_kind || meta?.mediaKind,
+        thumbnail: row.thumbnail || meta?.thumbnail,
+        mediaLocalPath: row.media_local_path || meta?.mediaLocalPath,
+        parentCardId: row.parent_id || meta?.parentCardId,
+        createdAt: row.created_at || meta?.createdAt,
+        updatedAt: row.updated_at || meta?.updatedAt,
+        cardType: row.type || meta?.cardType,
+      };
+    });
+
+    return { items, total };
   }
 }
 

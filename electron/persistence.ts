@@ -73,6 +73,28 @@ export function getPersistence(): SqliteAdapter | null {
   return adapter;
 }
 
+export function getPersistenceMetaValue(key: string): string | null {
+  const a = adapter as any;
+  if (!a || !a.isReady()) return null;
+  if (typeof a.getMetaValue !== 'function') return null;
+  try {
+    return a.getMetaValue(key);
+  } catch {
+    return null;
+  }
+}
+
+export function setPersistenceMetaValue(key: string, value: string): void {
+  const a = adapter as any;
+  if (!a || !a.isReady()) return;
+  if (typeof a.setMetaValue !== 'function') return;
+  try {
+    a.setMetaValue(key, value);
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * Check if persistence is ready.
  */
