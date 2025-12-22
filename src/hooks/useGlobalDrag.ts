@@ -6,7 +6,7 @@ interface UseGlobalDragOptions {
   id: string;
   type: string;
   data: any;
-  render: (data: any) => React.ReactNode;
+  render: React.ComponentType<{ data: any }>;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onClick?: (e: React.MouseEvent | React.PointerEvent | PointerEvent) => void; // Pass through click

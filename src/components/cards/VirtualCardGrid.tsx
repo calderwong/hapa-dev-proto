@@ -281,33 +281,39 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
             style={{ transform: `translateY(${visibleRange.offsetY}px)` }}
             ref={gridRef}
           >
-            {visibleCards.map(({ card, queued, index }) => (
-              <CardWithReveal
-                key={card.cardId}
-                queuedCard={queued}
-                card={queued.data}
-                onPrioritize={() => prioritizeCard(card.cardId)}
-                animatedCards={animatedCardsRef.current}
-              >
-                <DraggableGridCard
-                  card={card}
-                  renderPreview={() => renderCard(card, index)}
-                  onClick={(e) => onCardClick?.(card, e)}
-                  draggable={!!onCardDragStart}
-                  onDragStart={(e) => onCardDragStart?.(e, card)}
-                  portalColorMode={getPortalColorMode?.(card)}
-                  className={`
-                    group relative bg-gray-900/40 border-2 rounded-lg 
-                    cursor-grab active:cursor-grabbing 
-                    hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200
-                    flex flex-col overflow-hidden
-                    ${selectedCardId === card.cardId ? 'card-selected' : ''}
-                  `}
+            {visibleCards.map(({ card, queued, index }) => {
+              const RenderPreview: React.FC<{ data: any }> = ({ data }) => (
+                <>{renderCard(data as CardIndexEntry, index)}</>
+              );
+
+              return (
+                <CardWithReveal
+                  key={card.cardId}
+                  queuedCard={queued}
+                  card={queued.data}
+                  onPrioritize={() => prioritizeCard(card.cardId)}
+                  animatedCards={animatedCardsRef.current}
                 >
-                  {renderCard(card, index)}
-                </DraggableGridCard>
-              </CardWithReveal>
-            ))}
+                  <DraggableGridCard
+                    card={card}
+                    renderPreview={RenderPreview}
+                    onClick={(e) => onCardClick?.(card, e)}
+                    draggable={!!onCardDragStart}
+                    onDragStart={(e) => onCardDragStart?.(e, card)}
+                    portalColorMode={getPortalColorMode?.(card)}
+                    className={`
+                      group relative bg-gray-900/40 border-2 rounded-lg 
+                      cursor-grab active:cursor-grabbing 
+                      hover:scale-[1.02] hover:-translate-y-1 transition-all duration-200
+                      flex flex-col overflow-hidden
+                      ${selectedCardId === card.cardId ? 'card-selected' : ''}
+                    `}
+                  >
+                    {renderCard(card, index)}
+                  </DraggableGridCard>
+                </CardWithReveal>
+              );
+            })}
           </div>
         </div>
       </div>

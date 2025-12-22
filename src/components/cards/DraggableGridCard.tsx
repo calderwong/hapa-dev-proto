@@ -6,7 +6,7 @@ import type { PortalColorMode } from '../../contexts/DragCanvasContext';
 interface DraggableGridCardProps {
   card: CardIndexEntry;
   children: React.ReactNode;
-  renderPreview: () => React.ReactNode;
+  renderPreview: React.ComponentType<{ data: any }>;
   onClick?: (e: React.MouseEvent) => void;
   onDragStart?: (e: React.DragEvent) => void;
   draggable?: boolean;

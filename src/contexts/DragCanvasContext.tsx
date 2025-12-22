@@ -4,7 +4,7 @@ export interface DragItem {
   id: string;
   type: string;
   data: any;
-  render: (data: any) => React.ReactNode;
+  render: React.ComponentType<{ data: any }>;
   initialRect: DOMRect;
   startX: number;
   startY: number;
@@ -124,7 +124,7 @@ type PersistedOverlayState = {
   anchored?: string[];
 };
 
-function renderPersistedCard(data: any) {
+const PersistedCardRenderer: React.FC<{ data: any }> = ({ data }) => {
   const thumbnail = data?.thumbnail;
   const title = data?.name || data?.cardId || 'Card';
   return (
@@ -138,12 +138,12 @@ function renderPersistedCard(data: any) {
       )}
     </div>
   );
-}
+};
 
-function rendererForType(type: string): (data: any) => React.ReactNode {
-  if (type === 'HAND_CARD') return renderPersistedCard;
-  if (type === 'LIBRARY_CARD') return renderPersistedCard;
-  return renderPersistedCard;
+function rendererForType(type: string): React.ComponentType<{ data: any }> {
+  if (type === 'HAND_CARD') return PersistedCardRenderer;
+  if (type === 'LIBRARY_CARD') return PersistedCardRenderer;
+  return PersistedCardRenderer;
 }
 
 function minimizeData(type: string, data: any) {

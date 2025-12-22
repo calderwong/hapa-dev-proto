@@ -391,7 +391,7 @@ const CardHand: React.FC<CardHandProps> = ({ className = '' }) => {
             id: selectedCard.cardId,
             type: 'HAND_CARD',
             data: selectedCard,
-            render: () => renderOverlayClone(selectedCard),
+            render: ({ data }) => renderOverlayClone(data),
             initialRect: rect,
             startX: rect.left + rect.width / 2,
             startY: rect.top + rect.height / 2,

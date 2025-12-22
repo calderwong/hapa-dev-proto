@@ -32,7 +32,7 @@ export const DraggableHandCard: React.FC<DraggableHandCardProps> = ({
   const isBeingDragged = items.some(i => i.id === card.cardId);
 
   // The render function for the drag canvas (what shows up when dragging)
-  const renderDragPreview = () => (
+  const RenderDragPreview: React.FC<{ data: any }> = () => (
     <div className={`
       relative w-12 h-16 rounded-md overflow-hidden
       border-2 shadow-2xl z-[10000]
@@ -61,7 +61,7 @@ export const DraggableHandCard: React.FC<DraggableHandCardProps> = ({
     id: card.cardId,
     type: 'HAND_CARD',
     data: card,
-    render: renderDragPreview,
+    render: RenderDragPreview,
     onClick: () => setSelectedCard(card),
     portalColorMode,
   });

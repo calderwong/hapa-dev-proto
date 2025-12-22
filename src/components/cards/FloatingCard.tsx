@@ -1026,7 +1026,10 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
           ref={poseRef}
           className="w-full h-full [will-change:transform] [transform-style:preserve-3d]"
         >
-          {item.render(item.data)}
+          {(() => {
+            const Render = item.render;
+            return <Render data={item.data} />;
+          })()}
         </div>
       </div>
     </div>
