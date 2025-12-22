@@ -1745,3 +1745,24 @@
 
 **Tags:** #bugfix #react #overlay
 **Est. Avg. Human Dev Time:** 15 minutes
+
+## Entry 171 – Bugfix: Card Library stuck at 120 cards (pagination cursor)
+**Prompt:** "can you figure out why I'm capped at 120 cards again, after recover too"
+
+**Summary of actions:**
+- Traced the 120-card “cap” to the `nexus:index-page` IPC reverse-pagination cursor math.
+  - The handler used `windowSize = max(limit*4, 400)` and advanced `cursor` by `windowSize` each loop.
+  - When the Card Library index length was < 400 (or when scanning stopped early after hitting `limit`), the handler could set `cursor` to `0` and return `hasMore: false` after the first page (120).
+- Fixed `electron/main.ts` so `nextCursor` advances by the number of blocks actually consumed rather than `windowSize`.
+  - Prevents skipping unscanned blocks in the current window.
+  - Prevents false `hasMore: false` due to overshooting with a large window size.
+
+**Verification:**
+- `npm run typecheck` and `npm test` passing.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #card_library #pagination
+**Est. Avg. Human Dev Time:** 35 minutes
