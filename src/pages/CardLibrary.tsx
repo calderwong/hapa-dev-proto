@@ -2884,7 +2884,7 @@ const CardLibrary: React.FC = () => {
                     </div>
                 )}
 
-                <div className="flex-1 overflow-y-auto p-6">
+                <div className="flex-1 overflow-hidden p-6">
                     <style>{`
                 .card-grid {
                     display: grid;
