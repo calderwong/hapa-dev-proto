@@ -1679,3 +1679,22 @@
 
 **Tags:** #lint #ui #overlay
 **Est. Avg. Human Dev Time:** 10 minutes
+
+## Entry 168 – Fix: Electron boot TS2322 after AIMLAPI vision support
+**Prompt:** "can't boot"
+
+**Summary of actions:**
+- Fixed Electron compile failure (`TS2322`) caused by AIMLAPI vision messages using structured `content` arrays.
+  - `electron/main.ts`: explicitly typed the AIMLAPI `messages` array as `{ role: string; content: any }[]` so pushing vision parts (`any[]`) is allowed.
+- Verified Electron can start again.
+
+**Verification:**
+- `npm run electron` succeeds.
+- `npm run typecheck` passing.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #electron #aimlapi
+**Est. Avg. Human Dev Time:** 10 minutes
