@@ -1662,3 +1662,20 @@
 
 **Tags:** #feature #aimlapi #vision #chat
 **Est. Avg. Human Dev Time:** 25 minutes
+
+## Entry 167 – Lint: remove inline style from DragCanvas recenter pulse
+**Prompt:** "sure"
+
+**Summary of actions:**
+- Removed the JSX inline `style={{ left, top }}` on the recenter pulse indicator.
+- Positioned the pulse element via a `ref` + `useLayoutEffect` to satisfy the no-inline-style lint rule while preserving the same visual behavior.
+
+**Verification:**
+- `npm run typecheck` and `npm test` passing.
+
+**Files modified/created:**
+- Modified: `src/components/DragCanvas.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #lint #ui #overlay
+**Est. Avg. Human Dev Time:** 10 minutes
