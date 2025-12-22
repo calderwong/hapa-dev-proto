@@ -5,6 +5,8 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import type { PetCard, PetInstance, PetConfig, EnvironmentTheme, PetZone } from './types';
 import { PetState } from './types';
 import { HeaderPetController } from './HeaderPetController';
@@ -17,11 +19,100 @@ import {
   ENVIRONMENT_THEMES 
 } from '../../utils/petCardUtils';
 
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+const PetActionMenu: React.FC<{
+  pet: PetInstance;
+  containerRect: DOMRect;
+  onClose: () => void;
+  onChat: () => void;
+}> = ({ pet, containerRect, onClose, onChat }) => {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const el = panelRef.current;
+      if (!el) return;
+      if (el.contains(e.target as Node)) return;
+      onClose();
+    };
+
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+  }, [onClose]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  const w = 168;
+  const h = 96;
+
+  const petLeft = containerRect.left + pet.position.x;
+  const petTop = containerRect.bottom - (pet.position.y + 2) - 28;
+
+  const left = clamp(petLeft + 34, 10, window.innerWidth - w - 10);
+  const top = clamp(petTop - 8, 70, window.innerHeight - h - 10);
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      className="fixed z-[100020] pointer-events-auto"
+      style={{ left, top, width: w }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      <div className="rounded-lg border border-purple-500/25 bg-gray-950/92 shadow-[0_0_30px_rgba(168,85,247,0.16)] backdrop-blur-sm overflow-hidden">
+        <div className="px-3 py-2 border-b border-purple-500/15">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-purple-200 truncate">
+            {pet.config?.name || pet.id}
+          </div>
+        </div>
+
+        <div className="p-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              onChat();
+              onClose();
+            }}
+            className="px-2 py-[6px] rounded-md border border-cyan-500/25 bg-cyan-500/10 text-[10px] font-bold uppercase tracking-[0.22em] text-cyan-100 hover:bg-cyan-500/15"
+            title="Open Chat"
+          >
+            Chat
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-2 py-[6px] rounded-md border border-gray-700/60 bg-gray-900/30 text-[10px] font-bold uppercase tracking-[0.22em] text-gray-300 hover:bg-gray-800/50"
+            title="Close"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 // Mini pet renderer for header
 const MiniPet: React.FC<{ 
   pet: PetInstance; 
+  isActive?: boolean;
+  onSelect?: (petId: string) => void;
+  onOpenMenu?: (petId: string) => void;
   onDragStart?: (pet: PetInstance, e: React.DragEvent) => void;
-}> = ({ pet, onDragStart }) => {
+  onDragEnd?: (pet: PetInstance, e: React.DragEvent) => void;
+}> = ({ pet, isActive, onSelect, onOpenMenu, onDragStart, onDragEnd }) => {
   let src = '';
 
   // 1. Check Agent State Animations first (Camp Refactor)
@@ -47,11 +138,25 @@ const MiniPet: React.FC<{
     }
   };
 
+  const handleDragEnd = (e: React.DragEvent) => {
+    onDragEnd?.(pet, e);
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (!onSelect) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect(pet.id);
+    onOpenMenu?.(pet.id);
+  };
+
   return (
     <div
       draggable
       onDragStart={handleDragStart}
-      className="absolute cursor-grab active:cursor-grabbing transition-none" // Removed transition for smooth physics
+      onDragEnd={handleDragEnd}
+      onClick={handleClick}
+      className={`absolute cursor-grab active:cursor-grabbing transition-none ${isActive ? 'drop-shadow-[0_0_6px_rgba(168,85,247,0.9)]' : ''}`}
       style={{
         left: `${pet.position.x}px`,
         bottom: `${pet.position.y + 2}px`, // Apply Y position from physics
@@ -161,12 +266,38 @@ interface PetPortalProps {
 }
 
 const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => {
+  const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<HeaderPetController | null>(null);
   const [pets, setPets] = useState<PetInstance[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [theme, setTheme] = useState<EnvironmentTheme>(ENVIRONMENT_THEMES[0]);
   const [petCards, setPetCards] = useState<Map<string, PetCard>>(new Map());
+  const [activePetId, setActivePetId] = useState<string | null>(null);
+  const [menuPetId, setMenuPetId] = useState<string | null>(null);
+
+  const setActivePet = useCallback((petId: string | null) => {
+    const card = petId ? petCards.get(petId) : undefined;
+    const nextId = card?.id || petId || null;
+    const nextCoreName = card?.coreName || null;
+
+    setActivePetId(nextId);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('activePhamiliarPetId', nextId ? String(nextId) : '');
+        window.localStorage.setItem('activePhamiliarPetCoreName', nextCoreName ? String(nextCoreName) : '');
+      }
+    } catch { }
+
+    try {
+      window.dispatchEvent(new CustomEvent('active-phamiliar-change', {
+        detail: { petId: nextId, coreName: nextCoreName },
+      }));
+    } catch { }
+  }, [petCards]);
+
+  const containerRect = containerRef.current?.getBoundingClientRect() || null;
+  const menuPet = menuPetId ? pets.find((p) => p.id === menuPetId) : null;
 
   // Initialize controller and load pets
   useEffect(() => {
@@ -188,6 +319,20 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
       });
       setPetCards(cardMap);
       setPets([...controllerRef.current?.getPets() || []]);
+
+      try {
+        const stored = typeof window !== 'undefined' ? window.localStorage.getItem('activePhamiliarPetId') : null;
+        const storedId = stored && stored.trim().length > 0 ? stored.trim() : null;
+        if (storedId && cardMap.has(storedId)) {
+          setActivePetId(storedId);
+          setTimeout(() => setActivePet(storedId), 0);
+        } else if (headerPets.length > 0) {
+          setActivePetId(headerPets[0].id);
+          if (headerPets[0].id) {
+            setTimeout(() => setActivePet(headerPets[0].id), 0);
+          }
+        }
+      } catch { }
     });
 
     // Game loop - 30fps for smooth physics
@@ -278,8 +423,27 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
 
     e.dataTransfer.setData('application/x-pet-card', dragData);
     e.dataTransfer.setData('application/json', dragData);
+    e.dataTransfer.setData('text/plain', dragData);
     e.dataTransfer.effectAllowed = 'move';
   }, [petCards]);
+
+  const handlePetDragEnd = useCallback((pet: PetInstance, e: React.DragEvent) => {
+    if (e.dataTransfer.dropEffect !== 'move') return;
+    if (!controllerRef.current) return;
+
+    const petCard = petCards.get(pet.id);
+    controllerRef.current.removePet(pet.id);
+    setPets([...controllerRef.current.getPets()]);
+    setPetCards(prev => {
+      const next = new Map(prev);
+      next.delete(pet.id);
+      return next;
+    });
+
+    if (petCard) {
+      onPetRemoved?.(petCard);
+    }
+  }, [onPetRemoved, petCards]);
 
   // Handle drop - add pet to portal
   const handleDrop = useCallback(async (e: React.DragEvent) => {
@@ -306,23 +470,30 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
       
       setPetCards(prev => new Map(prev).set(updatedCard.id, updatedCard));
       setPets([...controllerRef.current.getPets()]);
+
+      setTimeout(() => setActivePet(updatedCard.id), 0);
       
       onPetDropped?.(updatedCard);
     }
-  }, [onPetDropped]);
+  }, [onPetDropped, setActivePet]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    if (hasPetDragData(e.dataTransfer)) {
-      e.dataTransfer.dropEffect = 'move';
-    }
+    try {
+      const parsed = parsePetDragData(e.dataTransfer);
+      if (parsed) {
+        e.dataTransfer.dropEffect = 'move';
+        if (!isDragOver) setIsDragOver(true);
+      }
+    } catch { }
   }, []);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    if (hasPetDragData(e.dataTransfer)) {
-      setIsDragOver(true);
-    }
+    try {
+      const parsed = parsePetDragData(e.dataTransfer);
+      if (parsed) setIsDragOver(true);
+    } catch { }
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
@@ -356,7 +527,13 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
-      onClick={cycleTheme}
+      onClick={() => {
+        if (menuPetId) {
+          setMenuPetId(null);
+          return;
+        }
+        cycleTheme();
+      }}
       title={`Pet Portal - ${theme.name} (click to change)`}
     >
       {/* Render custom meadow scene or standard ground line */}
@@ -394,9 +571,25 @@ const PetPortal: React.FC<PetPortalProps> = ({ onPetDropped, onPetRemoved }) => 
         <MiniPet 
           key={pet.id} 
           pet={pet} 
+          isActive={activePetId === pet.id}
+          onSelect={(id) => setActivePet(id)}
+          onOpenMenu={(id) => setMenuPetId(id)}
           onDragStart={handlePetDragStart}
+          onDragEnd={handlePetDragEnd}
         />
       ))}
+
+      {menuPet && containerRect ? (
+        <PetActionMenu
+          pet={menuPet}
+          containerRect={containerRect}
+          onClose={() => setMenuPetId(null)}
+          onChat={() => {
+            setActivePet(menuPet.id);
+            navigate('/');
+          }}
+        />
+      ) : null}
 
       {/* Empty state */}
       {pets.length === 0 && !isDragOver && (

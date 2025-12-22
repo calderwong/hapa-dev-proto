@@ -470,6 +470,14 @@ export function parsePetDragData(dataTransfer: DataTransfer): { petCard: PetCard
  * Check if a drag event contains pet card data
  */
 export function hasPetDragData(dataTransfer: DataTransfer): boolean {
-  return dataTransfer.types.includes(PET_CARD_MIME) || 
-         dataTransfer.types.includes('application/json');
+  if (dataTransfer.types.includes(PET_CARD_MIME)) return true;
+  if (dataTransfer.types.includes('application/json')) return true;
+  if (dataTransfer.types.includes('text/plain')) {
+    try {
+      return !!parsePetDragData(dataTransfer);
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }

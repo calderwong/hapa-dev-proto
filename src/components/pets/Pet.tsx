@@ -6,12 +6,13 @@ import type { PetInstance } from './types';
 interface PetProps {
     pet: PetInstance;
     onPetClick?: (petId: string) => void;
+    onPetContextMenu?: (petId: string, e: React.MouseEvent) => void;
     onDragStart?: (e: React.DragEvent) => void;
     onDragEnd?: (e: React.DragEvent) => void;
     draggable?: boolean;
 }
 
-const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, onDragEnd, draggable = false }) => {
+const Pet: React.FC<PetProps> = ({ pet, onPetClick, onPetContextMenu, onDragStart, onDragEnd, draggable = false }) => {
     // Map state to asset filename
     // We downloaded: black_idle.gif, black_walk.gif, black_run.gif, black_lie.gif
 
@@ -52,6 +53,13 @@ const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, onDragEnd, drag
         }
     };
 
+    const handleContextMenu = (e: React.MouseEvent) => {
+        if (!onPetContextMenu) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onPetContextMenu(pet.config.id, e);
+    };
+
     const style: React.CSSProperties = {
         position: 'absolute',
         left: `${pet.position.x}px`,
@@ -81,6 +89,7 @@ const Pet: React.FC<PetProps> = ({ pet, onPetClick, onDragStart, onDragEnd, drag
             style={style} 
             title={`${pet.config.name} (${pet.state})${hasClickTrigger ? ' - Click me!' : ''}${draggable ? ' - Drag to move' : ''}`}
             onClick={handleClick}
+            onContextMenu={handleContextMenu}
             draggable={draggable}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}

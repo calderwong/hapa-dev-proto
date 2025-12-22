@@ -79,6 +79,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const recordedChunksRef = useRef<Blob[]>([]);
     const openaiSessionIdRef = useRef<string | null>(null);
+    const attachmentsRef = useRef<Attachment[]>([]);
+    attachmentsRef.current = attachments;
+
+    const revokePreviewUrl = (url?: string) => {
+        if (!url) return;
+        if (!url.startsWith('blob:')) return;
+        try {
+            URL.revokeObjectURL(url);
+        } catch {
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            for (const att of attachmentsRef.current) {
+                revokePreviewUrl(att.preview);
+            }
+        };
+    }, []);
     
     // Close attach menu when clicking outside
     useEffect(() => {
@@ -182,7 +201,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     };
 
     const removeAttachment = (index: number) => {
-        setAttachments((prev) => prev.filter((_, i) => i !== index));
+        setAttachments((prev) => {
+            const next = prev.filter((_, i) => i !== index);
+            const removed = prev[index];
+            revokePreviewUrl(removed?.preview);
+            return next;
+        });
     };
 
     const handleCaptureImage = async () => {
@@ -303,6 +327,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         // Clear attached message cards after sending
         if (setAttachedMessageCards && attachedMessageCards.length > 0) {
             setAttachedMessageCards([]);
+        }
+        for (const att of attachments) {
+            revokePreviewUrl(att.preview);
         }
         setAttachments([]);
     };

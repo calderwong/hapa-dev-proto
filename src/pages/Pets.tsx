@@ -6,6 +6,7 @@ import Pet from '../components/pets/Pet';
 import type { PetInstance, PetConfig, PetCard, PetZone } from '../components/pets/types';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
 import PetForge from '../components/PetForge';
+import PetCapabilitiesEditor from '../components/pets/PetCapabilitiesEditor';
 import { 
     createPetCard, 
     loadPetsByZone, 
@@ -37,6 +38,8 @@ const Pets: React.FC = () => {
     const [customRun, setCustomRun] = useState<File | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [isForgeOpen, setIsForgeOpen] = useState(false);
+
+    const [editingPet, setEditingPet] = useState<PetCard | null>(null);
 
     // Load sanctuary pets from card library
     const loadSanctuaryPets = useCallback(async () => {
@@ -304,6 +307,53 @@ const Pets: React.FC = () => {
         }
     };
 
+    const handlePetContextMenu = useCallback((petId: string, e: React.MouseEvent) => {
+        const petCard = petCards.get(petId);
+        if (!petCard) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setEditingPet(petCard);
+    }, [petCards]);
+
+    const handleSaveEditedPet = useCallback(async (updatedPet: PetCard) => {
+        if (!window.electronAPI?.p2pAppend) return;
+
+        const now = Date.now();
+        const nextPet: PetCard = {
+            ...updatedPet,
+            updatedAt: now,
+            version: (updatedPet.version || 1) + 1,
+        };
+
+        try {
+            await window.electronAPI.p2pAppend({
+                name: nextPet.coreName,
+                data: JSON.stringify(nextPet),
+            });
+
+            await window.electronAPI.p2pAppend({
+                name: 'card-library',
+                data: JSON.stringify({
+                    type: 'card-index',
+                    cardId: nextPet.id,
+                    coreName: nextPet.coreName,
+                    mediaKind: 'pet',
+                    name: nextPet.name,
+                    species: nextPet.species,
+                    thumbnail: nextPet.thumbnail,
+                    location: nextPet.location,
+                    createdAt: nextPet.createdAt,
+                    updatedAt: nextPet.updatedAt,
+                }),
+            });
+
+            setPetCards(prev => new Map(prev).set(nextPet.id, nextPet));
+            setEditingPet(null);
+        } catch (err) {
+            console.error('Failed to save pet:', err);
+        }
+    }, []);
+
     // Handle pet drag start from sanctuary
     const handlePetDragStart = useCallback((petId: string, e: React.DragEvent) => {
         const petCard = petCards.get(petId);
@@ -312,6 +362,7 @@ const Pets: React.FC = () => {
         const dragData = createPetDragData(petCard, 'sanctuary');
         e.dataTransfer.setData('application/x-pet-card', dragData);
         e.dataTransfer.setData('application/json', dragData);
+        e.dataTransfer.setData('text/plain', dragData);
         e.dataTransfer.effectAllowed = 'move';
     }, [petCards]);
 
@@ -333,9 +384,10 @@ const Pets: React.FC = () => {
         if (!parsed) return;
 
         const { petCard, sourceZone } = parsed;
-        
-        // Only accept drops from header
-        if (sourceZone !== 'header') return;
+
+        if (sourceZone === 'sanctuary') return;
+
+        if (!petCard?.coreName) return;
 
         // Update pet location to sanctuary
         const updatedCard = await updatePetLocation(petCard, 'sanctuary');
@@ -433,6 +485,7 @@ const Pets: React.FC = () => {
                         key={pet.id} 
                         pet={pet} 
                         onPetClick={handlePetClick}
+                        onPetContextMenu={handlePetContextMenu}
                         onDragStart={(e) => handlePetDragStart(pet.id, e)}
                         onDragEnd={handlePetDragEnd}
                         draggable={!!petCards.get(pet.id)}
@@ -454,6 +507,14 @@ const Pets: React.FC = () => {
             {/* Pet Forge Modal */}
             {isForgeOpen && (
                 <PetForge onClose={() => setIsForgeOpen(false)} onSave={handleForgeSave} />
+            )}
+
+            {editingPet && (
+                <PetCapabilitiesEditor
+                    pet={editingPet}
+                    onSave={handleSaveEditedPet}
+                    onClose={() => setEditingPet(null)}
+                />
             )}
 
             {/* Add Pet Modal (Standard) */}
@@ -493,17 +554,17 @@ const Pets: React.FC = () => {
 
                             <div className="space-y-1">
                                 <label className="text-[10px] uppercase font-bold text-gray-500">Idle Animation (Required)</label>
-                                <input type="file" accept="image/gif" onChange={(e) => setCustomIdle(e.target.files?.[0] || null)} className="text-xs text-gray-300" />
+                                <input type="file" accept="image/gif" aria-label="Idle Animation (Required)" title="Idle Animation (Required)" onChange={(e) => setCustomIdle(e.target.files?.[0] || null)} className="text-xs text-gray-300" />
                             </div>
 
                             <div className="space-y-1">
                                 <label className="text-[10px] uppercase font-bold text-gray-500">Walk Animation (Required)</label>
-                                <input type="file" accept="image/gif" onChange={(e) => setCustomWalk(e.target.files?.[0] || null)} className="text-xs text-gray-300" />
+                                <input type="file" accept="image/gif" aria-label="Walk Animation (Required)" title="Walk Animation (Required)" onChange={(e) => setCustomWalk(e.target.files?.[0] || null)} className="text-xs text-gray-300" />
                             </div>
 
                             <div className="space-y-1">
                                 <label className="text-[10px] uppercase font-bold text-gray-500">Run Animation (Required)</label>
-                                <input type="file" accept="image/gif" onChange={(e) => setCustomRun(e.target.files?.[0] || null)} className="text-xs text-gray-300" />
+                                <input type="file" accept="image/gif" aria-label="Run Animation (Required)" title="Run Animation (Required)" onChange={(e) => setCustomRun(e.target.files?.[0] || null)} className="text-xs text-gray-300" />
                             </div>
                         </div>
                     ) : (

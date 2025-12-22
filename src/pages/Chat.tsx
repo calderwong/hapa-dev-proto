@@ -8,6 +8,7 @@ import { PrimaryButton, SecondaryButton } from '../components/Button';
 import { ChatInput, type Attachment, type AttachedMessageCard } from '../components/ChatInput';
 import VeoOptionsPanel, { type VeoOptions } from '../components/VeoOptionsPanel';
 import ImagenOptionsPanel, { type ImagenOptions } from '../components/ImagenOptionsPanel';
+import { mapCapabilityToChatSelection } from '../utils/phamiliarChat.mjs';
 
 // Memoized component for Veo options bar to prevent expensive base64 re-processing
 const VeoOptionsBar = memo(({ 
@@ -164,6 +165,9 @@ const CHAT_IMAGE_CARD_STATE_STORAGE_PREFIX = 'chatImageCardState';
 const CHAT_EXTRACTED_CARDS_STORAGE_KEY = 'chatExtractedCards';
 const CHAT_MESSAGE_CARDS_STORAGE_KEY = 'chatMessageCards';
 
+const ACTIVE_PHAMILIAR_PET_ID_KEY = 'activePhamiliarPetId';
+const ACTIVE_PHAMILIAR_PET_CORE_KEY = 'activePhamiliarPetCoreName';
+
 const formatProviderLabel = (value: 'gemini' | 'openai' | 'llama' | 'aimlapi') => {
   if (value === 'gemini') return 'Gemini';
   if (value === 'openai') return 'OpenAI';
@@ -198,6 +202,14 @@ const Chat: React.FC = () => {
     return next;
   });
   const [messages, setMessages] = useState<Message[]>([]);
+
+  const [activePhamiliar, setActivePhamiliar] = useState<{
+    petId: string;
+    coreName: string;
+    name: string;
+    capability?: any;
+    capabilities?: any[];
+  } | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [provider, setProvider] = useState<'gemini' | 'openai' | 'llama' | 'aimlapi'>('gemini');
@@ -1099,21 +1111,148 @@ const Chat: React.FC = () => {
     assistantMessageIdRef.current = null;
     activeRequestIdRef.current = null;
     setIsLoading(false);
+
+    try {
+      const petId = activePhamiliar?.petId || null;
+      window.dispatchEvent(new CustomEvent('agent-state-change', { detail: { petId, state: 'idle' } }));
+    } catch { }
   };
+
+  useEffect(() => {
+    const loadFromCore = async (coreName: string, petIdHint?: string) => {
+      if (!window.electronAPI?.p2pRead) return;
+      try {
+        const records = await window.electronAPI.p2pRead(coreName);
+        let pet: any = null;
+        for (let i = records.length - 1; i >= 0; i--) {
+          try {
+            const parsed = JSON.parse(records[i]);
+            if (parsed && parsed.type === 'pet') {
+              pet = parsed;
+              break;
+            }
+          } catch { }
+        }
+        if (!pet) return;
+        const caps = Array.isArray(pet.capabilities) ? pet.capabilities : [];
+        const activeId = pet.activeCapabilityId;
+        let cap = activeId ? caps.find((c: any) => c && c.id === activeId) : undefined;
+        if (!cap && caps.length > 0) {
+          cap = caps[0];
+        }
+
+        try {
+          const selection = mapCapabilityToChatSelection(cap);
+          if (selection) {
+            setProvider(selection.provider);
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem(PROVIDER_STORAGE_KEY, selection.provider);
+            }
+
+            if (selection.provider === 'gemini') {
+              setGeminiModels((prev) => {
+                if (Array.isArray(prev) && prev.some((m) => m?.name === selection.modelId)) return prev;
+                return [...(Array.isArray(prev) ? prev : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+              });
+              setSelectedGeminiModel(selection.modelId);
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem(GEMINI_MODEL_STORAGE_KEY, selection.modelId);
+              }
+            } else if (selection.provider === 'openai') {
+              setOpenaiModels((prev) => {
+                if (Array.isArray(prev) && prev.some((m) => m?.name === selection.modelId)) return prev;
+                return [...(Array.isArray(prev) ? prev : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+              });
+              setSelectedOpenAIModel(selection.modelId);
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem(OPENAI_MODEL_STORAGE_KEY, selection.modelId);
+              }
+            } else if (selection.provider === 'aimlapi') {
+              setAimlApiModels((prev) => {
+                if (Array.isArray(prev) && prev.some((m) => m?.name === selection.modelId)) return prev;
+                return [...(Array.isArray(prev) ? prev : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+              });
+              setSelectedAimlApiModel(selection.modelId);
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem(AIMLAPI_MODEL_STORAGE_KEY, selection.modelId);
+              }
+            } else {
+              setLlamaModels((prev) => {
+                if (Array.isArray(prev) && prev.some((m) => m?.name === selection.modelId)) return prev;
+                return [...(Array.isArray(prev) ? prev : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+              });
+              setSelectedLlamaModel(selection.modelId);
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem(LLAMA_MODEL_STORAGE_KEY, selection.modelId);
+              }
+            }
+          }
+        } catch { }
+
+        setActivePhamiliar({
+          petId: petIdHint || pet.id,
+          coreName,
+          name: pet.name || pet.id,
+          capability: cap,
+          capabilities: caps,
+        });
+      } catch {
+      }
+    };
+
+    const initialId = typeof window !== 'undefined' ? (window.localStorage.getItem(ACTIVE_PHAMILIAR_PET_ID_KEY) || '').trim() : '';
+    const initialCore = typeof window !== 'undefined' ? (window.localStorage.getItem(ACTIVE_PHAMILIAR_PET_CORE_KEY) || '').trim() : '';
+    if (initialCore) {
+      loadFromCore(initialCore, initialId || undefined);
+    }
+
+    const handler = (event: any) => {
+      const detail = event?.detail || {};
+      const coreName = (detail.coreName || '').toString();
+      const petId = (detail.petId || '').toString();
+      if (!coreName) {
+        setActivePhamiliar(null);
+        return;
+      }
+      loadFromCore(coreName, petId || undefined);
+    };
+
+    window.addEventListener('active-phamiliar-change', handler as any);
+    return () => {
+      window.removeEventListener('active-phamiliar-change', handler as any);
+    };
+  }, []);
 
   const handleSend = async (text: string, currentAttachments: Attachment[], msgCards?: AttachedMessageCard[]) => {
     if (!text.trim() && currentAttachments.length === 0 && (!msgCards || msgCards.length === 0)) return;
     if (isLoading) return;
 
+    const cap = activePhamiliar?.capability;
+    let effectiveProvider = provider;
     let modelName: string | undefined;
-    if (provider === 'gemini') {
-      modelName = selectedGeminiModel;
-    } else if (provider === 'openai') {
-      modelName = selectedOpenAIModel;
-    } else if (provider === 'aimlapi') {
-      modelName = selectedAimlApiModel;
-    } else {
-      modelName = selectedLlamaModel || (llamaModels[0]?.name ?? undefined);
+    const capSelection = mapCapabilityToChatSelection(cap);
+    if (capSelection) {
+      effectiveProvider = capSelection.provider;
+      modelName = capSelection.modelId;
+    }
+    if (!modelName) {
+      if (effectiveProvider === 'gemini') {
+        modelName = selectedGeminiModel;
+      } else if (effectiveProvider === 'openai') {
+        modelName = selectedOpenAIModel;
+      } else if (effectiveProvider === 'aimlapi') {
+        modelName = selectedAimlApiModel;
+      } else {
+        modelName = selectedLlamaModel || (llamaModels[0]?.name ?? undefined);
+      }
+    }
+
+    let requestText = text;
+    if (cap && typeof cap.systemPrompt === 'string' && cap.systemPrompt.trim().length > 0) {
+      requestText = `${cap.systemPrompt}\n\n${requestText}`;
+    }
+    if (cap && typeof cap.appendPrompt === 'string' && cap.appendPrompt.trim().length > 0) {
+      requestText = `${requestText}\n\n${cap.appendPrompt}`;
     }
 
     // Extract parent card refs from attachments that came from card library
@@ -1133,7 +1272,7 @@ const Chat: React.FC = () => {
         // Preserve card source info
         fromCard: att.fromCard,
       })),
-      provider,
+      provider: effectiveProvider,
       model: modelName,
       // Include attached message cards as context references
       attachedMessageCards: msgCards && msgCards.length > 0 ? msgCards : undefined,
@@ -1148,7 +1287,7 @@ const Chat: React.FC = () => {
       id: assistantId,
       role: 'model',
       content: '',
-      provider,
+      provider: effectiveProvider,
       model: modelName,
       metrics: { startTime }
     };
@@ -1158,6 +1297,11 @@ const Chat: React.FC = () => {
     activeRequestIdRef.current = requestId;
 
     console.log('Sending message with model:', modelName, 'Provider:', provider);
+
+    try {
+      const petId = activePhamiliar?.petId || null;
+      window.dispatchEvent(new CustomEvent('agent-state-change', { detail: { petId, state: 'requesting' } }));
+    } catch { }
 
     // Check if this is a Veo video generation model
     const isVeoModel = modelName?.toLowerCase().startsWith('veo-');
@@ -1185,7 +1329,7 @@ const Chat: React.FC = () => {
           
           // Build video payload from veoOptions
           const videoPayload: any = {
-            prompt: userMessage.content,
+            prompt: requestText,
             model: modelName,
             // Video parameters from options panel
             aspectRatio: veoOptions.aspectRatio,
@@ -1223,7 +1367,7 @@ const Chat: React.FC = () => {
           }
 
           try {
-            const videoResult = await window.electronAPI.generateVideoWithGemini(videoPayload);
+            let videoResult = await window.electronAPI.generateVideoWithGemini(videoPayload);
             
             if (activeRequestIdRef.current !== requestId) return;
 
@@ -1238,7 +1382,6 @@ const Chat: React.FC = () => {
                     content: `✅ Video generated successfully! (${videoResult.durationSeconds}s)`,
                     isVideoGenerating: false,
                     video: {
-                      base64: videoResult.videoBase64,
                       localPath: videoResult.videoPath,
                       fileName: videoResult.videoFileName,
                       mimeType: videoResult.mimeType,
@@ -1250,6 +1393,18 @@ const Chat: React.FC = () => {
                   : m,
               ),
             );
+
+            try {
+              const petId = activePhamiliar?.petId || null;
+              window.dispatchEvent(new CustomEvent('agent-state-change', { detail: { petId, state: 'responding' } }));
+            } catch { }
+
+            try {
+              if (videoResult && typeof videoResult === 'object') {
+                (videoResult as any).videoBase64 = null;
+              }
+            } catch { /* ignore */ }
+            videoResult = null as any;
           } catch (videoError: any) {
             if (activeRequestIdRef.current !== requestId) return;
             
@@ -1271,12 +1426,17 @@ const Chat: React.FC = () => {
               activeRequestIdRef.current = null;
               setIsLoading(false);
             }
+
+            try {
+              const petId = activePhamiliar?.petId || null;
+              window.dispatchEvent(new CustomEvent('agent-state-change', { detail: { petId, state: 'idle' } }));
+            } catch { }
           }
           return;
         }
 
         const payload = {
-          message: userMessage.content,
+          message: requestText,
           history,
           model: modelName,
           attachments: currentAttachments.map(att => ({
@@ -1286,11 +1446,11 @@ const Chat: React.FC = () => {
         };
 
         let result: { content: string; model: string; provider: string };
-        if (provider === 'gemini') {
+        if (effectiveProvider === 'gemini') {
           result = await window.electronAPI.chatWithGemini(payload);
-        } else if (provider === 'openai') {
+        } else if (effectiveProvider === 'openai') {
           result = await window.electronAPI.chatWithOpenAI(payload);
-        } else if (provider === 'aimlapi') {
+        } else if (effectiveProvider === 'aimlapi') {
           const content = await window.electronAPI.chatWithAimlApi(payload);
           result = { content, model: modelName || 'unknown', provider: 'aimlapi' };
         } else {
@@ -1317,6 +1477,11 @@ const Chat: React.FC = () => {
               : m,
           ),
         );
+
+        try {
+          const petId = activePhamiliar?.petId || null;
+          window.dispatchEvent(new CustomEvent('agent-state-change', { detail: { petId, state: 'responding' } }));
+        } catch { }
       } else {
         // Fallback for browser dev mode (mock)
         setTimeout(() => {
@@ -1355,6 +1520,11 @@ const Chat: React.FC = () => {
         activeRequestIdRef.current = null;
         setIsLoading(false);
       }
+
+      try {
+        const petId = activePhamiliar?.petId || null;
+        window.dispatchEvent(new CustomEvent('agent-state-change', { detail: { petId, state: 'idle' } }));
+      } catch { }
     }
   };
 
@@ -1465,6 +1635,66 @@ const Chat: React.FC = () => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(CHAT_MODE_STORAGE_KEY, value);
     }
+  };
+
+  const handleCapabilityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    setActivePhamiliar((prev) => {
+      if (!prev) return prev;
+      const caps = Array.isArray(prev.capabilities) ? prev.capabilities : [];
+      const nextCap = caps.find((c: any) => c && String(c.id) === String(value));
+      if (!nextCap) return prev;
+
+      try {
+        const selection = mapCapabilityToChatSelection(nextCap);
+        if (selection) {
+          setProvider(selection.provider);
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(PROVIDER_STORAGE_KEY, selection.provider);
+          }
+
+          if (selection.provider === 'gemini') {
+            setGeminiModels((prevModels) => {
+              if (Array.isArray(prevModels) && prevModels.some((m) => m?.name === selection.modelId)) return prevModels;
+              return [...(Array.isArray(prevModels) ? prevModels : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+            });
+            setSelectedGeminiModel(selection.modelId);
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem(GEMINI_MODEL_STORAGE_KEY, selection.modelId);
+            }
+          } else if (selection.provider === 'openai') {
+            setOpenaiModels((prevModels) => {
+              if (Array.isArray(prevModels) && prevModels.some((m) => m?.name === selection.modelId)) return prevModels;
+              return [...(Array.isArray(prevModels) ? prevModels : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+            });
+            setSelectedOpenAIModel(selection.modelId);
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem(OPENAI_MODEL_STORAGE_KEY, selection.modelId);
+            }
+          } else if (selection.provider === 'aimlapi') {
+            setAimlApiModels((prevModels) => {
+              if (Array.isArray(prevModels) && prevModels.some((m) => m?.name === selection.modelId)) return prevModels;
+              return [...(Array.isArray(prevModels) ? prevModels : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+            });
+            setSelectedAimlApiModel(selection.modelId);
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem(AIMLAPI_MODEL_STORAGE_KEY, selection.modelId);
+            }
+          } else {
+            setLlamaModels((prevModels) => {
+              if (Array.isArray(prevModels) && prevModels.some((m) => m?.name === selection.modelId)) return prevModels;
+              return [...(Array.isArray(prevModels) ? prevModels : []), { name: selection.modelId, displayName: selection.modelId, description: '' }];
+            });
+            setSelectedLlamaModel(selection.modelId);
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem(LLAMA_MODEL_STORAGE_KEY, selection.modelId);
+            }
+          }
+        }
+      } catch { }
+
+      return { ...prev, capability: nextCap };
+    });
   };
 
   const activeModels =
@@ -1673,10 +1903,33 @@ const Chat: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          {activePhamiliar && Array.isArray(activePhamiliar.capabilities) && activePhamiliar.capabilities.length > 0 ? (
+            <div className="flex items-center gap-2 bg-gray-800/50 rounded p-1 border border-purple-500/20">
+              <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-widest text-purple-200 truncate max-w-[160px]" title={activePhamiliar.name}>
+                {activePhamiliar.name}
+              </div>
+              <div className="w-px h-4 bg-gray-700"></div>
+              <select
+                value={activePhamiliar.capability?.id || ''}
+                onChange={handleCapabilityChange}
+                aria-label="Phamiliar Capability"
+                title="Phamiliar Capability"
+                className="bg-gray-800 text-white text-sm rounded border border-gray-700 px-2 py-1 w-80 focus:outline-none focus:border-purple-400"
+              >
+                {activePhamiliar.capabilities.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name || c.id} :: {c.provider}:{c.modelId}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
           <div className="flex items-center gap-2 bg-gray-800/50 rounded p-1 border border-gray-700">
             <rux-select
               value={provider}
               onRuxchange={(e: any) => handleProviderChange({ target: { value: e.target.value } } as any)}
+              disabled={!!activePhamiliar}
               size="small"
               className="w-32"
             >
@@ -1699,6 +1952,7 @@ const Chat: React.FC = () => {
                       : selectedLlamaModel || (llamaModels[0]?.name ?? '')
               }
               onChange={handleModelChange}
+              disabled={!!activePhamiliar}
               aria-label="Model"
               title="Model"
               className="bg-gray-800 text-white text-sm rounded border border-gray-700 px-2 py-1 w-48 focus:outline-none focus:border-astro-primary"
@@ -1851,12 +2105,12 @@ const Chat: React.FC = () => {
                                         : 'border border-astro-border'
                                     }`}>
                                       <img
-                                        src={att.previewUrl}
+                                        src={att.dataUrl || att.previewUrl}
                                         alt={att.fileName || `attachment-${index + 1}`}
                                         className="h-24 w-auto object-cover cursor-pointer hover:opacity-90 transition-opacity"
                                         onClick={() =>
                                           setPreviewImage({
-                                            src: att.previewUrl,
+                                            src: att.dataUrl || att.previewUrl,
                                             alt: att.fileName || `attachment-${index + 1}`,
                                           })
                                         }
