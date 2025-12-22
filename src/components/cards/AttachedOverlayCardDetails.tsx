@@ -730,10 +730,12 @@ export const AttachedOverlayCardDetails: React.FC = () => {
     setPlacementPref(panelPos.name);
   }, [panelPos?.name, placementPref, dockSideForItem]);
 
-  if (!item || !panelPos) return null;
+  const shouldRender = !!item && !!panelPos;
+  const itemId = item?.id ? String(item.id) : '';
+  const itemType = item?.type ? String(item.type) : '';
 
-  const data: any = item.data || {};
-  const coreName = data.coreName || data.cardId || item.id;
+  const data: any = item?.data || {};
+  const coreName = data.coreName || data.cardId || itemId;
   const localRecord: any = data.cardRecord || data.raw || {};
   const localMetadata: any = localRecord.metadata || data.metadata || {};
   const p2pRecord: any = fullRecord || null;
@@ -742,7 +744,7 @@ export const AttachedOverlayCardDetails: React.FC = () => {
   const record: any = p2pRecord || localRecord || {};
   const metadata: any = record.metadata || localMetadata || {};
 
-  const name = data.name || record.name || data.cardId || item.id;
+  const name = data.name || record.name || data.cardId || itemId;
   const thumbnail = data.thumbnail || record.thumbnail || metadata.thumbnail;
   const lore = record.lore || record.description || metadata.lore || metadata.description || '';
   const desires = record.desires || metadata.desires || '';
@@ -765,7 +767,9 @@ export const AttachedOverlayCardDetails: React.FC = () => {
 
   const formattedSkills = (skills || []).map((s: any) => (typeof s === 'string' ? s : s?.name || s?.id || 'Unknown Skill'));
 
-  const z = Math.round(Math.max(OVERLAY_CARD_Z_MIN, Math.min(OVERLAY_CARD_Z_MAX, zOffsets[item.id] ?? 0)));
+  const z = Math.round(
+    Math.max(OVERLAY_CARD_Z_MIN, Math.min(OVERLAY_CARD_Z_MAX, itemId ? (zOffsets[itemId] ?? 0) : 0)),
+  );
 
   const cardId = data.cardId || record.cardId || metadata.cardId || '';
   const mediaKind = data.mediaKind || record.mediaKind || metadata.mediaKind || '';
@@ -783,7 +787,7 @@ export const AttachedOverlayCardDetails: React.FC = () => {
   const p2pTier = p2pRecord ? ((p2pRecord as any)?.tier || (p2pMetadata as any)?.tier || '') : '';
 
   const metaRows: Array<{ k: string; v: string; copy?: string }> = [];
-  metaRows.push({ k: 'id', v: String(item.id) });
+  metaRows.push({ k: 'id', v: String(itemId) });
   metaRows.push({ k: 'coreName', v: String(coreName), copy: String(coreName) });
   metaRows.push({ k: 'dock', v: dockSideForItem ? String(dockSideForItem) : 'free' });
   metaRows.push({ k: 'status', v: statusLabel || '' });
@@ -946,7 +950,7 @@ export const AttachedOverlayCardDetails: React.FC = () => {
   const rawJsonText = useMemo(() => {
     try {
       const payload = {
-        id: item.id,
+        id: itemId,
         coreName,
         data,
         record,
@@ -959,7 +963,7 @@ export const AttachedOverlayCardDetails: React.FC = () => {
     } catch {
       return '';
     }
-  }, [coreName, data, fullRecord, item.id, metadata, record]);
+  }, [coreName, data, fullRecord, itemId, metadata, record]);
 
   const recordType = formatMetaValue((record as any)?.type) || formatMetaValue((record as any)?.recordType) || formatMetaValue((record as any)?.kind);
   const recordVersion = formatMetaValue((record as any)?.version) || formatMetaValue((record as any)?.schemaVersion);
@@ -1084,11 +1088,13 @@ export const AttachedOverlayCardDetails: React.FC = () => {
     return out;
   }, [coreName, metaRows, pinnedKeysForCore, recordRows]);
 
-  const returnLabel = item.type === 'HAND_CARD' ? 'Return Hand' : 'Return';
+  const returnLabel = itemType === 'HAND_CARD' ? 'Return Hand' : 'Return';
 
   const shortcutsLabel = showHelp
     ? 'hide help: ?'
     : '[ / ] / Ctrl+[ ] / Shift+Wheel / Ctrl+Shift+Wheel depth · Shift+←/→ dock · Shift+↓ undock · A anchor · Del return · C camera · P pin · O auto-pin · ? help';
+
+  if (!shouldRender) return null;
 
   return createPortal(
     <div
