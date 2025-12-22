@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useDragCanvas } from '../contexts/DragCanvasContext';
 import { getOverlayZBaseline, OVERLAY_CARD_Z_MAX, OVERLAY_CARD_Z_MIN, OVERLAY_CARD_Z_STEP } from '../contexts/DragCanvasContext';
 import { FloatingCard } from './cards/FloatingCard';
@@ -40,6 +40,7 @@ export const DragCanvas: React.FC = () => {
   const [recenterTick, setRecenterTick] = useState(0);
   const [showRecenterPulse, setShowRecenterPulse] = useState(false);
   const [hudRect, setHudRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const recenterPulseRef = useRef<HTMLDivElement | null>(null);
 
   const dragCountRef = useRef(0);
   const AUTO_PIN_ON_DRAG_KEY = 'hapa.overlayDetails.autoPinOnDrag.v1';
@@ -541,6 +542,14 @@ export const DragCanvas: React.FC = () => {
     };
   }, [viewportTick, recenterTick]);
 
+  useLayoutEffect(() => {
+    if (!showRecenterPulse || overlayLayout.mode === 'free') return;
+    const el = recenterPulseRef.current;
+    if (!el) return;
+    el.style.left = `${Math.round(anchorPoint.x)}px`;
+    el.style.top = `${Math.round(anchorPoint.y)}px`;
+  }, [anchorPoint.x, anchorPoint.y, overlayLayout.mode, recenterTick, showRecenterPulse]);
+
   if (!hasItems) {
     return (
       <div className="fixed inset-0 z-[2147483000] pointer-events-none [perspective:1200px]">
@@ -590,7 +599,7 @@ export const DragCanvas: React.FC = () => {
         <div
           key={recenterTick}
           className="fixed z-[2147483001] pointer-events-none"
-          style={{ left: anchorPoint.x, top: anchorPoint.y }}
+          ref={recenterPulseRef}
         >
           <div className="absolute -left-3 -top-3 w-6 h-6 rounded-full border border-cyan-300/60 shadow-[0_0_18px_rgba(34,211,238,0.35)] animate-ping" />
           <div className="absolute -left-2.5 -top-2.5 w-5 h-5 rounded-full border border-cyan-200/60 bg-cyan-500/5" />
