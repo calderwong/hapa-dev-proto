@@ -4161,7 +4161,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         const { aimlApiClient } = await import('./aimlapi');
         
         // Construct messages array
-        const messages = history.map((h) => ({ role: h.role, content: h.content }));
+        const messages: Array<{ role: string; content: any }> = history.map((h) => ({
+          role: h.role,
+          content: h.content,
+        }));
 
         const resolveDataUrl = (att: { mimeType: string; data: string }) => {
           const mt = att?.mimeType ? String(att.mimeType) : '';
