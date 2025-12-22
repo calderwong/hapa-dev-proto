@@ -1641,3 +1641,24 @@
 
 **Tags:** #feature #ui #overlay #ux
 **Est. Avg. Human Dev Time:** 30 minutes
+
+## Entry 166 – AIMLAPI chat: support OpenAI-style vision attachments (image_url)
+**Prompt:** "continue to do's"
+
+**Summary of actions:**
+- Implemented OpenAI-compatible vision message formatting for AIMLAPI chat when image attachments are present.
+  - `electron/main.ts`: builds `content: [{ type: 'text', text }, { type: 'image_url', image_url: { url } }, ...]` for the user message.
+  - Safely retries as text-only if the model/provider rejects the vision payload.
+- Loosened AIMLAPI message typing to allow structured content arrays.
+  - `electron/aimlapi.ts`: message `content` accepts structured content.
+
+**Verification:**
+- `npm run typecheck` and `npm test` passing.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `electron/aimlapi.ts`
+- Modified: `dev_journal.md`
+
+**Tags:** #feature #aimlapi #vision #chat
+**Est. Avg. Human Dev Time:** 25 minutes
