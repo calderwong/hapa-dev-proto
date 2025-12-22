@@ -227,6 +227,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('export-media', params),
     exportAllMedia: () =>
         ipcRenderer.invoke('export-all-media'),
+    cardDelete: (params: { cardId: string; deleteAssets?: boolean }) =>
+        ipcRenderer.invoke('card:delete', params),
     savePrototype: (data: { title: string; content: string }) =>
         ipcRenderer.invoke('save-prototype', data),
 });

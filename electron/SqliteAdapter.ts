@@ -27,6 +27,7 @@ import type {
   ProjectionStats,
   CardCreatedPayload,
   CardUpdatedPayload,
+  CardDeletedPayload,
   WikiNodePayload,
   WikiEdgePayload,
 } from './persistence-types';
@@ -200,6 +201,9 @@ export class SqliteAdapter implements PersistenceAdapter {
       case 'CARD_UPDATED':
         this.handleCardUpdated(event.payload as CardUpdatedPayload);
         break;
+      case 'CARD_DELETED':
+        this.handleCardDeleted(event.payload as CardDeletedPayload);
+        break;
       case 'WIKI_NODE_CREATED':
         this.handleWikiNode(event.payload as WikiNodePayload);
         break;
@@ -279,6 +283,16 @@ export class SqliteAdapter implements PersistenceAdapter {
       ...payload,
       createdAt: payload.updatedAt,
     } as CardCreatedPayload);
+  }
+
+  private handleCardDeleted(payload: CardDeletedPayload): void {
+    if (!this.db) return;
+
+    const id = payload?.id;
+    if (!id) return;
+
+    this.db.prepare(`DELETE FROM cards WHERE id = ?`).run(id);
+    this.db.prepare(`DELETE FROM card_fts WHERE id = ?`).run(id);
   }
 
   private handleWikiNode(payload: WikiNodePayload): void {

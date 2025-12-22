@@ -1576,100 +1576,159 @@ export function initPipeline(mainWindow: BrowserWindow) {
 async function recoverOrphanedHellWeekCards(): Promise<{ recovered: number; errors: string[] }> {
   const fsSync = require('fs');
   const pathModule = require('path');
+  const { getStorageDir, appendToCore, createCore } = require('./p2p');
   
-  const storageDir = './storage';
+  const storageDir = (typeof getStorageDir === 'function' ? getStorageDir() : './storage');
   const errors: string[] = [];
   let recovered = 0;
 
-  console.log('[Recovery] Starting recovery of orphaned Hell Week cards...');
+  console.log('[Recovery] Starting recovery of orphaned Hell Week cards...', { storageDir });
 
   if (!fsSync.existsSync(storageDir)) {
     return { recovered: 0, errors: ['Storage directory not found'] };
   }
 
-  const dirs = fsSync.readdirSync(storageDir);
-  const hellWeekCardDirs = dirs.filter((d: string) => d.startsWith('hell-week-card-'));
+  const dirs = fsSync
+    .readdirSync(storageDir)
+    .filter((d: string) => {
+      try {
+        const full = pathModule.join(storageDir, d);
+        return fsSync.statSync(full).isDirectory();
+      } catch {
+        return false;
+      }
+    });
 
-  console.log(`[Recovery] Found ${hellWeekCardDirs.length} Hell Week card hypercores`);
+  console.log(`[Recovery] Found ${dirs.length} hypercores in storage`);
 
   // Ensure card-library core exists
   const cardLibraryCoreName = 'card-library';
   try {
     await createCore(cardLibraryCoreName);
-  } catch (e: any) {
-    // Core might already exist
+  } catch {
+    // ignore
   }
 
-  // Read card-library to get existing cardIds (avoid duplicates)
   let existingCardIds = new Set<string>();
   try {
-    const existing = await readCore(cardLibraryCoreName);
-    for (const item of existing) {
-      if (typeof item === 'string') {
-        try {
-          const data = JSON.parse(item);
-          if (data.cardId) {
-            existingCardIds.add(data.cardId);
-          }
-        } catch {}
+    const Hypercore = require('hypercore');
+    const core = new Hypercore(pathModule.join(storageDir, cardLibraryCoreName));
+    await core.ready();
+    const length = core.length;
+    for (let i = 0; i < length; i++) {
+      try {
+        const data = await core.get(i);
+        if (!data) continue;
+        const raw = data.toString();
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.cardId) {
+          existingCardIds.add(String(parsed.cardId));
+        }
+      } catch {
+        // ignore
       }
     }
-  } catch {}
+  } catch {
+    // ignore
+  }
 
   console.log(`[Recovery] ${existingCardIds.size} cards already in library`);
 
-  // Process each hell-week-card hypercore
-  for (const cardDir of hellWeekCardDirs) {
+  const shouldIndexCore = (coreName: string): boolean => {
+    if (!coreName) return false;
+    if (coreName === cardLibraryCoreName) return false;
+
+    const lc = coreName.toLowerCase();
+    if (lc === 'card-sets') return false;
+    if (lc === 'chat-archives') return false;
+    if (lc === 'wormhole-wiki-entries') return false;
+    if (lc === 'wormhole-wiki-terms') return false;
+    if (lc === 'wormhole-wiki-meta') return false;
+
+    return (
+      lc.startsWith('hell-week-card-') ||
+      lc.startsWith('card-') ||
+      lc.startsWith('set-') ||
+      lc.startsWith('msg-') ||
+      lc.startsWith('avatar-')
+    );
+  };
+
+  const extractCardRecord = (records: string[]): any | null => {
+    for (let i = records.length - 1; i >= 0; i--) {
+      const raw = records[i];
+      if (typeof raw !== 'string') continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (!parsed) continue;
+        if (parsed.type === 'card-state' && parsed.card) return parsed.card;
+        if (parsed.cardId || parsed.cardData || parsed.kind || parsed.message || parsed.image || parsed.video || parsed.audio) {
+          return parsed;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  };
+
+  const toMediaKind = (cardRecord: any): 'image' | 'video' | 'audio' | 'message' | 'pet' | undefined => {
+    if (!cardRecord) return undefined;
+    if (cardRecord.kind === 'message' || cardRecord.message) return 'message';
+    if (cardRecord.mediaKind === 'pet' || cardRecord.type === 'pet') return 'pet';
+    if (cardRecord.video || cardRecord.mediaKind === 'video') return 'video';
+    if (cardRecord.audio || cardRecord.mediaKind === 'audio') return 'audio';
+    if (cardRecord.image || cardRecord.mediaKind === 'image') return 'image';
+    return undefined;
+  };
+
+  const toMediaLocalPath = (cardRecord: any): string | undefined => {
+    if (!cardRecord) return undefined;
+    if (cardRecord.image?.localPath) return cardRecord.image.localPath;
+    if (cardRecord.video?.localPath) return cardRecord.video.localPath;
+    if (cardRecord.audio?.localPath) return cardRecord.audio.localPath;
+    if (typeof cardRecord.mediaLocalPath === 'string') return cardRecord.mediaLocalPath;
+    if (typeof cardRecord.mediaPrompts?.generated_image_local === 'string') return cardRecord.mediaPrompts.generated_image_local;
+    if (typeof cardRecord.imagePath === 'string') return cardRecord.imagePath;
+    if (typeof cardRecord.mediaPath === 'string') return cardRecord.mediaPath;
+    return undefined;
+  };
+
+  const getCardName = (cardRecord: any, fallbackId: string): string => {
+    return (
+      cardRecord?.cardData?.name ||
+      cardRecord?.name ||
+      cardRecord?.pet?.name ||
+      cardRecord?.message?.title ||
+      `Card ${fallbackId.slice(-6)}`
+    );
+  };
+
+  for (const coreName of dirs) {
     try {
-      // Read the card hypercore
-      const records = await readCore(cardDir);
+      if (!shouldIndexCore(coreName)) continue;
+
+      const records = await readCore(coreName, { tail: 12 });
       if (!records || records.length === 0) continue;
 
-      // Find the most recent card-state record
-      let cardRecord: any = null;
-      for (let i = records.length - 1; i >= 0; i--) {
-        if (typeof records[i] === 'string') {
-          try {
-            const parsed = JSON.parse(records[i]);
-            // CardManager writes type: 'card-state' with card data in .card property
-            if (parsed.type === 'card-state' && parsed.card) {
-              cardRecord = parsed.card;
-              break;
-            }
-          } catch {}
-        }
-      }
-
-      if (!cardRecord) {
-        // Try parsing as raw card object (fallback)
-        for (let i = records.length - 1; i >= 0; i--) {
-          if (typeof records[i] === 'string') {
-            try {
-              const parsed = JSON.parse(records[i]);
-              if (parsed.cardId || parsed.cardData) {
-                cardRecord = parsed;
-                break;
-              }
-            } catch {}
-          }
-        }
-      }
-
+      const cardRecord: any = extractCardRecord(records);
       if (!cardRecord) continue;
 
-      // Extract cardId from data or hypercore name
-      const cardId = cardRecord.cardId || cardDir.replace('hell-week-card-', '');
+      const cardId = String(
+        cardRecord.cardId ||
+          (coreName.startsWith('hell-week-card-')
+            ? coreName.replace('hell-week-card-', '')
+            : coreName),
+      );
       
       // Skip if already indexed
       if (existingCardIds.has(cardId)) {
         continue;
       }
 
-      // Get card name and image path from the card structure
-      const cardName = cardRecord.cardData?.name || cardRecord.name || `Card ${cardId.slice(-6)}`;
-      const imagePath = cardRecord.mediaPrompts?.generated_image_local || 
-                        cardRecord.imagePath || 
-                        cardRecord.mediaPath;
+      const cardName = getCardName(cardRecord, cardId);
+      const mediaKind = toMediaKind(cardRecord);
+      const mediaLocalPath = toMediaLocalPath(cardRecord);
 
       // Create card-index entry
       const cardIndexEntry = {
@@ -1677,10 +1736,10 @@ async function recoverOrphanedHellWeekCards(): Promise<{ recovered: number; erro
         cardId: cardId,
         name: cardName,
         createdAt: cardRecord.createdAt || new Date().toISOString(),
-        coreName: cardDir,
-        thumbnail: imagePath,
-        mediaKind: 'image',
-        mediaLocalPath: imagePath,
+        coreName: coreName,
+        thumbnail: mediaLocalPath,
+        mediaKind,
+        mediaLocalPath,
         runId: cardRecord.runId,
         lore: cardRecord.cardData?.lore?.substring(0, 200),
         sourceFile: 'Hell Week Recovery',
@@ -1689,12 +1748,19 @@ async function recoverOrphanedHellWeekCards(): Promise<{ recovered: number; erro
         state: cardRecord.state,
       };
 
-      await appendToCore(cardLibraryCoreName, JSON.stringify(cardIndexEntry));
+      try {
+        await appendToCore(cardLibraryCoreName, JSON.stringify(cardIndexEntry));
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        errors.push(`[append] ${msg}`);
+        console.error('[Recovery] Append failed; aborting recovery.', { error: msg, storageDir });
+        return { recovered, errors };
+      }
       recovered++;
       console.log(`[Recovery] Indexed: ${cardIndexEntry.name} (${cardRecord.state || 'unknown'})`);
 
     } catch (err: any) {
-      errors.push(`${cardDir}: ${err.message}`);
+      errors.push(`${coreName}: ${err.message}`);
     }
   }
 
@@ -1703,13 +1769,19 @@ async function recoverOrphanedHellWeekCards(): Promise<{ recovered: number; erro
 }
 
 // Export for use
-async function readCore(name: string): Promise<string[]> {
+async function readCore(name: string, options?: { tail?: number }): Promise<string[]> {
   const Hypercore = require('hypercore');
-  const core = new Hypercore('./storage/' + name);
+  const { getStorageDir } = require('./p2p');
+  const storageDir = (typeof getStorageDir === 'function' ? getStorageDir() : './storage');
+  const core = new Hypercore(require('path').join(storageDir, name));
   await core.ready();
   const length = core.length;
   const results: string[] = [];
-  for (let i = 0; i < length; i++) {
+
+  const tail = typeof options?.tail === 'number' ? options.tail : undefined;
+  const start = typeof tail === 'number' ? Math.max(0, length - Math.max(1, tail)) : 0;
+
+  for (let i = start; i < length; i++) {
     const data = await core.get(i);
     if (data) {
       results.push(data.toString());

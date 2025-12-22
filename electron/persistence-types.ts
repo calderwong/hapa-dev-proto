@@ -136,6 +136,11 @@ export interface CardUpdatedPayload extends Partial<CardCreatedPayload> {
   updatedAt: string;
 }
 
+export interface CardDeletedPayload {
+  id: string;
+  deletedAt: string;
+}
+
 // ============================================================
 // Wiki Event Payloads
 // ============================================================

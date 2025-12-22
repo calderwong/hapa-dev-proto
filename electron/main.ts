@@ -12,7 +12,7 @@ import { spawn, ChildProcess } from 'child_process';
 import isDev from 'electron-is-dev';
 import Store from 'electron-store';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { initP2P, createCore, appendToCore, readCore, getCoreLength, getP2PStats } from './p2p';
+import { initP2P, createCore, appendToCore, readCore, getCoreLength, getP2PStats, setStorageDir, getStorageDir } from './p2p';
 import { initPipeline } from './pipeline';
 import { thorsHammaManager } from './thors-hamma';
 import {
@@ -29,7 +29,8 @@ import {
 import {
   initPersistence,
   getPersistence,
-  emitCardEvent
+  emitCardEvent,
+  emitCardDeleted
 } from './persistence';
 
 const store: any = new Store();
@@ -39,6 +40,63 @@ let splashWindow: BrowserWindow | null = null;
 let rendererBootReady = false;
 let mainReadyToShow = false;
 
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    try {
+      const win = mainWindow;
+      if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+      }
+    } catch {
+      // ignore
+    }
+  });
+}
+
+process.on('uncaughtException', (err: any) => {
+  try {
+    console.error('[UncaughtException]', {
+      message: err?.message || String(err),
+      code: err?.code || err?.errno,
+      storageDir: (() => {
+        try {
+          return getStorageDir();
+        } catch {
+          return undefined;
+        }
+      })(),
+      cwd: process.cwd(),
+      stack: err?.stack,
+    });
+  } catch {
+    // ignore
+  }
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  try {
+    console.error('[UnhandledRejection]', {
+      message: reason?.message || String(reason),
+      code: reason?.code || reason?.errno,
+      storageDir: (() => {
+        try {
+          return getStorageDir();
+        } catch {
+          return undefined;
+        }
+      })(),
+      cwd: process.cwd(),
+      stack: reason?.stack,
+    });
+  } catch {
+    // ignore
+  }
+});
+
 const GEMINI_REQUEST_LOG_KEY = 'geminiRequestLog';
 const GEMINI_REQUEST_LOG_MAX_ENTRIES = 200;
 const ADMIN_SETTINGS_KEY = 'adminSettings';
@@ -46,8 +104,18 @@ const LLAMA_SETTINGS_KEY = 'llamaSettings';
 const LOCAL_VISION_SETTINGS_KEY = 'localVisionSettings';
 const WORMHOLE_SETTINGS_KEY = 'wormholeSettings';
 const CARD_LIBRARY_CORE_NAME = 'card-library';
+const CARD_SETS_CORE_NAME = 'card-sets';
 const WIKI_CORE_NAME = 'wormhole-wiki-entries';
 const NEXUS_SETTINGS_KEY = 'nexusSettings';
+
+const HAPA_STRESS_MEMORY =
+  process.env.HAPA_STRESS_MEMORY === '1' ||
+  process.argv.includes('--stress-memory');
+
+const HAPA_STRESS_HEADLESS =
+  process.env.HAPA_STRESS_HEADLESS === '1' ||
+  process.argv.includes('--stress-headless');
+const WORMHOLE_INGEST_SET_ID = 'set-wormhole-ingests';
 
 type AudioMode = 'transcribe' | 'realtime';
 
@@ -88,6 +156,200 @@ const saveNexusSettingsInternal = (settings: Partial<NexusSettings>) => {
   };
   store.set(NEXUS_SETTINGS_KEY, next);
   return next;
+};
+
+const getLatestCoreRecord = async (coreName: string): Promise<any | null> => {
+  try {
+    const records = await readCore(coreName);
+    if (!Array.isArray(records) || records.length === 0) return null;
+    for (let i = records.length - 1; i >= 0; i -= 1) {
+      const raw = records[i];
+      if (!raw || typeof raw !== 'string') continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed) return parsed;
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const ensureWormholeIngestSetExists = async (): Promise<{ setId: string; setName: string }> => {
+  const now = new Date().toISOString();
+  const setName = 'Wormhole Ingests';
+
+  await createCore(WORMHOLE_INGEST_SET_ID);
+
+  const existing = await getLatestCoreRecord(WORMHOLE_INGEST_SET_ID);
+  if (!existing || !(existing.type === 'card' || existing.cardType === 'set' || existing.kind === 'set')) {
+    const setCardRecord = {
+      type: 'card',
+      kind: 'set',
+      id: WORMHOLE_INGEST_SET_ID,
+      cardId: WORMHOLE_INGEST_SET_ID,
+      name: setName,
+      createdAt: now,
+      updatedAt: now,
+      cardType: 'set',
+      mediaKind: 'image',
+      memberOfSets: [],
+      containedCards: [],
+      containedCardCount: 0,
+      skills: [
+        { id: 'contain', name: 'Contain', type: 'passive', description: 'Holds and organizes cards.', icon: '📦' },
+        { id: 'consume', name: 'Consume', type: 'active', description: 'Add a card to this set.', icon: '🔮' },
+      ],
+      source: 'wormhole',
+      provider: 'wormhole',
+    };
+    await appendToCore(WORMHOLE_INGEST_SET_ID, JSON.stringify(setCardRecord));
+  }
+
+  await createCore(CARD_SETS_CORE_NAME);
+  try {
+    const setRecords = await readCore(CARD_SETS_CORE_NAME);
+    let hasSet = false;
+    for (const raw of setRecords || []) {
+      if (!raw || typeof raw !== 'string') continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.type === 'card-set' && parsed.setId === WORMHOLE_INGEST_SET_ID) {
+          hasSet = true;
+          break;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!hasSet) {
+      await appendToCore(
+        CARD_SETS_CORE_NAME,
+        JSON.stringify({
+          type: 'card-set',
+          setId: WORMHOLE_INGEST_SET_ID,
+          name: setName,
+          description: 'Automatically collected Wormhole ingests.',
+          artifactName: 'Wormhole',
+          runId: 'wormhole',
+          createdAt: now,
+          cardIds: [],
+          cardCount: 0,
+          imageCount: 0,
+          videoCount: 0,
+        }),
+      );
+    }
+  } catch {
+    // ignore
+  }
+
+  await createCore(CARD_LIBRARY_CORE_NAME);
+  await appendToCore(
+    CARD_LIBRARY_CORE_NAME,
+    JSON.stringify({
+      type: 'card-index',
+      cardId: WORMHOLE_INGEST_SET_ID,
+      createdAt: now,
+      provider: 'wormhole',
+      model: 'system',
+      coreName: WORMHOLE_INGEST_SET_ID,
+      name: setName,
+      cardType: 'set',
+      mediaKind: 'image',
+      memberOfSets: [],
+      containedCards: [],
+      containedCardCount: 0,
+    }),
+  );
+
+  return { setId: WORMHOLE_INGEST_SET_ID, setName };
+};
+
+const addCardToWormholeIngestSet = async (params: { cardId: string; cardName?: string; addedAt: string }) => {
+  const { cardId, cardName, addedAt } = params;
+  await createCore(WORMHOLE_INGEST_SET_ID);
+
+  const latest = await getLatestCoreRecord(WORMHOLE_INGEST_SET_ID);
+  const contained = Array.isArray(latest?.containedCards) ? latest.containedCards : [];
+  const existingIds = new Set(contained.map((c: any) => String(c?.cardId || '')).filter(Boolean));
+  if (existingIds.has(cardId)) return;
+
+  const now = new Date().toISOString();
+  const nextContainedCards = [
+    ...contained,
+    {
+      cardId,
+      cardName: cardName || undefined,
+      addedAt: addedAt || now,
+      addedBy: 'consume',
+      order: contained.length,
+    },
+  ];
+
+  const nextSetRecord = {
+    ...(latest && typeof latest === 'object' ? latest : {}),
+    type: 'card',
+    kind: 'set',
+    id: WORMHOLE_INGEST_SET_ID,
+    cardId: WORMHOLE_INGEST_SET_ID,
+    name: (latest && latest.name) || 'Wormhole Ingests',
+    createdAt: (latest && latest.createdAt) || now,
+    updatedAt: now,
+    cardType: 'set',
+    mediaKind: 'image',
+    containedCards: nextContainedCards,
+    containedCardCount: nextContainedCards.length,
+  };
+
+  await appendToCore(WORMHOLE_INGEST_SET_ID, JSON.stringify(nextSetRecord));
+
+  try {
+    await createCore(CARD_SETS_CORE_NAME);
+    const setRecords = await readCore(CARD_SETS_CORE_NAME);
+    let lastRecord: any = null;
+    for (let i = setRecords.length - 1; i >= 0; i -= 1) {
+      const raw = setRecords[i];
+      if (!raw || typeof raw !== 'string') continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.type === 'card-set' && parsed.setId === WORMHOLE_INGEST_SET_ID) {
+          lastRecord = parsed;
+          break;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const existingIds = Array.isArray(lastRecord?.cardIds) ? (lastRecord.cardIds as any[]) : [];
+    const nextIds = [...new Set(existingIds.map(String).filter(Boolean).concat([cardId]))];
+
+    const nowIso = new Date().toISOString();
+    await appendToCore(
+      CARD_SETS_CORE_NAME,
+      JSON.stringify({
+        ...(lastRecord || {}),
+        type: 'card-set',
+        setId: WORMHOLE_INGEST_SET_ID,
+        name: (lastRecord && lastRecord.name) || 'Wormhole Ingests',
+        description: (lastRecord && lastRecord.description) || 'Automatically collected Wormhole ingests.',
+        artifactName: (lastRecord && lastRecord.artifactName) || 'Wormhole',
+        runId: (lastRecord && lastRecord.runId) || 'wormhole',
+        createdAt: (lastRecord && lastRecord.createdAt) || nowIso,
+        cardIds: nextIds,
+        cardCount: nextIds.length,
+        imageCount: typeof lastRecord?.imageCount === 'number' ? lastRecord.imageCount : 0,
+        videoCount: typeof lastRecord?.videoCount === 'number' ? lastRecord.videoCount : 0,
+      }),
+    );
+  } catch {
+    // ignore
+  }
 };
 
 interface LlamaSettingsInternal {
@@ -172,6 +434,183 @@ const endOperation = (id: string) => {
     const duration = Date.now() - op.startTime;
     console.log(`[Ops] Completed ${op.type} (${id}) in ${duration}ms. Active ops: ${activeOperations.size - 1}`);
     activeOperations.delete(id);
+  }
+};
+
+const parsePositiveInt = (value: any, fallback: number) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.floor(n);
+  return i > 0 ? i : fallback;
+};
+
+const getRepoTempDir = () => {
+  try {
+    return path.join(process.cwd(), 'temp');
+  } catch {
+    return path.join(app.getPath('userData'), 'temp');
+  }
+};
+
+const ensureDir = async (dirPath: string) => {
+  try {
+    await fs.promises.mkdir(dirPath, { recursive: true });
+  } catch {
+    // ignore
+  }
+};
+
+const appendJsonl = async (filePath: string, payload: any) => {
+  const line = JSON.stringify(payload) + '\n';
+  await fs.promises.appendFile(filePath, line, { encoding: 'utf8' });
+};
+
+const getDefaultSeedImagePath = () => {
+  const p = path.join(process.cwd(), 'public', 'Paramation_Logo.png');
+  try {
+    if (fs.existsSync(p)) return p;
+  } catch {
+    // ignore
+  }
+  return '';
+};
+
+let stressRunStarted = false;
+
+const runMemoryStressTest = async (win: BrowserWindow) => {
+  if (stressRunStarted) return;
+  stressRunStarted = true;
+
+  const imageCount = parsePositiveInt(process.env.HAPA_STRESS_IMAGE_COUNT, 50);
+  const videoCount = parsePositiveInt(process.env.HAPA_STRESS_VIDEO_COUNT, 20);
+  const sleepMs = parsePositiveInt(process.env.HAPA_STRESS_SLEEP_MS, 150);
+  const seedImagePath =
+    typeof process.env.HAPA_STRESS_SEED_IMAGE_PATH === 'string' && process.env.HAPA_STRESS_SEED_IMAGE_PATH.trim().length > 0
+      ? process.env.HAPA_STRESS_SEED_IMAGE_PATH.trim()
+      : getDefaultSeedImagePath();
+
+  const reportDir = getRepoTempDir();
+  await ensureDir(reportDir);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const reportPath = path.join(reportDir, `memory-stress-${stamp}.jsonl`);
+
+  const snapshot = async (label: string, extra?: any) => {
+    const used = process.memoryUsage();
+    const payload = {
+      t: new Date().toISOString(),
+      label,
+      rssMB: Math.round(used.rss / 1024 / 1024),
+      heapUsedMB: Math.round(used.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(used.heapTotal / 1024 / 1024),
+      externalMB: Math.round(used.external / 1024 / 1024),
+      activeOps: activeOperations.size,
+      ...extra,
+    };
+    await appendJsonl(reportPath, payload);
+    logMemory(label);
+  };
+
+  const invokeRenderer = async <T,>(expr: string): Promise<T> => {
+    return await win.webContents.executeJavaScript(expr, true);
+  };
+
+  await snapshot('StressTest Start', {
+    imageCount,
+    videoCount,
+    seedImagePath: seedImagePath || undefined,
+  });
+
+  const generatedImages: Array<{ localPath: string; craftedPrompt?: string }> = [];
+  for (let i = 1; i <= imageCount; i++) {
+    await snapshot('StressTest Image Before', { i });
+    try {
+      const name = `Stress Image ${i}`;
+      const text = `Memory stress test image generation iteration ${i}.`;
+      const provider = process.env.HAPA_STRESS_IMAGE_PROVIDER || 'gemini';
+      const result = await invokeRenderer<any>(
+        `window.electronAPI.generateImageForCard({ cardContext: { name: ${JSON.stringify(name)}, mediaKind: 'text', text: ${JSON.stringify(text)}, tags: ['stress-test'] }, provider: ${JSON.stringify(provider)} })`
+      );
+      if (result?.success && result?.localPath) {
+        generatedImages.push({ localPath: String(result.localPath), craftedPrompt: result.craftedPrompt });
+      }
+      await appendJsonl(reportPath, { t: new Date().toISOString(), phase: 'image', i, ok: true, localPath: result?.localPath });
+    } catch (err: any) {
+      await appendJsonl(reportPath, { t: new Date().toISOString(), phase: 'image', i, ok: false, error: err?.message || String(err) });
+    }
+    hintGC();
+    await snapshot('StressTest Image After', { i, generated: generatedImages.length });
+    if (sleepMs > 0) await new Promise((r) => setTimeout(r, sleepMs));
+  }
+
+  const parentCardId = `stress-parent-${Date.now()}`;
+  try {
+    await createCore(CARD_LIBRARY_CORE_NAME);
+    await appendToCore(
+      CARD_LIBRARY_CORE_NAME,
+      JSON.stringify({
+        type: 'card-index',
+        cardId: parentCardId,
+        name: 'Stress Parent',
+        mediaKind: 'image',
+        createdAt: new Date().toISOString(),
+        coreName: parentCardId,
+      })
+    );
+    await createCore(parentCardId);
+    await appendToCore(
+      parentCardId,
+      JSON.stringify({
+        type: 'card',
+        cardId: parentCardId,
+        name: 'Stress Parent',
+        mediaKind: 'image',
+        createdAt: new Date().toISOString(),
+      })
+    );
+  } catch {
+    // ignore
+  }
+
+  const loopSourcePaths = generatedImages.length > 0
+    ? generatedImages.map((x) => x.localPath)
+    : (seedImagePath ? [seedImagePath] : []);
+
+  for (let i = 1; i <= videoCount; i++) {
+    const sourcePath = loopSourcePaths.length > 0
+      ? loopSourcePaths[(i - 1) % loopSourcePaths.length]
+      : '';
+    if (!sourcePath) {
+      await appendJsonl(reportPath, { t: new Date().toISOString(), phase: 'video', i, ok: false, error: 'No source image path available' });
+      break;
+    }
+
+    await snapshot('StressTest Video Before', { i, sourcePath });
+    try {
+      const imageId = `stress-image-${i}`;
+      const originalPrompt = generatedImages[(i - 1) % Math.max(1, generatedImages.length)]?.craftedPrompt || 'Stress loop prompt';
+      const result = await invokeRenderer<any>(
+        `window.electronAPI.createLoopVideoForImage({ parentCardId: ${JSON.stringify(parentCardId)}, imageId: ${JSON.stringify(imageId)}, imagePath: ${JSON.stringify(sourcePath)}, originalPrompt: ${JSON.stringify(originalPrompt)}, cardName: 'Stress Parent', imageOrder: ${i - 1} })`
+      );
+      await appendJsonl(reportPath, { t: new Date().toISOString(), phase: 'video', i, ok: true, videoCardId: result?.videoCardId, videoPath: result?.videoPath });
+    } catch (err: any) {
+      await appendJsonl(reportPath, { t: new Date().toISOString(), phase: 'video', i, ok: false, error: err?.message || String(err) });
+    }
+    hintGC();
+    await snapshot('StressTest Video After', { i });
+    if (sleepMs > 0) await new Promise((r) => setTimeout(r, sleepMs));
+  }
+
+  await snapshot('StressTest Complete', { reportPath });
+  console.log('[StressTest] Complete:', { reportPath });
+
+  if (HAPA_STRESS_HEADLESS) {
+    setTimeout(() => {
+      try {
+        app.quit();
+      } catch {
+        // ignore
+      }
+    }, 750);
   }
 };
 
@@ -1742,6 +2181,9 @@ const maybeShowMain = () => {
 };
 
 function createSplashWindow() {
+  if (HAPA_STRESS_HEADLESS) {
+    throw new Error('Headless stress mode');
+  }
   const videos = getVibesVideoUrls();
   const html = buildSplashHtml(videos);
   const splash = new BrowserWindow({
@@ -1822,6 +2264,12 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => {
     console.log('[Renderer] did-finish-load:', win.webContents.getURL());
+
+    if (HAPA_STRESS_MEMORY) {
+      runMemoryStressTest(win).catch((err) => {
+        console.error('[StressTest] Failed:', err);
+      });
+    }
   });
 
   // Strip X-Frame-Options and CSP frame-ancestors headers to allow embedding external sites
@@ -1851,7 +2299,24 @@ function createWindow() {
     }
   });
 
-  if (isDev) {
+  if (HAPA_STRESS_HEADLESS) {
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hapa Stress Headless</title>
+  </head>
+  <body style="background:#000;color:#0ff;font-family:monospace;">
+    <div>Hapa Stress Headless Mode</div>
+    <script>
+      window.__HAPA_STRESS_HEADLESS__ = true;
+    </script>
+  </body>
+</html>`;
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+    win.loadURL(dataUrl);
+  } else if (isDev) {
     const devUrl =
       process.env.VITE_DEV_SERVER_URL ||
       process.env.ELECTRON_RENDERER_URL ||
@@ -4777,6 +5242,16 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       const cardCoreName = `card-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const createdAt = new Date().toISOString();
 
+      const ingestSet = await ensureWormholeIngestSetExists();
+      const memberOfSets = [
+        {
+          setCardId: ingestSet.setId,
+          setName: ingestSet.setName,
+          joinedAt: createdAt,
+          addedBy: 'consume',
+        },
+      ];
+
       if (!filePath && hasBytes) {
         const userDataDir = app.getPath('userData');
         const wormholeDir = path.join(userDataDir, 'wormhole');
@@ -4927,12 +5402,16 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         type: 'card',
         kind,
         id: cardCoreName,
+        cardId: cardCoreName,
         createdAt,
         updatedAt: createdAt,
         title: fileName,
         mediaType,
         source: 'wormhole',
         provider: 'wormhole',
+        parentCardId: ingestSet.setId,
+        memberOfSets,
+        setId: ingestSet.setId,
         wormhole: {
           ingest: ingestInfo,
           processing,
@@ -4984,9 +5463,22 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         coreName: cardCoreName,
         coreKey: coreInfo?.key,
         coreDiscoveryKey: coreInfo?.discoveryKey,
+        parentCardId: ingestSet.setId,
+        setId: ingestSet.setId,
+        memberOfSets,
       } as any;
 
       await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(libraryEntry));
+
+      try {
+        await addCardToWormholeIngestSet({
+          cardId: cardCoreName,
+          cardName: fileName,
+          addedAt: createdAt,
+        });
+      } catch (err) {
+        console.warn('[Wormhole] Failed to add card to wormhole ingest set:', err);
+      }
 
       // Emit to persistence layer
       emitCardEvent('CARD_CREATED', {
@@ -6293,6 +6785,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     mediaLocalPath?: string;
     parentCardId?: string;
     createdAt?: string;
+    deleted?: boolean;
+    deletedAt?: string;
   };
 
   const normalizeIndexEntry = (parsed: any): NexusIndexEntry | null => {
@@ -6308,6 +6802,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       mediaLocalPath: parsed.mediaLocalPath,
       parentCardId: parsed.parentCardId,
       createdAt: parsed.createdAt,
+      deleted: parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted',
+      deletedAt: parsed.deletedAt,
     };
   };
 
@@ -6334,13 +6830,18 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         const start = typeof payload?.cursor === 'number' && payload.cursor >= 0 ? payload.cursor : 0;
         const blocks = await readCore(coreName, { start, limit: windowSize });
         const byId = new Map<string, NexusIndexEntry>();
+        const deletedIds = new Set<string>();
 
         for (const raw of blocks || []) {
           try {
             const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
             const entry = normalizeIndexEntry(parsed);
             if (!entry) continue;
-            if (byId.has(entry.cardId)) continue;
+            if (byId.has(entry.cardId) || deletedIds.has(entry.cardId)) continue;
+            if (entry.deleted) {
+              deletedIds.add(entry.cardId);
+              continue;
+            }
             byId.set(entry.cardId, entry);
             if (byId.size >= limit) break;
           } catch {
@@ -6372,6 +6873,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             if (!entry) continue;
             if (seen.has(entry.cardId)) continue;
             seen.add(entry.cardId);
+            if (entry.deleted) continue;
             items.push(entry);
             if (items.length >= limit) break;
           } catch {
@@ -6490,6 +6992,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
               if (!entry) continue;
               if (seen.has(entry.cardId)) continue;
               seen.add(entry.cardId);
+              if (entry.deleted) continue;
 
               const name = String(entry.name || '').toLowerCase();
               const id = String(entry.cardId || '').toLowerCase();
@@ -6525,6 +7028,108 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     if (job) job.cancelled = true;
     return { ok: true };
   });
+
+  ipcMain.handle(
+    'card:delete',
+    async (
+      _event,
+      payload: {
+        cardId: string;
+        deleteAssets?: boolean;
+      },
+    ) => {
+      const cardId = String(payload?.cardId || '').trim();
+      if (!cardId) {
+        throw new Error('card:delete requires cardId');
+      }
+
+      const deleteAssets = payload?.deleteAssets === true;
+      const deletedAt = new Date().toISOString();
+
+      await createCore(cardId);
+      await appendToCore(
+        cardId,
+        JSON.stringify({ type: 'card-deleted', cardId, deletedAt }),
+      );
+
+      await createCore(CARD_LIBRARY_CORE_NAME);
+      await appendToCore(
+        CARD_LIBRARY_CORE_NAME,
+        JSON.stringify({
+          type: 'card-index',
+          cardId,
+          coreName: cardId,
+          deleted: true,
+          deletedAt,
+          createdAt: deletedAt,
+          provider: 'system',
+          model: 'delete',
+        }),
+      );
+
+      try {
+        await emitCardDeleted({ id: cardId, deletedAt });
+      } catch (err) {
+        console.error('[Persistence] Failed to emit CARD_DELETED:', err);
+      }
+
+      let deletedAssets: string[] = [];
+      if (deleteAssets) {
+        try {
+          const userDataDir = app.getPath('userData');
+          const userDataLower = userDataDir.replace(/\\/g, '/').toLowerCase();
+
+          const blocks = await readCore(cardId, { reverse: true, limit: 30 });
+          const candidates = new Set<string>();
+
+          for (const raw of blocks || []) {
+            if (!raw || typeof raw !== 'string') continue;
+            try {
+              const rec = JSON.parse(raw);
+              const maybeAdd = (p: any) => {
+                if (!p || typeof p !== 'string') return;
+                const normalized = p.startsWith('file://') ? p.replace(/^file:\/\//, '') : p;
+                candidates.add(normalized);
+              };
+
+              maybeAdd(rec?.mediaLocalPath);
+              maybeAdd(rec?.image?.localPath);
+              maybeAdd(rec?.video?.localPath);
+              maybeAdd(rec?.audio?.localPath);
+              maybeAdd(rec?.wormhole?.ingest?.originalPath);
+              maybeAdd(rec?.cardData?.htmlPath);
+              maybeAdd(rec?.cardData?.htmlFilePath);
+            } catch {
+              // ignore
+            }
+          }
+
+          for (const p of candidates) {
+            try {
+              const resolved = path.resolve(p).replace(/\\/g, '/');
+              const resolvedLower = resolved.toLowerCase();
+              if (!resolvedLower.startsWith(userDataLower)) continue;
+              const stat = await fs.promises.stat(resolved).catch(() => null);
+              if (!stat || !stat.isFile()) continue;
+              await fs.promises.unlink(resolved);
+              deletedAssets.push(resolved);
+            } catch {
+              // ignore
+            }
+          }
+        } catch (err) {
+          console.error('[CardDelete] Asset cleanup failed:', err);
+        }
+      }
+
+      return {
+        ok: true,
+        cardId,
+        deletedAt,
+        deletedAssets,
+      };
+    },
+  );
 
   // P2P IPC handlers
   ipcMain.handle('p2p-create-core', async (_event, name: string) => {
@@ -6576,8 +7181,6 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
   // ============================================================================
   // CARD SETS IPC HANDLERS
   // ============================================================================
-
-  const CARD_SETS_CORE_NAME = 'card-sets';
 
   // Get all card sets
   ipcMain.handle('card-sets:list', async () => {
@@ -6877,6 +7480,8 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
   ipcMain.handle('get-system-stats', async () => {
     // 1. Storage usage
     let storageUsageBytes = 0;
+    let storageFreeBytes = 0;
+    let storageTotalBytes = 0;
     try {
       // Simple recursive size
       const getDirSize = async (dir: string): Promise<number> => {
@@ -6893,11 +7498,21 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         }
         return size;
       };
-      // storage dir is relative to where main.ts runs? 
-      // In dev: electron/main.ts -> storage/ is in root.
-      // In prod: resources/app/storage? 
-      // For now, assume './storage' relative to CWD which is project root in dev.
-      storageUsageBytes = await getDirSize('./storage').catch(() => 0);
+      storageUsageBytes = await getDirSize(getStorageDir()).catch(() => 0);
+
+      try {
+        // statfs provides accurate free/total for the filesystem containing storageDir.
+        const stat: any = await (fs.promises as any).statfs(getStorageDir());
+        const bsize = Number(stat?.bsize || stat?.frsize || 0);
+        const bavail = Number(stat?.bavail || 0);
+        const blocks = Number(stat?.blocks || 0);
+        if (bsize > 0) {
+          storageFreeBytes = bavail * bsize;
+          storageTotalBytes = blocks * bsize;
+        }
+      } catch {
+        // ignore
+      }
     } catch {
       // ignore
     }
@@ -6919,6 +7534,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
     return {
       storageUsageBytes,
+      storageFreeBytes,
+      storageTotalBytes,
+      storageDir: getStorageDir(),
+      cwd: process.cwd(),
       cardCount,
       wikiEntryCount,
       wormholeRunCount,
@@ -6939,7 +7558,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
       // Build a map of setId -> setCardId from cards that have both
       const setIdToSetCardId: Map<string, string> = new Map();
-      const cardsBySetId: Map<string, any[]> = new Map();
+      const setIdToSetName: Map<string, string> = new Map();
 
       // First pass: find Set Cards and build mapping
       for (const raw of libraryRecords) {
@@ -6952,58 +7571,111 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           if (parsed.cardType === 'set') {
             // Set Cards use their own cardId as the setId
             setIdToSetCardId.set(parsed.cardId, parsed.cardId);
-          }
-
-          // Collect cards by setId for legacy mapping
-          if (parsed.setId) {
-            if (!cardsBySetId.has(parsed.setId)) {
-              cardsBySetId.set(parsed.setId, []);
+            if (parsed.name) {
+              setIdToSetName.set(parsed.cardId, String(parsed.name));
             }
-            cardsBySetId.get(parsed.setId)!.push(parsed);
           }
         } catch { /* ignore */ }
       }
 
-      // Second pass: fix cards that have setId but no parentCardId
       for (const raw of libraryRecords) {
         if (!raw || typeof raw !== 'string') continue;
         try {
           const parsed = JSON.parse(raw);
-          if (parsed.type !== 'card-index') continue;
-          if (parsed.cardType === 'set') continue; // Skip Set Cards
+          if (!parsed || parsed.type !== 'card-index') continue;
+          if (parsed.deleted) continue;
+          if (parsed.cardType === 'set') continue;
 
-          // Check if card needs repair
-          const needsParent = parsed.setId && !parsed.parentCardId;
-          const needsMemberOfSets = parsed.setId && (!parsed.memberOfSets || parsed.memberOfSets.length === 0);
+          const setId = typeof parsed.setId === 'string' ? parsed.setId : '';
+          if (!setId) continue;
+          const setCardId = setIdToSetCardId.get(setId) || setId;
+          const setName = setIdToSetName.get(setId);
 
-          if (needsParent || needsMemberOfSets) {
-            const setCardId = parsed.setId; // For Hell Week, setId IS the Set Card ID
+          const needsParent = !parsed.parentCardId;
+          const needsMemberOfSets = !Array.isArray(parsed.memberOfSets) || parsed.memberOfSets.length === 0;
+          if (!needsParent && !needsMemberOfSets) continue;
 
-            // Create repaired entry
-            const repairedEntry = {
-              ...parsed,
-              cardType: parsed.cardType || 'standard',
-              parentCardId: setCardId,
-              memberOfSets: parsed.memberOfSets || [{
-                setCardId: setCardId,
+          const memberOfSets = Array.isArray(parsed.memberOfSets) ? parsed.memberOfSets : [];
+          const nextMemberOfSets = needsMemberOfSets
+            ? [
+              {
+                setCardId,
+                setName,
                 joinedAt: parsed.createdAt || new Date().toISOString(),
-                addedBy: 'repair',
-              }],
+                addedBy: 'pipeline',
+              },
+            ]
+            : memberOfSets;
+
+          const repairedEntry = {
+            ...parsed,
+            parentCardId: parsed.parentCardId || setCardId,
+            memberOfSets: nextMemberOfSets,
+            updatedAt: new Date().toISOString(),
+          };
+
+          await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(repairedEntry));
+          repaired.push(String(parsed.cardId));
+        } catch (err: any) {
+          errors.push(err?.message || String(err));
+        }
+      }
+
+      try {
+        const ingestSet = await ensureWormholeIngestSetExists();
+        for (const raw of libraryRecords) {
+          if (!raw || typeof raw !== 'string') continue;
+          try {
+            const parsed = JSON.parse(raw);
+            if (!parsed || parsed.type !== 'card-index') continue;
+            if (parsed.deleted) continue;
+            if (parsed.provider !== 'wormhole') continue;
+            if (parsed.cardId === ingestSet.setId) continue;
+
+            const needsParent = !parsed.parentCardId;
+            const needsSetId = !parsed.setId;
+            if (!needsParent && !needsSetId) continue;
+
+            const nextMemberOfSets = Array.isArray(parsed.memberOfSets) && parsed.memberOfSets.length > 0
+              ? parsed.memberOfSets
+              : [{
+                setCardId: ingestSet.setId,
+                setName: ingestSet.setName,
+                joinedAt: parsed.createdAt || new Date().toISOString(),
+                addedBy: 'consume',
+              }];
+
+            const updated = {
+              ...parsed,
+              parentCardId: ingestSet.setId,
+              setId: ingestSet.setId,
+              memberOfSets: nextMemberOfSets,
               updatedAt: new Date().toISOString(),
             };
 
-            // Append repaired entry
-            await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(repairedEntry));
-            repaired.push(parsed.cardId);
-            console.log('[Repair] Fixed card:', parsed.cardId, '-> parent:', setCardId);
+            await appendToCore(CARD_LIBRARY_CORE_NAME, JSON.stringify(updated));
+            repaired.push(String(parsed.cardId));
+
+            try {
+              await addCardToWormholeIngestSet({
+                cardId: String(parsed.cardId),
+                cardName: parsed.name,
+                addedAt: parsed.createdAt || new Date().toISOString(),
+              });
+            } catch {
+              // ignore
+            }
+          } catch {
+            // ignore
           }
-        } catch (err: any) {
-          errors.push(`${raw.substring(0, 50)}: ${err.message}`);
         }
+      } catch {
+        // ignore
       }
 
       console.log('[Repair] Completed. Repaired:', repaired.length, 'Errors:', errors.length);
       return { repaired: repaired.length, errors, repairedIds: repaired };
+
     } catch (err: any) {
       console.error('[Repair] Failed:', err);
       return { repaired: 0, errors: [err.message], repairedIds: [] };
@@ -7014,9 +7686,41 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 app.on('ready', async () => {
   // Initialize P2P and optionally auto-start local llama.cpp server, then open the window
   rendererBootReady = false;
+
   try {
-    splashWindow = createSplashWindow();
-  } catch {
+    const overrideDir = typeof process.env.HAPA_STORAGE_DIR === 'string' && process.env.HAPA_STORAGE_DIR.trim().length > 0
+      ? process.env.HAPA_STORAGE_DIR.trim()
+      : '';
+    const defaultDir = path.join(app.getPath('userData'), 'storage');
+    setStorageDir(overrideDir || defaultDir, overrideDir ? { force: true } : undefined);
+    console.log('[Storage] Configured Hypercore storage', {
+      storageDir: getStorageDir(),
+      cwd: process.cwd(),
+      overrideDir: overrideDir || undefined,
+      defaultDir,
+    });
+  } catch (err) {
+    console.error('[Storage] Failed to configure Hypercore storage:', err);
+  }
+
+  ipcMain.handle('toggle-dev-tools', async () => {
+    try {
+      const win = BrowserWindow.getFocusedWindow() || mainWindow;
+      if (win && !win.isDestroyed()) {
+        win.webContents.toggleDevTools();
+      }
+    } catch (err) {
+      console.error('[DevTools] toggle-dev-tools failed:', err);
+    }
+  });
+
+  if (!HAPA_STRESS_HEADLESS) {
+    try {
+      splashWindow = createSplashWindow();
+    } catch {
+      splashWindow = null;
+    }
+  } else {
     splashWindow = null;
   }
 
@@ -7038,17 +7742,6 @@ app.on('ready', async () => {
 
   setTimeout(() => {
     try {
-      initP2P();
-    } catch (err) {
-      console.error('[P2P] Init error:', err);
-    }
-
-    // Initialize persistence layer (SQLite projection engine)
-    initPersistence().catch(err => {
-      console.error('[Persistence] Init error:', err);
-    });
-
-    try {
       const llamaSettings = getLlamaSettingsInternal();
       if (llamaSettings.autoStart) {
         startLlamaServerInternal().catch((error) => {
@@ -7057,6 +7750,20 @@ app.on('ready', async () => {
       }
     } catch (error) {
       console.error('Failed to read llama settings during auto-start:', error);
+    }
+
+    try {
+      initPersistence().catch((err) => {
+        console.error('[Persistence] Init error:', err);
+      });
+    } catch (err) {
+      console.error('[Persistence] Init error:', err);
+    }
+
+    try {
+      initP2P();
+    } catch (err) {
+      console.error('[P2P] Init error:', err);
     }
   }, 0);
 

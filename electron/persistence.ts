@@ -9,7 +9,7 @@ import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { SqliteAdapter } from './SqliteAdapter';
-import type { HypercoreEvent, CardCreatedPayload } from './persistence-types';
+import type { HypercoreEvent, CardCreatedPayload, CardDeletedPayload } from './persistence-types';
 
 // Singleton instance
 let adapter: SqliteAdapter | null = null;
@@ -145,5 +145,24 @@ export async function emitCardEvents(
     console.log(`[Persistence] Batch indexed ${events.length} cards`);
   } catch (err) {
     console.error('[Persistence] Batch event failed:', err);
+  }
+}
+
+export async function emitCardDeleted(payload: CardDeletedPayload): Promise<void> {
+  if (!adapter || !adapter.isReady()) return;
+
+  try {
+    const event: HypercoreEvent<CardDeletedPayload> = {
+      type: 'CARD_DELETED',
+      payload: {
+        id: payload.id,
+        deletedAt: payload.deletedAt,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    await adapter.applyEvent(event);
+  } catch (err) {
+    console.error('[Persistence] Delete event emit failed:', err);
   }
 }

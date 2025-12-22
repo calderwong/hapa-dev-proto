@@ -1,11 +1,67 @@
 import Hypercore from 'hypercore';
 import Hyperswarm from 'hyperswarm';
 import * as b4a from 'b4a';
+import * as path from 'path';
+import * as fs from 'fs';
 
 const cores = new Map<string, any>();
 let swarm: any;
 let swarmInitialized = false;
 const joinedTopics = new Set<string>();
+
+let storageDir = path.resolve(process.cwd(), 'storage');
+
+export function setStorageDir(nextDir: string, options?: { force?: boolean }) {
+    const resolved = path.resolve(nextDir);
+
+    const legacy = path.resolve(process.cwd(), 'storage');
+    const legacyCardLibrary = path.join(legacy, 'card-library');
+    const nextCardLibrary = path.join(resolved, 'card-library');
+
+    const safeDirSize = (p: string): number => {
+        try {
+            if (!fs.existsSync(p)) return -1;
+            const stat = fs.statSync(p);
+            if (!stat.isDirectory()) return stat.size;
+            let total = 0;
+            const entries = fs.readdirSync(p);
+            for (const name of entries) {
+                const child = path.join(p, name);
+                total += safeDirSize(child);
+            }
+            return total;
+        } catch {
+            return -1;
+        }
+    };
+
+    const legacyHas = fs.existsSync(legacyCardLibrary);
+    const nextHas = fs.existsSync(nextCardLibrary);
+
+    if (options?.force) {
+        storageDir = resolved;
+    } else {
+        if (legacyHas && nextHas) {
+            const legacySize = safeDirSize(legacyCardLibrary);
+            const nextSize = safeDirSize(nextCardLibrary);
+            storageDir = legacySize > nextSize ? legacy : resolved;
+        } else if (legacyHas) {
+            storageDir = legacy;
+        } else {
+            storageDir = resolved;
+        }
+    }
+
+    try {
+        fs.mkdirSync(storageDir, { recursive: true });
+    } catch {
+        // ignore
+    }
+}
+
+export function getStorageDir() {
+    return storageDir;
+}
 
 export function initP2P() {
     if (swarmInitialized) return;
@@ -46,7 +102,12 @@ export async function createCore(name: string) {
 
     let core = cores.get(name);
     if (!core) {
-        core = new Hypercore('./storage/' + name);
+        try {
+            fs.mkdirSync(storageDir, { recursive: true });
+        } catch {
+            // ignore
+        }
+        core = new Hypercore(path.join(storageDir, name));
         cores.set(name, core);
     }
 
@@ -73,7 +134,13 @@ export async function appendToCore(name: string, data: string) {
         throw new Error(`Core ${name} not found`);
     }
 
-    await core.append(data);
+    try {
+        await core.append(data);
+    } catch (err: any) {
+        const code = err?.code || err?.errno;
+        const msg = err?.message || String(err);
+        throw new Error(`[appendToCore] Failed (core=${name}, storageDir=${storageDir}, code=${code}): ${msg}`);
+    }
     return { length: core.length };
 }
 
