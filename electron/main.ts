@@ -29,6 +29,8 @@ import {
 import {
   initPersistence,
   getPersistence,
+  emitCardEvent,
+  emitCardDeleted,
   getPersistenceMetaValue,
   setPersistenceMetaValue
 } from './persistence';
@@ -53,6 +55,80 @@ if (!gotTheLock) {
       }
     } catch {
       // ignore
+    }
+  });
+
+  ipcMain.handle('persistence:rebuild-card-library-index', async () => {
+    const adapter: any = getPersistence();
+    if (!adapter || !adapter.isReady || !adapter.isReady()) {
+      return { ok: false, error: 'persistence_not_ready', indexed: 0, totalBlocks: 0 };
+    }
+
+    const checkpointKey = 'card_library_index_last_seq';
+    try {
+      const len = await getCoreLength(CARD_LIBRARY_CORE_NAME);
+      const end = typeof len === 'number' ? len : 0;
+      if (end <= 0) {
+        setPersistenceMetaValue(checkpointKey, '0');
+        return { ok: true, indexed: 0, totalBlocks: 0 };
+      }
+
+      // Reset checkpoint and replay entire index
+      setPersistenceMetaValue(checkpointKey, '0');
+      const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start: 0, end });
+      if (!Array.isArray(blocks) || blocks.length === 0) {
+        setPersistenceMetaValue(checkpointKey, String(end));
+        return { ok: true, indexed: 0, totalBlocks: 0 };
+      }
+
+      let indexed = 0;
+      for (const raw of blocks) {
+        if (!raw || typeof raw !== 'string') continue;
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = null;
+        }
+
+        if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
+
+        const id = String(parsed.cardId || parsed.coreName || '').trim();
+        if (!id) continue;
+
+        const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
+        if (deleted) {
+          await emitCardDeleted({ id, deletedAt: parsed.deletedAt || new Date().toISOString() } as any);
+          indexed += 1;
+        } else {
+          await emitCardEvent('CARD_CREATED', {
+            id,
+            type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
+            mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+            name: typeof parsed.name === 'string' ? parsed.name : undefined,
+            tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
+            hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
+            parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+            createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
+            metadata: {
+              coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
+              thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
+              mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
+              parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+              mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+              name: typeof parsed.name === 'string' ? parsed.name : undefined,
+              createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+              updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+            },
+          } as any);
+          indexed += 1;
+        }
+      }
+
+      setPersistenceMetaValue(checkpointKey, String(end));
+      return { ok: true, indexed, totalBlocks: blocks.length };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || String(err), indexed: 0, totalBlocks: 0 };
     }
   });
 }

@@ -243,6 +243,8 @@ export interface ElectronAPI {
     p2pAppend: (data: { name: string; data: string }) => Promise<number>;
     p2pRead: (name: string, options?: any) => Promise<string[]>;
     p2pGetLength: (name: string) => Promise<number>;
+
+    persistenceRebuildCardLibraryIndex?: () => Promise<{ ok: boolean; indexed: number; totalBlocks: number; error?: string }>;
     nexusGetSettings?: () => Promise<{ globalRenderCap: number; globalPageSize: number }>;
     nexusSaveSettings?: (settings: { globalRenderCap?: number; globalPageSize?: number }) => Promise<{ globalRenderCap: number; globalPageSize: number }>;
     nexusIndexPage?: (payload: { coreName?: string; cursor?: number; limit?: number; direction?: 'reverse' | 'forward' }) => Promise<{ items: any[]; nextCursor: number; hasMore: boolean; totalLength: number }>;

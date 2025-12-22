@@ -210,7 +210,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     persistenceSearchCards: (query: any) => ipcRenderer.invoke('persistence:search-cards', query),
     persistenceGetRagContext: (query: any) => ipcRenderer.invoke('persistence:get-rag-context', query),
     persistenceGetNeighbors: (query: any) => ipcRenderer.invoke('persistence:get-neighbors', query),
-    persistenceGetStats: () => ipcRenderer.invoke('persistence:get-stats'),
+    getPersistenceStats: () => ipcRenderer.invoke('persistence:get-stats'),
+    persistenceRebuildCardLibraryIndex: () => ipcRenderer.invoke('persistence:rebuild-card-library-index'),
 
     // Thor's Hamma
     processThorUrl: (url: string, handCards: any[]) => ipcRenderer.invoke('thor:process-url', { url, handCards }),
