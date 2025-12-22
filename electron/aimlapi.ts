@@ -118,7 +118,7 @@ export class AimlApiClient {
    * Chat Completion (OpenAI Compatible)
    */
   async chatCompletion(
-    messages: Array<{ role: string; content: string }>,
+    messages: Array<{ role: string; content: any }>,
     model: string,
     options: {
       temperature?: number;

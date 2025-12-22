@@ -4161,15 +4161,47 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         const { aimlApiClient } = await import('./aimlapi');
         
         // Construct messages array
-        const messages = history.map(h => ({ role: h.role, content: h.content }));
-        
-        // Add current message
-        // Note: AIMLAPI might not support inline images via OpenAI format for all models yet
-        // For now, we'll just send text.
-        // TODO: Check if AIMLAPI supports vision via standard OpenAI vision format
-        messages.push({ role: 'user', content: message });
+        const messages = history.map((h) => ({ role: h.role, content: h.content }));
 
-        const response = await aimlApiClient.chatCompletion(messages, model || 'gpt-4o');
+        const resolveDataUrl = (att: { mimeType: string; data: string }) => {
+          const mt = att?.mimeType ? String(att.mimeType) : '';
+          const raw = att?.data ? String(att.data) : '';
+          if (!raw) return null;
+          if (raw.startsWith('data:')) return raw;
+          if (mt) return `data:${mt};base64,${raw}`;
+          return `data:application/octet-stream;base64,${raw}`;
+        };
+
+        const imageAttachments = Array.isArray(attachments)
+          ? attachments
+              .filter((a) => {
+                const mt = a?.mimeType ? String(a.mimeType) : '';
+                return mt.startsWith('image/');
+              })
+              .slice(0, 4)
+          : [];
+
+        if (imageAttachments.length > 0) {
+          const contentParts: any[] = [{ type: 'text', text: message }];
+          for (const att of imageAttachments) {
+            const url = resolveDataUrl(att);
+            if (!url) continue;
+            contentParts.push({ type: 'image_url', image_url: { url } });
+          }
+
+          messages.push({ role: 'user', content: contentParts });
+
+          try {
+            const response = await aimlApiClient.chatCompletion(messages as any, model || 'gpt-4o');
+            return response.content;
+          } catch (err: any) {
+            console.warn('[AIMLAPI] Vision-style message failed; retrying as text-only:', err?.message || err);
+            // fall through to text-only
+          }
+        }
+
+        messages.push({ role: 'user', content: message });
+        const response = await aimlApiClient.chatCompletion(messages as any, model || 'gpt-4o');
         return response.content;
       } catch (error: any) {
         console.error('AIMLAPI Chat Error:', error);
