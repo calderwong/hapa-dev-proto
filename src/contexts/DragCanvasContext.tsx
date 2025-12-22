@@ -24,7 +24,7 @@ export interface SnapZone {
   onSnap: (item: DragItem) => void;
 }
 
-export type OverlayFormationMode = 'free' | 'fan' | 'line' | 'stack' | 'arc' | 'ring';
+export type OverlayFormationMode = 'free' | 'fan' | 'line' | 'stack' | 'arc' | 'ring' | 'square' | 'rect';
 
 export type PortalTargetMode = 'hand-dock' | 'bottom-center' | 'custom';
 
@@ -37,6 +37,13 @@ export interface OverlayLayoutState {
   portalColorMode: PortalColorMode;
   portalTargetPoint: { x: number; y: number };
 }
+
+export type HudDockSide = 'left' | 'right';
+
+export type HudDockState = {
+  left: string[];
+  right: string[];
+};
 
 export type CardPose = {
   tiltX: number;
@@ -54,6 +61,26 @@ export const DEFAULT_CARD_POSE: CardPose = {
   cameraMode: false,
 };
 
+export const OVERLAY_CARD_Z_MIN = -600;
+export const OVERLAY_CARD_Z_MAX = 800;
+export const OVERLAY_CARD_Z_STEP = 240;
+
+export function getOverlayZBaseline(mode: OverlayFormationMode, hover: boolean) {
+  const baseZ = mode === 'stack' ? 140 : 100;
+  const hoverLift = hover ? (mode === 'stack' ? 80 : 60) : 0;
+  return { baseZ, hoverLift, baselineZ: baseZ + hoverLift };
+}
+
+function clampZOffsets(input: unknown): Record<string, number> {
+  if (!input || typeof input !== 'object') return {};
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
+    out[key] = Math.max(OVERLAY_CARD_Z_MIN, Math.min(OVERLAY_CARD_Z_MAX, raw));
+  }
+  return out;
+}
+
 interface DragCanvasContextType {
   items: DragItem[];
   spawnItem: (item: DragItem) => void;
@@ -70,6 +97,10 @@ interface DragCanvasContextType {
   setZOffsets: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   poses: Record<string, CardPose>;
   setPoses: React.Dispatch<React.SetStateAction<Record<string, CardPose>>>;
+  hudDock: HudDockState;
+  setHudDock: React.Dispatch<React.SetStateAction<HudDockState>>;
+  anchored: string[];
+  setAnchored: React.Dispatch<React.SetStateAction<string[]>>;
 }
 
 const OVERLAY_PERSIST_KEY = 'hapa.overlayCards.v1';
@@ -89,6 +120,8 @@ type PersistedOverlayState = {
   overlayLayout: OverlayLayoutState;
   zOffsets: Record<string, number>;
   poses?: Record<string, CardPose>;
+  hudDock?: HudDockState;
+  anchored?: string[];
 };
 
 function renderPersistedCard(data: any) {
@@ -137,6 +170,8 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [zOffsets, setZOffsets] = useState<Record<string, number>>({});
   const [poses, setPoses] = useState<Record<string, CardPose>>({});
+  const [hudDock, setHudDock] = useState<HudDockState>({ left: [], right: [] });
+  const [anchored, setAnchored] = useState<string[]>([]);
 
   const didHydrateRef = useRef(false);
 
@@ -170,6 +205,14 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const { [id]: _removed, ...rest } = prev;
       return rest;
     });
+    setHudDock((prev) => {
+      if (!prev.left.includes(id) && !prev.right.includes(id)) return prev;
+      return {
+        left: prev.left.filter((x) => x !== id),
+        right: prev.right.filter((x) => x !== id),
+      };
+    });
+    setAnchored((prev) => prev.filter((x) => x !== id));
   }, []);
 
   const updateItemPosition = useCallback((id: string, tx: number, ty: number) => {
@@ -233,8 +276,19 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const portalTargetPoint = { x: window.innerWidth / 2, y: window.innerHeight - 26 };
         setOverlayLayout({ mode: o.mode ?? 'free', hover: !!o.hover, portalTargetMode, portalColorMode, portalTargetPoint });
       }
-      if (parsed?.zOffsets) setZOffsets(parsed.zOffsets);
+      if (parsed?.zOffsets) setZOffsets(clampZOffsets(parsed.zOffsets));
       if (parsed?.poses) setPoses(parsed.poses);
+      if (parsed?.hudDock) {
+        const d: any = parsed.hudDock;
+        const left = Array.isArray(d.left) ? d.left.map((x: any) => String(x)) : [];
+        const right = Array.isArray(d.right) ? d.right.map((x: any) => String(x)) : [];
+        setHudDock({ left, right });
+      }
+      if (parsed?.anchored) {
+        const a: any = parsed.anchored;
+        const ids = Array.isArray(a) ? a.map((x: any) => String(x)) : [];
+        setAnchored(ids);
+      }
       if (restoredItems.length > 0) setItems(restoredItems);
     } catch {
       // ignore
@@ -263,14 +317,16 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           portalColorMode: i.portalColorMode,
         })),
         overlayLayout,
-        zOffsets,
+        zOffsets: clampZOffsets(zOffsets),
         poses,
+        hudDock,
+        anchored,
       };
       window.localStorage.setItem(OVERLAY_PERSIST_KEY, JSON.stringify(persisted));
     } catch {
       // ignore
     }
-  }, [items, overlayLayout, zOffsets, poses]);
+  }, [items, overlayLayout, zOffsets, poses, hudDock, anchored]);
 
   return (
     <DragCanvasContext.Provider 
@@ -289,7 +345,11 @@ export const DragCanvasProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         zOffsets,
         setZOffsets,
         poses,
-        setPoses
+        setPoses,
+        hudDock,
+        setHudDock,
+        anchored,
+        setAnchored
       }}
     >
       {children}

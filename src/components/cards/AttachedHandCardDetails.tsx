@@ -95,8 +95,8 @@ export const AttachedHandCardDetails: React.FC<AttachedHandCardDetailsProps> = (
     if (!anchorRect) return null;
 
     const gap = 14;
-    const width = 320;
-    const height = 420;
+    const width = 300;
+    const height = 392;
 
     const preferredLeft = anchorRect.left - gap - width;
     const preferredTop = anchorRect.top - 14;
@@ -113,6 +113,7 @@ export const AttachedHandCardDetails: React.FC<AttachedHandCardDetailsProps> = (
   const skills = (card as any).skills || metadata.skills || [];
   const desires = (card as any).desires || metadata.desires || 'Awaiting purpose...';
   const truths = (card as any).truths || metadata.truths || [];
+  const lore = (card as any).lore || metadata.lore || (card as any).description || metadata.description || '';
 
   const formattedSkills = (skills || []).map((s: any) => (typeof s === 'string' ? s : s?.name || 'Unknown Skill'));
 
@@ -215,6 +216,13 @@ export const AttachedHandCardDetails: React.FC<AttachedHandCardDetailsProps> = (
               </div>
             </div>
           </div>
+
+          {lore ? (
+            <div className="rounded-xl border border-gray-800/70 bg-gray-900/20 p-3 space-y-1.5">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-gray-500">Lore</div>
+              <div className="text-xs text-gray-300 leading-relaxed whitespace-pre-wrap line-clamp-4">{String(lore)}</div>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-3">
             <div className="rounded-xl border border-gray-800/70 bg-gray-900/20 p-3 space-y-3">

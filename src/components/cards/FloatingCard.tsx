@@ -1,14 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { animate } from '../../hooks/useAnime';
 import type { DragItem } from '../../contexts/DragCanvasContext';
 import { useDragCanvas } from '../../contexts/DragCanvasContext';
 import type { OverlayLayoutState } from '../../contexts/DragCanvasContext';
-import { DEFAULT_CARD_POSE } from '../../contexts/DragCanvasContext';
-import { playCardClickSound, playCardDepthNudgeSound, playCardDropSound, playCardMoveTickSound, playCardPickUpSound, playCardPortalSound, playCardSnapSound } from '../../utils/audio';
+import { DEFAULT_CARD_POSE, getOverlayZBaseline, OVERLAY_CARD_Z_MAX, OVERLAY_CARD_Z_MIN, OVERLAY_CARD_Z_STEP } from '../../contexts/DragCanvasContext';
+import { playCardClickSound, playCardDepthNudgeSound, playCardDropSound, playCardMoveTickSound, playCardPickUpSound, playCardSnapSound } from '../../utils/audio';
 
 interface FloatingCardProps {
   item: DragItem;
-  formationTarget?: { tx: number; ty: number; tz: number; rotZ: number };
+  formationTarget?: { tx: number; ty: number; tz: number; rotZ: number; force?: boolean };
   overlayLayout: OverlayLayoutState;
 }
 
@@ -16,7 +16,23 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
   const dragRef = useRef<HTMLDivElement>(null);   // Controls Position (TranslateX/Y)
   const visualRef = useRef<HTMLDivElement>(null); // Controls Effects (Scale, Rotate, Glow)
   const poseRef = useRef<HTMLDivElement>(null);   // Controls user pose (rotateX/rotateY/rotateZ + zoom)
-  const { removeItem, snapZones, setOverlayLayout, selectedItemId, setSelectedItemId, zOffsets, setZOffsets, updateItemPosition, poses } = useDragCanvas();
+  const {
+    removeItem,
+    snapZones,
+    setOverlayLayout,
+    selectedItemId,
+    setSelectedItemId,
+    zOffsets,
+    setZOffsets,
+    updateItemPosition,
+    poses,
+    hudDock,
+    setHudDock,
+    anchored,
+    setAnchored,
+  } = useDragCanvas();
+
+  const [isHovered, setIsHovered] = useState(false);
 
   const portalColorMode = item.portalColorMode ?? overlayLayout.portalColorMode;
 
@@ -37,9 +53,15 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
 
   const zOffsetsRef = useRef(zOffsets);
 
+  const hudDockRef = useRef(hudDock);
+
+  const setHudDockRef = useRef(setHudDock);
+
   const posesRef = useRef(poses);
 
   const zDragRef = useRef({ startY: 0, startZ: 0, didAdjust: false, isAdjusting: false });
+
+  const moveNotifyRef = useRef({ lastAt: 0 });
 
   const sessionStartRef = useRef({ tx: 0, ty: 0 });
 
@@ -240,6 +262,55 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
   }, [zOffsets]);
 
   useEffect(() => {
+    hudDockRef.current = hudDock;
+    setHudDockRef.current = setHudDock;
+  }, [hudDock, setHudDock]);
+
+  const dockSideForItem = useMemo(() => {
+    if (hudDock.left.includes(item.id)) return 'left';
+    if (hudDock.right.includes(item.id)) return 'right';
+    return null;
+  }, [hudDock.left, hudDock.right, item.id]);
+
+  const isAnchored = useMemo(() => {
+    return anchored.includes(item.id);
+  }, [anchored, item.id]);
+
+  const statusLabel = useMemo(() => {
+    if (dockSideForItem) return dockSideForItem === 'left' ? 'Docked L' : 'Docked R';
+    if (isAnchored) return 'Anchored';
+    if (overlayLayout.mode !== 'free' && formationTarget) return 'Formation';
+    return 'Free';
+  }, [dockSideForItem, isAnchored, overlayLayout.mode, formationTarget]);
+
+  const zLabel = useMemo(() => {
+    const z = zOffsets[item.id] ?? 0;
+    const clamped = Math.max(OVERLAY_CARD_Z_MIN, Math.min(OVERLAY_CARD_Z_MAX, z));
+    return Math.round(clamped);
+  }, [item.id, zOffsets]);
+
+  const dockItem = useCallback((side: 'left' | 'right') => {
+    setAnchored((prev) => prev.filter((x) => x !== item.id));
+    setHudDock((prev) => {
+      const without = {
+        left: prev.left.filter((x) => x !== item.id),
+        right: prev.right.filter((x) => x !== item.id),
+      };
+      const nextSide = [item.id, ...(without[side] || [])].slice(0, 6);
+      return side === 'left'
+        ? { left: nextSide, right: without.right }
+        : { left: without.left, right: nextSide };
+    });
+  }, [item.id, setAnchored, setHudDock]);
+
+  const undockItem = useCallback(() => {
+    setHudDock((prev) => ({
+      left: prev.left.filter((x) => x !== item.id),
+      right: prev.right.filter((x) => x !== item.id),
+    }));
+  }, [item.id, setHudDock]);
+
+  useEffect(() => {
     posesRef.current = poses;
   }, [poses]);
 
@@ -249,20 +320,23 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
 
     const onWheel = (e: WheelEvent) => {
       if (e.altKey) return;
+      if (!e.shiftKey) return;
       e.preventDefault();
       e.stopPropagation();
 
-      const delta = Math.max(-80, Math.min(80, e.deltaY));
+      const direction = e.deltaY > 0 ? 1 : -1;
+      const step = e.ctrlKey ? 40 : OVERLAY_CARD_Z_STEP;
+
       setZOffsets(prev => {
         const current = prev[item.id] ?? 0;
-        const next = Math.max(-400, Math.min(800, current - delta));
+        const next = Math.max(OVERLAY_CARD_Z_MIN, Math.min(OVERLAY_CARD_Z_MAX, current - direction * step));
         return { ...prev, [item.id]: next };
       });
 
       const now = Date.now();
       if (now - sfxRef.current.lastNudgeAt > 50) {
         sfxRef.current.lastNudgeAt = now;
-        playCardDepthNudgeSound(delta < 0 ? 'in' : 'out');
+        playCardDepthNudgeSound(direction < 0 ? 'in' : 'out');
       }
     };
 
@@ -275,6 +349,13 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
     const visualEl = visualRef.current;
     if (!dragEl || !visualEl) return;
 
+    const setDragging = (next: boolean) => {
+      const prev = dragStateRef.current.isDragging;
+      if (prev === next) return;
+      dragStateRef.current.isDragging = next;
+      window.dispatchEvent(new CustomEvent('hapa.overlayCard.drag', { detail: { id: item.id, dragging: next } }));
+    };
+
     let onWinMove: ((ev: PointerEvent) => void) | null = null;
     let onWinUp: ((ev: PointerEvent) => void) | null = null;
 
@@ -283,6 +364,16 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
       if (onWinUp) window.removeEventListener('pointerup', onWinUp as any, true);
       onWinMove = null;
       onWinUp = null;
+    };
+
+    const undockIfDocked = () => {
+      const d = hudDockRef.current;
+      if (!d?.left?.includes(item.id) && !d?.right?.includes(item.id)) return;
+      setHudDockRef.current((prev) => ({
+        left: prev.left.filter((x) => x !== item.id),
+        right: prev.right.filter((x) => x !== item.id),
+      }));
+      window.dispatchEvent(new Event('hapa.overlay.layoutTick'));
     };
 
     state.current.currentTx = item.tx ?? 0;
@@ -371,13 +462,22 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
         (e as any).metaKey;
 
       if (depthModifier) {
+        if (!dragStateRef.current.isDragging) {
+          setDragging(true);
+          playCardPickUpSound();
+          setOverlayLayout((prev) => ({ ...prev, mode: 'free' }));
+          stopSway();
+        }
         if (!zDragRef.current.isAdjusting) {
           zDragRef.current.isAdjusting = true;
           zDragRef.current.startY = e.clientY;
           zDragRef.current.startZ = zOffsetsRef.current[item.id] ?? 0;
         }
 
-        const next = Math.max(-400, Math.min(800, zDragRef.current.startZ - (e.clientY - zDragRef.current.startY)));
+        const next = Math.max(
+          OVERLAY_CARD_Z_MIN,
+          Math.min(OVERLAY_CARD_Z_MAX, zDragRef.current.startZ - (e.clientY - zDragRef.current.startY)),
+        );
         zDragRef.current.didAdjust = true;
         setZOffsets(prev => ({ ...prev, [item.id]: next }));
 
@@ -391,8 +491,11 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
 
         const scale = Math.max(0.95, Math.min(1.35, 1.15 + next / 3500));
 
+        const { baselineZ } = getOverlayZBaseline(overlayLayout.mode, overlayLayout.hover);
+        const totalZ = (overlayLayout.mode === 'free' || !formationTarget) ? (baselineZ + next) : (formationTarget.tz + next);
+
         animate(visualEl, {
-          translateZ: next,
+          translateZ: totalZ,
           scale,
           duration: 0,
         });
@@ -403,6 +506,19 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
 
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
+
+      // Don't enter drag mode on micro-movements; this prevents click-to-select from
+      // leaving a live pointermove handler that later shoves the card away.
+      if (!dragStateRef.current.isDragging) {
+        const dist = Math.hypot(dx, dy);
+        if (dist < 6) return;
+        setDragging(true);
+        setSelectedItemId(item.id);
+        undockIfDocked();
+        playCardPickUpSound();
+        setOverlayLayout((prev) => ({ ...prev, mode: 'free' }));
+        stopSway();
+      }
 
       state.current.currentTx = initialTx + dx;
       state.current.currentTy = initialTy + dy;
@@ -424,6 +540,12 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
         translateY: state.current.currentTy,
         duration: 0,
       });
+
+      const notifyNow = performance.now();
+      if (notifyNow - moveNotifyRef.current.lastAt > 33) {
+        moveNotifyRef.current.lastAt = notifyNow;
+        window.dispatchEvent(new CustomEvent('hapa.overlayCard.moved', { detail: { id: item.id } }));
+      }
     };
 
     const handlePointerUp = (e: PointerEvent, startX: number, startY: number) => {
@@ -482,150 +604,20 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
       }
 
       if (dist < 5) {
-        if (e.shiftKey) {
-          playCardClickSound();
-          setSelectedItemId(prev => (prev === item.id ? null : item.id));
-          return;
-        }
-
         playCardClickSound();
-        playCardPortalSound(portalColorMode);
-
-        const dock = snapZonesRef.current.find(z => z.id === 'hand-dock');
-        const mode = overlayLayout.portalTargetMode;
-        const useHand = mode === 'hand-dock' && !!dock;
-
-        const isRed = portalColorMode === 'red';
-        const profile = isRed
-          ? {
-              portalOpenMs: 190,
-              portalSpinMs: 420,
-              portalSpinDeg: 420,
-              portalScale: 1.15,
-              portalCloseMs: 180,
-              cardMs: 470,
-              cardArc: 52,
-              cardRot: [0, 340, 900] as any,
-              cardZ: -260,
-              cardScale: [1.14, 0.72, 0.05] as any,
-              cardFilter: ['blur(0px) saturate(1)', 'blur(2px) saturate(1.55) contrast(1.1)', 'blur(11px) saturate(0.55) contrast(0.95)'] as any,
-            }
-          : {
-              portalOpenMs: 260,
-              portalSpinMs: 560,
-              portalSpinDeg: 260,
-              portalScale: 1.06,
-              portalCloseMs: 230,
-              cardMs: 560,
-              cardArc: 76,
-              cardRot: [0, 220, 620] as any,
-              cardZ: -200,
-              cardScale: [1.12, 0.78, 0.06] as any,
-              cardFilter: ['blur(0px) saturate(1)', 'blur(2px) saturate(1.35)', 'blur(10px) saturate(0.6)'] as any,
-            };
-        const p1 = isRed ? 'rgba(239,68,68,0.95)' : 'rgba(34,211,238,0.95)';
-        const p2 = isRed ? 'rgba(245,158,11,0.22)' : 'rgba(168,85,247,0.18)';
-        const b1 = isRed ? 'rgba(239,68,68,0.55)' : 'rgba(34,211,238,0.55)';
-        const b2 = isRed ? 'rgba(245,158,11,0.35)' : 'rgba(168,85,247,0.35)';
-
-        const portalCenterX = useHand ? dock!.rect.left + dock!.rect.width / 2 : (mode === 'custom' ? overlayLayout.portalTargetPoint.x : window.innerWidth / 2);
-        const portalCenterY = useHand ? dock!.rect.top + dock!.rect.height / 2 : (mode === 'custom' ? overlayLayout.portalTargetPoint.y : window.innerHeight - 26);
-
-        const portalLeft = portalCenterX - item.initialRect.width / 2;
-        const portalTop = portalCenterY - item.initialRect.height / 2;
-        const portalTx = portalLeft - item.initialRect.left;
-        const portalTy = portalTop - item.initialRect.top;
-
-        const portalVfx = document.createElement('div');
-        portalVfx.style.position = 'fixed';
-        portalVfx.style.left = `${portalCenterX}px`;
-        portalVfx.style.top = `${portalCenterY}px`;
-        portalVfx.style.width = '190px';
-        portalVfx.style.height = '190px';
-        portalVfx.style.borderRadius = '9999px';
-        portalVfx.style.transform = 'translate(-50%, -50%) scale(0.08)';
-        portalVfx.style.opacity = '0';
-        portalVfx.style.pointerEvents = 'none';
-        portalVfx.style.zIndex = '100002';
-        portalVfx.style.background = `radial-gradient(circle at 50% 50%, ${p1} 0%, rgba(0,0,0,0) 68%), radial-gradient(circle at 50% 50%, rgba(255,255,255,0.04) 0%, ${p2} 44%, rgba(0,0,0,0) 70%)`;
-        portalVfx.style.boxShadow = `0 0 40px ${b1}, 0 0 90px ${b2}, inset 0 0 40px rgba(0,0,0,0.75)`;
-        portalVfx.style.filter = isRed ? 'blur(0px) saturate(1.35) contrast(1.08)' : 'blur(0px) saturate(1.25)';
-
-        const portalRing = document.createElement('div');
-        portalRing.style.position = 'absolute';
-        portalRing.style.left = '50%';
-        portalRing.style.top = '50%';
-        portalRing.style.width = '100%';
-        portalRing.style.height = '100%';
-        portalRing.style.transform = 'translate(-50%, -50%)';
-        portalRing.style.borderRadius = '9999px';
-        portalRing.style.border = `1px solid ${isRed ? 'rgba(239,68,68,0.35)' : 'rgba(34,211,238,0.35)'}`;
-        portalRing.style.background = isRed
-          ? 'conic-gradient(from 90deg, rgba(239,68,68,0.00), rgba(239,68,68,0.30), rgba(245,158,11,0.22), rgba(239,68,68,0.00))'
-          : 'conic-gradient(from 90deg, rgba(34,211,238,0.00), rgba(34,211,238,0.30), rgba(168,85,247,0.22), rgba(34,211,238,0.00))';
-        portalRing.style.mixBlendMode = 'screen';
-        portalVfx.appendChild(portalRing);
-
-        document.body.appendChild(portalVfx);
-
-        animate(portalVfx, {
-          opacity: [0, 1],
-          scale: [0.08, profile.portalScale],
-          rotate: [0, isRed ? 140 : 80],
-          duration: profile.portalOpenMs,
-          easing: isRed ? 'outBack(1.8)' : 'outExpo',
-        });
-
-        animate(portalRing, {
-          rotate: [0, profile.portalSpinDeg],
-          duration: profile.portalSpinMs,
-          easing: isRed ? 'outExpo' : 'linear',
-        });
-
+        setSelectedItemId(prev => (prev === item.id ? null : item.id));
         if (item.onClick) item.onClick(e);
 
+        setDragging(false);
+        startSway();
         dragEl.onpointermove = null;
         dragEl.onpointerup = null;
-
-        const arcTy = state.current.currentTy + profile.cardArc;
-        const dragAnim = animate(dragEl, {
-          translateX: [state.current.currentTx, portalTx],
-          translateY: [state.current.currentTy, arcTy, portalTy],
-          duration: profile.cardMs,
-          easing: isRed ? 'inOutExpo' : 'inOutExpo',
-        });
-
-        const visualAnim = animate(visualEl, {
-          rotate: profile.cardRot,
-          translateZ: [0, profile.cardZ],
-          scale: profile.cardScale,
-          opacity: [1, 0.9, 0],
-          filter: profile.cardFilter,
-          boxShadow: [
-            `0 25px 60px rgba(0,0,0,0.6), 0 0 40px ${b1}`,
-            `0 25px 60px rgba(0,0,0,0.65), 0 0 90px ${b2}, 0 0 20px ${b1}`,
-            '0 0 0 rgba(0,0,0,0)'
-          ],
-          duration: profile.cardMs,
-          easing: isRed ? 'inOutExpo' : 'inOutExpo',
-        });
-
-        Promise.allSettled([dragAnim as any, visualAnim as any]).then(() => {
-          animate(portalVfx, {
-            opacity: [1, 0],
-            scale: [profile.portalScale, isRed ? 0.75 : 0.62],
-            duration: profile.portalCloseMs,
-            easing: isRed ? 'inBack(1.3)' : 'inQuad',
-          }).then(() => {
-            portalVfx.remove();
-          });
-          removeItem(item.id);
-        });
+        dragEl.onlostpointercapture = null;
         return;
       }
 
       // Persist free position
-      dragStateRef.current.isDragging = false;
+      setDragging(false);
 
       if (zDragRef.current.didAdjust) {
         const movedXy = Math.hypot(
@@ -743,6 +735,8 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
       playCardDropSound();
       updateItemPosition(item.id, state.current.currentTx, state.current.currentTy);
 
+      window.dispatchEvent(new Event('hapa.overlay.layoutTick'));
+
       // Resume Sway on Drop
       startSway();
 
@@ -756,7 +750,10 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
       dragEl.onpointerup = null;
     };
 
-    const startDragSession = (e: PointerEvent | { pointerId: number, clientX: number, clientY: number }) => {
+    const startDragSession = (
+      e: PointerEvent | { pointerId: number; clientX: number; clientY: number },
+      immediateDrag?: boolean,
+    ) => {
        const m = new DOMMatrixReadOnly(getComputedStyle(dragEl).transform);
        if (Number.isFinite(m.m41)) state.current.currentTx = m.m41;
        if (Number.isFinite(m.m42)) state.current.currentTy = m.m42;
@@ -768,8 +765,6 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
        sfxRef.current.lastMoveTx = state.current.currentTx;
        sfxRef.current.lastMoveTy = state.current.currentTy;
        sfxRef.current.lastZ = zOffsetsRef.current[item.id] ?? 0;
-
-       playCardPickUpSound();
 
        zDragRef.current.startY = e.clientY;
        zDragRef.current.startZ = zOffsetsRef.current[item.id] ?? 0;
@@ -799,10 +794,14 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
          window.addEventListener('pointerup', onWinUp as any, true);
        }
 
-       dragStateRef.current.isDragging = true;
-       setOverlayLayout((prev) => ({ ...prev, mode: 'free' }));
-       
-       stopSway();
+       setDragging(!!immediateDrag);
+       if (immediateDrag) {
+         setSelectedItemId(item.id);
+         undockIfDocked();
+         playCardPickUpSound();
+         setOverlayLayout((prev) => ({ ...prev, mode: 'free' }));
+         stopSway();
+       }
 
        // Assign handlers directly to avoid add/remove complexity with closures
        dragEl.onpointermove = (ev) => handlePointerMove(ev, startX, startY, initialTx, initialTy);
@@ -818,7 +817,7 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
         pointerId: item.pointerId, 
         clientX: item.startX, 
         clientY: item.startY 
-      });
+      }, true);
     } else {
       // Just floating
       startSway();
@@ -855,7 +854,9 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
     const zOffset = zOffsets[item.id] ?? 0;
     const scale = Math.max(0.95, Math.min(1.35, 1.15 + zOffset / 3500));
 
-    if (overlayLayout.mode === 'free' || !formationTarget) {
+    const { baselineZ } = getOverlayZBaseline(overlayLayout.mode, overlayLayout.hover);
+
+    if ((overlayLayout.mode === 'free' && !formationTarget?.force) || !formationTarget) {
       const freeTx = item.tx ?? state.current.currentTx;
       const freeTy = item.ty ?? state.current.currentTy;
       state.current.currentTx = freeTx;
@@ -869,7 +870,7 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
       });
 
       animate(visualEl, {
-        translateZ: zOffset,
+        translateZ: baselineZ + zOffset,
         scale,
         duration: 220,
         easing: 'outQuad',
@@ -885,28 +886,27 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
     });
 
     animate(visualEl, {
-      translateZ: (overlayLayout.hover ? formationTarget.tz : 0) + zOffset,
+      translateZ: formationTarget.tz + zOffset,
       rotate: formationTarget.rotZ - 2,
       scale,
       duration: 420,
       easing: 'outExpo',
     });
-  }, [formationTarget, overlayLayout.hover, overlayLayout.mode, item.id, zOffsets, item.tx, item.ty]);
+  }, [formationTarget, overlayLayout.mode, item.id, zOffsets, item.tx, item.ty]);
 
   return (
     <div
       ref={dragRef}
       data-overlay-card="true"
       data-overlay-card-id={item.id}
-      className="absolute relative pointer-events-auto cursor-grab active:cursor-grabbing"
+      className="absolute relative pointer-events-auto cursor-grab active:cursor-grabbing touch-none [will-change:transform] [transform-style:preserve-3d]"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       style={{
         left: item.initialRect.left,
         top: item.initialRect.top,
         width: item.initialRect.width,
         height: item.initialRect.height,
-        touchAction: 'none',
-        willChange: 'transform',
-        transformStyle: 'preserve-3d',
         zIndex: selectedItemId === item.id ? 100000 : 99999,
       }}
       // Prevent native drag
@@ -915,6 +915,96 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
         return false;
       }}
     >
+      {(isHovered || selectedItemId === item.id) && (
+        <div className="absolute left-1 top-1 z-[100001] flex flex-col items-start gap-1 pointer-events-none">
+          {statusLabel ? (
+            <div
+              className={`px-2 py-[2px] rounded-full border text-[9px] font-bold uppercase tracking-[0.22em] ${dockSideForItem
+                ? 'border-cyan-300/70 bg-cyan-500/10 text-cyan-100 shadow-[0_0_14px_rgba(34,211,238,0.22)]'
+                : isAnchored
+                  ? 'border-purple-400/40 bg-purple-500/10 text-purple-100 shadow-[0_0_14px_rgba(168,85,247,0.18)]'
+                  : overlayLayout.mode !== 'free'
+                    ? 'border-gray-500/40 bg-gray-900/30 text-gray-200'
+                    : 'border-gray-800/70 bg-gray-950/25 text-gray-400'
+                }`}
+            >
+              {statusLabel}
+            </div>
+          ) : null}
+
+          <div
+            className="px-2 py-[2px] rounded-full border border-gray-800/70 bg-gray-950/25 text-[9px] font-bold uppercase tracking-[0.22em] text-gray-300"
+            title="Shift+Wheel depth · Ctrl+Shift fine"
+          >
+            Z {zLabel}
+          </div>
+        </div>
+      )}
+
+      {(isHovered || selectedItemId === item.id) && (
+        <div className="absolute right-1 top-1 z-[100001] flex items-center gap-1 pointer-events-auto">
+          <button
+            type="button"
+            title={dockSideForItem === 'left' ? 'Docked left' : 'Dock left'}
+            className={`px-1.5 py-1 rounded-md border text-[9px] font-bold uppercase tracking-[0.22em] transition-all ${dockSideForItem === 'left'
+              ? 'border-cyan-300/70 bg-cyan-500/10 text-cyan-100 shadow-[0_0_14px_rgba(34,211,238,0.22)]'
+              : 'border-gray-700/60 bg-gray-950/35 text-gray-200 hover:bg-gray-900/50'
+              }`}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dockItem('left');
+            }}
+          >
+            DL
+          </button>
+
+          <button
+            type="button"
+            title={dockSideForItem === 'right' ? 'Docked right' : 'Dock right'}
+            className={`px-1.5 py-1 rounded-md border text-[9px] font-bold uppercase tracking-[0.22em] transition-all ${dockSideForItem === 'right'
+              ? 'border-cyan-300/70 bg-cyan-500/10 text-cyan-100 shadow-[0_0_14px_rgba(34,211,238,0.22)]'
+              : 'border-gray-700/60 bg-gray-950/35 text-gray-200 hover:bg-gray-900/50'
+              }`}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dockItem('right');
+            }}
+          >
+            DR
+          </button>
+
+          <button
+            type="button"
+            title={dockSideForItem ? 'Undock' : 'Not docked'}
+            className={`px-1.5 py-1 rounded-md border text-[9px] font-bold uppercase tracking-[0.22em] transition-all ${dockSideForItem
+              ? 'border-gray-600/60 bg-gray-800/55 text-gray-100 hover:bg-gray-800/70'
+              : 'border-gray-800/70 bg-gray-950/25 text-gray-500'
+              }`}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              undockItem();
+            }}
+          >
+            UD
+          </button>
+        </div>
+      )}
+
       {selectedItemId === item.id && (
         <>
           <div className={`absolute -inset-1 rounded-xl border pointer-events-none ${portalColorMode === 'red' ? 'border-red-300/80 shadow-[0_0_24px_rgba(239,68,68,0.42)]' : 'border-cyan-300/80 shadow-[0_0_24px_rgba(34,211,238,0.45)]'}`} />
@@ -930,22 +1020,11 @@ export const FloatingCard: React.FC<FloatingCardProps> = ({ item, formationTarge
       )}
       <div 
         ref={visualRef}
-        style={{
-          width: '100%',
-          height: '100%',
-          willChange: 'transform, box-shadow',
-          transformOrigin: 'center center',
-          transformStyle: 'preserve-3d',
-        }}
+        className="w-full h-full origin-center [will-change:transform,box-shadow] [transform-style:preserve-3d]"
       >
         <div
           ref={poseRef}
-          style={{
-            width: '100%',
-            height: '100%',
-            willChange: 'transform',
-            transformStyle: 'preserve-3d',
-          }}
+          className="w-full h-full [will-change:transform] [transform-style:preserve-3d]"
         >
           {item.render(item.data)}
         </div>
