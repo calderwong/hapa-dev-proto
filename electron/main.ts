@@ -6867,7 +6867,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         const byId = new Map<string, NexusIndexEntry>();
         const deletedIds = new Set<string>();
 
+        let consumed = 0;
+
         for (const raw of blocks || []) {
+          consumed += 1;
           try {
             const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
             const entry = normalizeIndexEntry(parsed);
@@ -6884,7 +6887,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           }
         }
 
-        const nextCursor = Math.min(length, start + windowSize);
+        // IMPORTANT: advance cursor by how many blocks we actually consumed.
+        // If we stop early after reaching `limit`, we must not skip the remaining
+        // blocks in this window, otherwise the caller gets stuck at 1 page.
+        const nextCursor = Math.min(length, start + Math.max(0, consumed));
         return {
           items: Array.from(byId.values()),
           nextCursor,
@@ -6898,10 +6904,13 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
       const seen = new Set<string>();
 
       while (cursor > 0 && items.length < limit) {
-        const blocks = await readCore(coreName, { reverse: true, start: cursor, limit: windowSize });
-        cursor = Math.max(0, cursor - windowSize);
+        const startCursor = cursor;
+        const blocks = await readCore(coreName, { reverse: true, start: startCursor, limit: windowSize });
+
+        let consumed = 0;
 
         for (const raw of blocks || []) {
+          consumed += 1;
           try {
             const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
             const entry = normalizeIndexEntry(parsed);
@@ -6914,6 +6923,15 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
           } catch {
             // ignore parse errors
           }
+        }
+
+        // Move cursor by the number of blocks we actually consumed.
+        // This prevents a false `hasMore: false` when windowSize is larger than
+        // the remaining core length (common when length < 400).
+        if (consumed > 0) {
+          cursor = Math.max(0, startCursor - consumed);
+        } else {
+          cursor = Math.max(0, startCursor - windowSize);
         }
       }
 
