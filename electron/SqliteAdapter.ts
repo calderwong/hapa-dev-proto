@@ -68,8 +68,6 @@ CREATE INDEX IF NOT EXISTS idx_cards_parent ON cards(parent_id);
 CREATE INDEX IF NOT EXISTS idx_cards_run ON cards(hellweek_run_id);
 CREATE INDEX IF NOT EXISTS idx_cards_tier ON cards(tier);
 CREATE INDEX IF NOT EXISTS idx_cards_created ON cards(created_at);
-CREATE INDEX IF NOT EXISTS idx_cards_deleted ON cards(is_deleted);
-CREATE INDEX IF NOT EXISTS idx_cards_last_seen ON cards(last_seen_at);
 
 -- ============================================================
 -- Full-Text Search for Cards
