@@ -1766,3 +1766,45 @@
 
 **Tags:** #bugfix #card_library #pagination
 **Est. Avg. Human Dev Time:** 35 minutes
+
+## Entry 172 – Persistence: rebuild card-library → SQLite index (manual unstick)
+**Prompt:** "I'm still only getting 120 cards after the recover---do these changes only apply to new cards?"
+
+**Summary of actions:**
+- Refactored persistence to treat the local SQLite projection as the primary paging/count source for Card Library.
+- Added a manual IPC endpoint to force a full replay of the `card-library` hypercore into SQLite.
+  - `electron/main.ts`: new `persistence:rebuild-card-library-index` handler resets the checkpoint and replays blocks.
+  - `electron/preload.ts` + `src/types.d.ts`: exposed `window.electronAPI.persistenceRebuildCardLibraryIndex()`.
+- Verified build/test passes.
+
+**Verification:**
+- `npm run typecheck` and `npm test` passing.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `electron/preload.ts`
+- Modified: `src/types.d.ts`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #persistence #sqlite #card_library
+**Est. Avg. Human Dev Time:** 60 minutes
+
+## Entry 173 – Bugfix: SQLite migration ordering for `cards.is_deleted` startup crash
+**Prompt:** (screenshot) "[Persistence] Failed to initialize: SqliteError: no such column: is_deleted"
+
+**Summary of actions:**
+- Fixed startup crashes for existing `persistence.db` files created before adding `is_deleted/last_seen_at`.
+- Root cause: schema init attempted to create indexes referencing `cards.is_deleted` / `cards.last_seen_at` before the migration ran.
+- Updated `electron/SqliteAdapter.ts`:
+  - Removed those indexes from the initial `SCHEMA_SQL` bootstrap.
+  - Kept index creation in `ensureCardsSchema()` after `ALTER TABLE ... ADD COLUMN` migrations.
+
+**Verification:**
+- `npm run typecheck` and `npm test` passing.
+
+**Files modified/created:**
+- Modified: `electron/SqliteAdapter.ts`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #sqlite #migration #persistence
+**Est. Avg. Human Dev Time:** 15 minutes
