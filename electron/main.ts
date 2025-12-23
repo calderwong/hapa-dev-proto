@@ -93,7 +93,7 @@ if (!gotTheLock) {
 
         if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
 
-        const id = String(parsed.cardId || parsed.coreName || '').trim();
+        const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
         if (!id) continue;
 
         const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
@@ -6902,7 +6902,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
 
   const normalizeIndexEntry = (parsed: any): NexusIndexEntry | null => {
     if (!parsed || parsed.type !== 'card-index') return null;
-    const id = parsed.cardId || parsed.coreName;
+    const id = parsed.cardId || parsed.id || parsed.coreName;
     if (!id) return null;
     return {
       cardId: String(id),
@@ -7953,7 +7953,7 @@ app.on('ready', async () => {
             // Emit via persistence functions indirectly by calling appendToCore projection?
             // Since projection logic lives in appendToCore for new appends only, we emit here
             // by reusing the same persistence entrypoints via dynamic import.
-            const id = String(parsed.cardId || parsed.coreName || '').trim();
+            const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
             if (!id) continue;
 
             const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';

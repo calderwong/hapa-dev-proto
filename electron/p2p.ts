@@ -156,7 +156,7 @@ export async function appendToCore(name: string, data: string) {
             }
 
             if (parsed && (parsed.type === 'card-index' || parsed.cardId || parsed.coreName)) {
-                const id = String(parsed.cardId || parsed.coreName || '').trim();
+                const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
                 if (id) {
                     const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
                     if (deleted) {
