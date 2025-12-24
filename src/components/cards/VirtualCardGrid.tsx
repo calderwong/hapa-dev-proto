@@ -106,10 +106,18 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   const gridRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(800);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const lastMeasuredSizeRef = useRef<{ h: number; w: number }>({ h: 800, w: 0 });
   const requestMoreLockRef = useRef(false);
   const resumeTimeoutRef = useRef<number | null>(null);
-  const [measuredColumns, setMeasuredColumns] = useState(columns);
-  const effectiveColumns = Math.max(1, measuredColumns || columns || 1);
+  const effectiveColumns = useMemo(() => {
+    const minCardWidth = 240;
+    const gap = 24;
+    const width = containerWidth > 0 ? containerWidth : 0;
+    if (width <= 0) return Math.max(1, columns || 1);
+    const next = Math.floor((width + gap) / (minCardWidth + gap));
+    return Math.max(1, next);
+  }, [columns, containerWidth]);
   
   // Track which cards have been animated (persists across virtual scroll re-renders)
   const animatedCardsRef = useRef<Set<string>>(new Set());
@@ -128,13 +136,10 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   } = useCardLoadQueue({
     revealDelay: 60,
     bufferSize: effectiveColumns * bufferRows,
-    onCardRevealed: (cardId, tier) => {
-      console.log(`[VirtualGrid] Card revealed: ${cardId} (tier ${tier})`);
-    },
   });
   
   // Calculate row height and total height
-  const rowHeight = cardHeight + 16; // card height + gap
+  const rowHeight = cardHeight + 24; // card height + gap
   const totalRows = Math.ceil(cards.length / effectiveColumns);
   const totalHeight = totalRows * rowHeight;
   
@@ -232,31 +237,36 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    lastMeasuredSizeRef.current = { h: container.clientHeight, w: container.clientWidth };
     
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setContainerHeight(entry.contentRect.height);
+        const nextH = Math.round(entry.contentRect.height);
+        const nextW = Math.round(entry.contentRect.width);
+        const prev = lastMeasuredSizeRef.current;
+        const heightChanged = Math.abs(nextH - prev.h) > 1;
+        const widthChanged = Math.abs(nextW - prev.w) > 1;
 
-        const grid = gridRef.current;
-        if (grid && typeof window !== 'undefined') {
-          const computed = window.getComputedStyle(grid);
-          const cols = computed.gridTemplateColumns
-            .split(' ')
-            .map((c) => c.trim())
-            .filter(Boolean).length;
-          if (cols > 0) {
-            setMeasuredColumns((prev) => (prev === cols ? prev : cols));
-          }
+        if (heightChanged) {
+          prev.h = nextH;
+          setContainerHeight(nextH);
+        }
+
+        if (widthChanged) {
+          prev.w = nextW;
+          setContainerWidth(nextW);
         }
       }
     });
     
     observer.observe(container);
     setContainerHeight(container.clientHeight);
+    setContainerWidth(container.clientWidth);
     
     return () => observer.disconnect();
   }, []);
 
+  const lastClampKeyRef = useRef<string>('');
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -264,6 +274,22 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
     const maxScrollTop = Math.max(0, totalHeight - containerHeight);
     const actualScrollTop = container.scrollTop;
     const next = Math.max(0, Math.min(actualScrollTop, maxScrollTop));
+
+    const clampKey = `${totalHeight}:${containerHeight}`;
+    const isFirst = lastClampKeyRef.current === '';
+    const epsilon = 2;
+    const didShrink =
+      !isFirst &&
+      clampKey !== lastClampKeyRef.current &&
+      actualScrollTop > maxScrollTop + epsilon;
+    lastClampKeyRef.current = clampKey;
+
+    if (!didShrink) {
+      if (scrollTop !== actualScrollTop) {
+        setScrollTop(actualScrollTop);
+      }
+      return;
+    }
 
     if (actualScrollTop !== next) {
       container.scrollTop = next;
@@ -290,7 +316,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   }, [visibleRange, cards, queuedCards]);
   
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative flex flex-col min-h-0 ${className}`}>
       {/* Loading progress indicator */}
       {isLoading && (
         <div className="absolute top-2 right-2 z-10 flex items-center gap-2 px-3 py-1.5 bg-gray-900/90 backdrop-blur rounded-full border border-cyan-500/30">
@@ -304,7 +330,8 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
       {/* Scrollable container */}
       <div
         ref={containerRef}
-        className="h-full overflow-y-auto custom-scrollbar"
+        data-virtual-grid-scroll-container="true"
+        className="flex-1 min-h-0 overflow-y-scroll custom-scrollbar"
         onScroll={handleScroll}
       >
         {/* Virtual spacer for total height */}
@@ -312,7 +339,13 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
           {/* Positioned grid for visible cards */}
           <div
             className="card-grid absolute left-0 right-0"
-            style={{ transform: `translateY(${visibleRange.offsetY}px)` }}
+            style={{
+              transform: `translateY(${visibleRange.offsetY}px)`,
+              display: 'grid',
+              gap: '1.5rem',
+              gridTemplateColumns: `repeat(${effectiveColumns}, minmax(240px, 1fr))`,
+              gridAutoRows: `${cardHeight}px`,
+            }}
             ref={gridRef}
           >
             {visibleCards.map(({ card, queued, index }) => {

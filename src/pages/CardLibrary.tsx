@@ -33,12 +33,15 @@ interface ModelInfo {
     description: string;
 }
 
-const toFileUrl = (path?: string) => {
-    if (!path) return path;
-    if (path.startsWith('file://')) return path;
-    const normalized = path.replace(/\\/g, '/');
+const toFileUrl = (p: string): string => {
+    if (!p) return '';
+    const normalized = p.replace(/\\/g, '/');
     return `file:///${normalized}`;
 };
+
+const VIDEO_THUMB_PLACEHOLDER = `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180"><rect width="240" height="180" fill="#0b1220"/><path d="M98 60 L160 90 L98 120 Z" fill="#7c3aed" opacity="0.9"/><rect x="16" y="140" width="208" height="20" fill="#111827" opacity="0.7"/></svg>`,
+)}`;
 
 // Card Content Component - renders the inside of a card (used by VirtualCardGrid)
 interface CardContentProps {
@@ -412,6 +415,88 @@ const CardLibrary: React.FC = () => {
         };
     };
 
+    const sanitizeCardRecord = (record: any): any => {
+        if (!record || typeof record !== 'object') return record;
+        const out: any = { ...record };
+
+        if (Array.isArray(out.attachments)) {
+            out.attachments = out.attachments.map((a: any) => {
+                if (!a || typeof a !== 'object') return a;
+                const next: any = { ...a };
+                delete next.dataUrl;
+                delete next.data;
+                delete next.base64;
+                return next;
+            });
+        }
+
+        if (out.image && typeof out.image === 'object') {
+            const next = { ...out.image };
+            delete (next as any).dataUrl;
+            delete (next as any).base64;
+            out.image = next;
+        }
+
+        if (out.video && typeof out.video === 'object') {
+            const next = { ...out.video };
+            delete (next as any).dataUrl;
+            delete (next as any).base64;
+            out.video = next;
+        }
+
+        if (out.audio && typeof out.audio === 'object') {
+            const next = { ...out.audio };
+            delete (next as any).dataUrl;
+            delete (next as any).base64;
+            out.audio = next;
+        }
+
+        return out;
+    };
+
+    const hydrateSelectedCardRecord = useCallback(async (card: CardIndexEntry): Promise<CardIndexEntry> => {
+        const api = (typeof window !== 'undefined' ? (window as any).electronAPI : null) as any;
+        if (!api) return card;
+
+        const coreName = card.coreName || card.cardId;
+
+        try {
+            if (api.nexusCardLatestBatch) {
+                const res = await api.nexusCardLatestBatch({ entries: [{ cardId: card.cardId, coreName }] });
+                const byId = (res && typeof res === 'object' ? res.recordsById : null) as any;
+                const rawRecord = byId && typeof byId === 'object' ? byId[card.cardId] : null;
+                const merged = rawRecord ? mergeEntryWithRecord(card, rawRecord) : card;
+                if (merged.cardRecord) merged.cardRecord = sanitizeCardRecord(merged.cardRecord);
+                return merged;
+            }
+        } catch {
+            // ignore
+        }
+
+        try {
+            if (!api.p2pRead) return card;
+            const records = await api.p2pRead(coreName, { reverse: true, limit: 24 });
+            if (!Array.isArray(records) || records.length === 0) return card;
+
+            let rawRecord: any | null = null;
+            for (const raw of records) {
+                if (!raw || typeof raw !== 'string') continue;
+                try {
+                    rawRecord = JSON.parse(raw);
+                    break;
+                } catch {
+                    // ignore
+                }
+            }
+
+            const merged = rawRecord ? mergeEntryWithRecord(card, rawRecord) : card;
+            if (merged.cardRecord) merged.cardRecord = sanitizeCardRecord(merged.cardRecord);
+            return merged;
+        } catch {
+            return card;
+        }
+    }, []);
+
     const enrichWithCardRecords = async (entries: CardIndexEntry[]): Promise<CardIndexEntry[]> => {
         const api = (typeof window !== 'undefined' ? (window as any).electronAPI : null) as any;
         if (!api) return entries;
@@ -500,8 +585,9 @@ const CardLibrary: React.FC = () => {
                 });
 
                 const items = Array.isArray(res?.items) ? res.items : [];
-                const nextCursor = typeof res?.nextCursor === 'number' ? res.nextCursor : undefined;
-                const hasMore = !!res?.hasMore;
+                const nextCursor =
+                    typeof res?.nextCursor === 'number' ? res.nextCursor : 0 + items.length;
+                const hasMore = !!res?.hasMore || items.length >= pageSize;
                 const totalLength = typeof res?.totalLength === 'number' ? res.totalLength : null;
 
                 setIndexCursor(nextCursor);
@@ -527,12 +613,6 @@ const CardLibrary: React.FC = () => {
                     .filter(Boolean) as CardIndexEntry[];
 
                 for (const e of pageEntries) {
-                    const existing = indexMapRef.current.get(e.cardId);
-                    indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
-                }
-
-                const pageEnriched = await enrichWithCardRecords(pageEntries);
-                for (const e of pageEnriched) {
                     const existing = indexMapRef.current.get(e.cardId);
                     indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
                 }
@@ -667,8 +747,10 @@ const CardLibrary: React.FC = () => {
             });
 
             const items = Array.isArray(res?.items) ? res.items : [];
-            const nextCursor = typeof res?.nextCursor === 'number' ? res.nextCursor : undefined;
-            const hasMore = !!res?.hasMore;
+            const offset = typeof indexCursor === 'number' ? indexCursor : 0;
+            const nextCursor =
+                typeof res?.nextCursor === 'number' ? res.nextCursor : offset + items.length;
+            const hasMore = !!res?.hasMore || items.length >= pageSize;
             const totalLength = typeof res?.totalLength === 'number' ? res.totalLength : null;
 
             setIndexCursor(nextCursor);
@@ -696,12 +778,6 @@ const CardLibrary: React.FC = () => {
                 .filter(Boolean) as CardIndexEntry[];
 
             for (const e of pageEntries) {
-                const existing = indexMapRef.current.get(e.cardId);
-                indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
-            }
-
-            const pageEnriched = await enrichWithCardRecords(pageEntries);
-            for (const e of pageEnriched) {
                 const existing = indexMapRef.current.get(e.cardId);
                 indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
             }
@@ -843,6 +919,27 @@ const CardLibrary: React.FC = () => {
         setEditingName(card.name || '');
         setIsEditingName(false);
     };
+
+    useEffect(() => {
+        const card = selected;
+        if (!card) return;
+        if (card.cardRecord) return;
+        let cancelled = false;
+        (async () => {
+            const hydrated = await hydrateSelectedCardRecord(card);
+            if (cancelled) return;
+            if (hydrated && hydrated.cardId === card.cardId && hydrated.cardRecord) {
+                setSelected((prev) => {
+                    if (!prev || prev.cardId !== card.cardId) return prev;
+                    if (prev.cardRecord) return prev;
+                    return hydrated;
+                });
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [hydrateSelectedCardRecord, selected]);
 
     const handleSaveName = async () => {
         if (!selected || !window.electronAPI || !window.electronAPI.p2pAppend) return;
@@ -1169,8 +1266,6 @@ const CardLibrary: React.FC = () => {
                 card.cardRecord?.video?.localPath;
             const videoSrc = rawVideoPath ? toFileUrl(rawVideoPath) : card.mediaRemoteUrl;
 
-            console.log('[renderThumbnail] Video card:', card.cardId, 'videoSrc:', videoSrc, 'raw:', rawVideoPath);
-
             if (videoSrc) {
                 // For grid view (small) - hover to play with thumbnail
                 if (!large) {
@@ -1195,7 +1290,7 @@ const CardLibrary: React.FC = () => {
                     // No thumbnail - just show video directly with poster frame
                     return (
                         <HoverVideoThumbnail
-                            imageSrc={videoSrc}
+                            imageSrc={VIDEO_THUMB_PLACEHOLDER}
                             videoSrc={videoSrc}
                             alt={card.cardId}
                             className={className}
@@ -1729,16 +1824,20 @@ const CardLibrary: React.FC = () => {
             // If not found, try to load from Hypercore
             if (!parentCard && window.electronAPI?.p2pRead) {
                 try {
-                    const records = await window.electronAPI.p2pRead(currentParentId);
+                    const records = await window.electronAPI.p2pRead(currentParentId, { reverse: true, limit: 24 });
                     if (Array.isArray(records) && records.length > 0) {
-                        for (let i = records.length - 1; i >= 0; i--) {
+                        // NOTE: p2pRead({ reverse: true }) returns newest-first.
+                        for (const raw of records) {
+                            if (!raw || typeof raw !== 'string') continue;
                             try {
-                                const parsed = JSON.parse(records[i]);
-                                if (parsed) {
-                                    parentCard = { cardId: currentParentId, cardRecord: parsed } as any;
-                                    break;
-                                }
-                            } catch { /* skip */ }
+                                const parsed = JSON.parse(raw);
+                                if (!parsed) continue;
+                                const cardRecord = parsed?.type === 'card-state' && parsed?.card ? parsed.card : parsed;
+                                parentCard = { cardId: currentParentId, cardRecord: sanitizeCardRecord(cardRecord) } as any;
+                                break;
+                            } catch {
+                                // skip
+                            }
                         }
                     }
                 } catch { /* skip */ }
@@ -2128,29 +2227,41 @@ const CardLibrary: React.FC = () => {
                 if (img.isCard && img.cardId) {
                     try {
                         // Read the image card
-                        const imageCardRecords = await window.electronAPI.p2pRead(img.cardId);
+                        const imageCardRecords = await window.electronAPI.p2pRead(img.cardId, { reverse: true, limit: 24 });
                         let imageCardLatest: any = {};
-                        for (const r of imageCardRecords) {
-                            try {
-                                const parsed = JSON.parse(r);
-                                if (parsed) imageCardLatest = parsed;
-                            } catch { }
+                        if (Array.isArray(imageCardRecords)) {
+                            // NOTE: p2pRead({ reverse: true }) returns newest-first.
+                            for (const r of imageCardRecords) {
+                                if (!r || typeof r !== 'string') continue;
+                                try {
+                                    const parsed = JSON.parse(r);
+                                    if (parsed) {
+                                        imageCardLatest = parsed;
+                                        break;
+                                    }
+                                } catch { }
+                            }
                         }
 
                         // Update with loop video child
-                        const updatedImageCard = {
-                            ...imageCardLatest,
+                        const isCardState = imageCardLatest?.type === 'card-state' && imageCardLatest?.card;
+                        const baseCard = isCardState ? imageCardLatest.card : imageCardLatest;
+                        const updatedBaseCard = {
+                            ...(baseCard || {}),
                             children: [
-                                ...(imageCardLatest.children || []),
+                                ...((baseCard && baseCard.children) || []),
                                 {
                                     cardId: result.videoCardId,
                                     type: 'loop-video',
                                     label: 'Loop Video',
                                     createdAt: now,
-                                }
+                                },
                             ],
                             updatedAt: now,
                         };
+                        const updatedImageCard = isCardState
+                            ? { ...(imageCardLatest || {}), type: 'card-state', card: updatedBaseCard, updatedAt: now }
+                            : updatedBaseCard;
 
                         await window.electronAPI.p2pAppend({
                             name: img.cardId,
@@ -2246,29 +2357,41 @@ const CardLibrary: React.FC = () => {
 
                 // Update the Image Card's children array with loop video
                 try {
-                    const imageCardRecords = await window.electronAPI.p2pRead(imageId);
+                    const imageCardRecords = await window.electronAPI.p2pRead(imageId, { reverse: true, limit: 24 });
                     let imageCardLatest: any = {};
-                    for (const r of imageCardRecords) {
-                        try {
-                            const parsed = JSON.parse(r);
-                            if (parsed) imageCardLatest = parsed;
-                        } catch { }
+                    if (Array.isArray(imageCardRecords)) {
+                        // NOTE: p2pRead({ reverse: true }) returns newest-first.
+                        for (const r of imageCardRecords) {
+                            if (!r || typeof r !== 'string') continue;
+                            try {
+                                const parsed = JSON.parse(r);
+                                if (parsed) {
+                                    imageCardLatest = parsed;
+                                    break;
+                                }
+                            } catch { }
+                        }
                     }
 
-                    const updatedImageCard = {
-                        ...imageCardLatest,
+                    const isCardState = imageCardLatest?.type === 'card-state' && imageCardLatest?.card;
+                    const baseCard = isCardState ? imageCardLatest.card : imageCardLatest;
+                    const updatedBaseCard = {
+                        ...(baseCard || {}),
                         children: [
-                            ...(imageCardLatest.children || []),
+                            ...((baseCard && baseCard.children) || []),
                             {
                                 cardId: result.videoCardId,
                                 type: 'loop-video',
                                 label: 'Loop Video',
                                 videoPath: result.videoPath,
                                 createdAt: now,
-                            }
+                            },
                         ],
                         updatedAt: now,
                     };
+                    const updatedImageCard = isCardState
+                        ? { ...(imageCardLatest || {}), type: 'card-state', card: updatedBaseCard, updatedAt: now }
+                        : updatedBaseCard;
 
                     await window.electronAPI.p2pAppend({
                         name: imageId,
@@ -2314,15 +2437,15 @@ const CardLibrary: React.FC = () => {
         // Try to load the card directly from its core
         if (window.electronAPI?.p2pRead) {
             try {
-                const records = await window.electronAPI.p2pRead(loopVideoCardId);
+                const records = await window.electronAPI.p2pRead(loopVideoCardId, { reverse: true, limit: 24 });
                 if (Array.isArray(records) && records.length > 0) {
                     // Parse the most recent record
                     let cardRecord: any = null;
-                    for (let i = records.length - 1; i >= 0; i--) {
+                    for (let i = 0; i < records.length; i += 1) {
                         try {
                             const parsed = JSON.parse(records[i]);
                             if (parsed) {
-                                cardRecord = parsed;
+                                cardRecord = parsed?.type === 'card-state' && parsed?.card ? parsed.card : parsed;
                                 break;
                             }
                         } catch { /* skip */ }
@@ -2365,12 +2488,9 @@ const CardLibrary: React.FC = () => {
             mediaKind: card.mediaKind,
             mediaLocalPath: card.mediaLocalPath,
             thumbnail: card.thumbnail || getCardThumbnail(card),
-            image: card.cardRecord?.image,
             coreName: card.coreName,
             createdAt: card.createdAt,
             tier: card.tier || calculateCardQuality(card).tierNumber,
-            // Pass full cardRecord to ensure PetPortal can reconstruct the pet config
-            cardRecord: card.cardRecord,
             type: 'card-transfer'
         }));
 
@@ -2437,13 +2557,12 @@ const CardLibrary: React.FC = () => {
             const coreName = activeWorkspaceCard.coreName || cardId;
             const nowIso = new Date().toISOString();
 
-            const records = await window.electronAPI.p2pRead(coreName);
+            const records = await window.electronAPI.p2pRead(coreName, { reverse: true, limit: 48 });
 
             let latestWrapper: any = null;
             let latestCard: any = null;
             let wrapperKind: 'card-state' | 'card' | 'raw' = 'raw';
-
-            for (let i = records.length - 1; i >= 0; i--) {
+            for (let i = 0; i < records.length; i += 1) {
                 const raw = records[i];
                 if (!raw || typeof raw !== 'string') continue;
                 try {
@@ -2467,7 +2586,6 @@ const CardLibrary: React.FC = () => {
                         break;
                     }
                 } catch {
-                    // ignore
                 }
             }
 
@@ -2523,9 +2641,9 @@ const CardLibrary: React.FC = () => {
             });
 
             try {
-                const refreshed = await window.electronAPI.p2pRead(coreName);
+                const refreshed = await window.electronAPI.p2pRead(coreName, { reverse: true, limit: 48 });
                 let latest: any = null;
-                for (let i = refreshed.length - 1; i >= 0; i--) {
+                for (let i = 0; i < refreshed.length; i += 1) {
                     const raw = refreshed[i];
                     if (!raw || typeof raw !== 'string') continue;
                     try {
@@ -2539,12 +2657,10 @@ const CardLibrary: React.FC = () => {
                             break;
                         }
                     } catch {
-                        // ignore
                     }
                 }
                 setActiveWorkspaceCard(prev => prev ? ({ ...prev, cardRecord: latest || prev.cardRecord }) : null);
             } catch {
-                // ignore
             }
 
             loadCards();
@@ -2592,16 +2708,23 @@ const CardLibrary: React.FC = () => {
                             if (window.electronAPI?.p2pRead) {
                                 const coreName = activeWorkspaceCard.coreName || activeWorkspaceCard.cardId;
                                 try {
-                                    const records = await window.electronAPI.p2pRead(coreName);
+                                    const records = await window.electronAPI.p2pRead(coreName, { reverse: true, limit: 48 });
                                     let latest: any = {};
                                     for (const r of records) {
                                         try {
                                             const p = JSON.parse(r);
-                                            if (p.type === 'card') latest = p;
+                                            if (p?.type === 'card-state' && p?.card) {
+                                                latest = p.card;
+                                                break;
+                                            }
+                                            if (p?.type === 'card') {
+                                                latest = p;
+                                                break;
+                                            }
                                         } catch { }
                                     }
                                     setActiveWorkspaceCard(prev => prev ? ({ ...prev, cardRecord: latest }) : null);
-                                    loadCards(); // Refresh grid as well
+                                    loadCards();
                                 } catch (e) { console.error("Failed to refresh workspace card", e); }
                             }
                         }}
@@ -2692,9 +2815,12 @@ const CardLibrary: React.FC = () => {
                                         console.log('[Repair]', repairResult);
                                     }
 
-                                    if (result.recovered > 0 || repairResult.repaired > 0) {
-                                        await loadCards();
+                                    if (window.electronAPI?.persistenceRebuildCardLibraryIndex) {
+                                        const rebuild = await window.electronAPI.persistenceRebuildCardLibraryIndex();
+                                        console.log('[Recover] RebuildCardLibraryIndex', rebuild);
                                     }
+
+                                    await loadCards();
 
                                     // Show result message
                                     const msg = `Recovered ${result.recovered} cards. Fixed ${repairResult.repaired} parent relationships.`;
@@ -2754,9 +2880,9 @@ const CardLibrary: React.FC = () => {
                     <div className="flex-none px-6 py-2 bg-gray-800/30 border-b border-gray-700/50">
                         <div className="flex items-center gap-2 overflow-x-auto pb-1">
                             <span className="text-xs text-gray-500 uppercase font-mono flex-shrink-0">Sets:</span>
-                            {cardSets.slice(0, 5).map((set) => (
+                            {cardSets.slice(0, 5).map((set, i) => (
                                 <button
-                                    key={set.setId || set.mergedSetId}
+                                    key={`${set.setId || set.mergedSetId || 'set'}:${(set as any)?.createdAt || ''}:${i}`}
                                     onClick={() => {
                                         const id = set.setId || set.mergedSetId;
                                         setActiveSetId(id);
@@ -2884,7 +3010,7 @@ const CardLibrary: React.FC = () => {
                     </div>
                 )}
 
-                <div className="flex-1 overflow-hidden p-6">
+                <div className="flex-1 min-h-0 overflow-hidden p-6">
                     <style>{`
                 .card-grid {
                     display: grid;
@@ -2916,7 +3042,7 @@ const CardLibrary: React.FC = () => {
                 }
             `}</style>
 
-                    <div className="w-full text-white h-full flex flex-col max-w-[1800px] mx-auto relative">
+                    <div className="w-full text-white h-full flex flex-col min-h-0 max-w-[1800px] mx-auto relative">
                         {error && (
                             <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg flex items-center gap-3 text-red-300">
                                 <rux-icon icon="warning" size="small"></rux-icon>
@@ -2972,7 +3098,7 @@ const CardLibrary: React.FC = () => {
                                 onCardDragStart={(e, card) => handleDragStart(e, card)}
                                 getPortalColorMode={(card) => (card?.provider === 'revid' ? 'red' : 'blue')}
                                 selectedCardId={selected?.cardId}
-                                className="flex-1 pb-10"
+                                className="flex-1 min-h-0 pb-10"
                                 onRequestMore={requestMoreCards}
                                 isFetchingMore={isFetchingMore}
                                 renderCard={(card) => {

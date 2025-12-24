@@ -329,7 +329,52 @@ export const FormationHud: React.FC<FormationHudProps> = ({
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     if (!hudRef.current) return;
+    if (!e.shiftKey) {
+      const x = (e as any).clientX;
+      const y = (e as any).clientY;
+      if (typeof x !== 'number' || typeof y !== 'number') return;
+
+      const findScrollableY = (t: HTMLElement | null): HTMLElement | null => {
+        let cur: HTMLElement | null = t;
+        while (cur && cur !== document.body) {
+          try {
+            const style = window.getComputedStyle(cur);
+            const oy = style.overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && cur.scrollHeight > cur.clientHeight + 2) {
+              return cur;
+            }
+          } catch {
+          }
+          cur = cur.parentElement;
+        }
+        const root = document.scrollingElement as HTMLElement | null;
+        if (root && root.scrollHeight > root.clientHeight + 2) return root;
+        return null;
+      };
+
+      const hudEl = hudRef.current as HTMLElement;
+      let under: HTMLElement | null = null;
+      const prev = hudEl.style.pointerEvents;
+      try {
+        hudEl.style.pointerEvents = 'none';
+        under = document.elementFromPoint(x, y) as HTMLElement | null;
+      } catch {
+        under = null;
+      } finally {
+        hudEl.style.pointerEvents = prev;
+      }
+
+      const scroller = findScrollableY(under);
+      if (!scroller) return;
+
+      scroller.scrollTop += e.deltaY;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (e.altKey || e.metaKey) return;
     e.preventDefault();
+    e.stopPropagation();
     const next = hudZ + e.deltaY * -6;
     setHudZ(clamp(next, HUD_Z_MIN, HUD_Z_MAX));
   }, [HUD_Z_MAX, HUD_Z_MIN, hudZ]);

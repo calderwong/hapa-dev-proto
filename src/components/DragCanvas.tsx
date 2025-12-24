@@ -283,6 +283,22 @@ export const DragCanvas: React.FC = () => {
       return tag === 'INPUT' || tag === 'TEXTAREA' || !!t?.isContentEditable;
     };
 
+    const isInsideScrollableY = (t: HTMLElement | null) => {
+      let cur: HTMLElement | null = t;
+      while (cur && cur !== document.body) {
+        try {
+          const style = window.getComputedStyle(cur);
+          const oy = style.overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && cur.scrollHeight > cur.clientHeight + 2) {
+            return true;
+          }
+        } catch {
+        }
+        cur = cur.parentElement;
+      }
+      return false;
+    };
+
     const onWheel = (e: WheelEvent) => {
       if (!e.shiftKey) return;
       if (e.altKey || e.metaKey) return;
@@ -304,6 +320,8 @@ export const DragCanvas: React.FC = () => {
 
       const target = (fromPoint || (e.target as HTMLElement | null)) as HTMLElement | null;
       if (isEditableTarget(target)) return;
+
+      if (isInsideScrollableY(target)) return;
 
       // Let local handlers win.
       if (target?.closest('[data-overlay-hud="true"]')) return;

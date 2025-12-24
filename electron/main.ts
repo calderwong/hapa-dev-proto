@@ -75,58 +75,93 @@ if (!gotTheLock) {
 
       // Reset checkpoint and replay entire index
       setPersistenceMetaValue(checkpointKey, '0');
-      const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start: 0, end });
-      if (!Array.isArray(blocks) || blocks.length === 0) {
-        setPersistenceMetaValue(checkpointKey, String(end));
-        return { ok: true, indexed: 0, totalBlocks: 0 };
-      }
-
+      const CHUNK_BLOCKS = 500;
+      const BATCH_EVENTS = 250;
       let indexed = 0;
-      for (const raw of blocks) {
-        if (!raw || typeof raw !== 'string') continue;
-        let parsed: any = null;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          parsed = null;
+      let totalBlocks = 0;
+      const batch: any[] = [];
+      const flush = async (checkpointValue: number) => {
+        if (batch.length > 0) {
+          await adapter.applyEvents(batch as any);
+          indexed += batch.length;
+          batch.length = 0;
+        }
+        setPersistenceMetaValue(checkpointKey, String(checkpointValue));
+        await new Promise((r) => setTimeout(r, 0));
+      };
+
+      for (let cursor = 0; cursor < end; cursor += CHUNK_BLOCKS) {
+        const chunkEnd = Math.min(end, cursor + CHUNK_BLOCKS);
+        const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start: cursor, end: chunkEnd });
+        if (!Array.isArray(blocks) || blocks.length === 0) {
+          await flush(chunkEnd);
+          continue;
         }
 
-        if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
+        totalBlocks += blocks.length;
 
-        const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
-        if (!id) continue;
+        for (let i = 0; i < blocks.length; i++) {
+          const raw = blocks[i];
+          if (!raw || typeof raw !== 'string') continue;
+          let parsed: any = null;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            parsed = null;
+          }
 
-        const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
-        if (deleted) {
-          await emitCardDeleted({ id, deletedAt: parsed.deletedAt || new Date().toISOString() } as any);
-          indexed += 1;
-        } else {
-          await emitCardEvent('CARD_CREATED', {
-            id,
-            type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
-            mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-            name: typeof parsed.name === 'string' ? parsed.name : undefined,
-            tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
-            hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
-            parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-            createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
-            metadata: {
-              coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
-              thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
-              mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
-              parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-              mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-              name: typeof parsed.name === 'string' ? parsed.name : undefined,
-              createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
-              updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
-            },
-          } as any);
-          indexed += 1;
+          if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
+
+          const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
+          if (!id) continue;
+
+          const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
+          const now = new Date().toISOString();
+          if (deleted) {
+            batch.push({
+              type: 'CARD_DELETED',
+              payload: {
+                id,
+                deletedAt: parsed.deletedAt || now,
+              },
+              timestamp: now,
+            });
+          } else {
+            batch.push({
+              type: 'CARD_CREATED',
+              payload: {
+                id,
+                type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
+                mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
+                hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
+                parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : now,
+                metadata: {
+                  coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
+                  thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
+                  mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
+                  parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                  mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                  name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                  createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+                  updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+                },
+              },
+              timestamp: now,
+            });
+          }
+
+          if (batch.length >= BATCH_EVENTS) {
+            await flush(cursor + i + 1);
+          }
         }
+
+        await flush(chunkEnd);
       }
 
-      setPersistenceMetaValue(checkpointKey, String(end));
-      return { ok: true, indexed, totalBlocks: blocks.length };
+      return { ok: true, indexed, totalBlocks };
     } catch (err: any) {
       return { ok: false, error: err?.message || String(err), indexed: 0, totalBlocks: 0 };
     }
@@ -6946,7 +6981,7 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
             return {
               items,
               nextCursor,
-              hasMore: nextCursor < total,
+              hasMore: items.length >= limit ? true : nextCursor < total,
               totalLength: total,
             };
           }
@@ -7926,66 +7961,86 @@ app.on('ready', async () => {
           const end = typeof len === 'number' ? len : 0;
           if (end <= start) return;
 
-          // readCore will lazily open/create the core now that P2P is initialized.
-          await readCore(CARD_LIBRARY_CORE_NAME, { start, end });
+          const CHUNK_BLOCKS = 500;
+          const BATCH_EVENTS = 250;
+          const batch: any[] = [];
+          const flush = async (checkpointValue: number) => {
+            if (batch.length > 0) {
+              await adapter.applyEvents(batch as any);
+              batch.length = 0;
+            }
+            setPersistenceMetaValue(checkpointKey, String(checkpointValue));
+            await new Promise((r) => setTimeout(r, 0));
+          };
 
-          // The actual projection is done inside appendToCore for new writes.
-          // For existing historical blocks, we need to re-append to persistence;
-          // simplest approach is to replay blocks through the p2p layer's projection
-          // by parsing and emitting events here.
-          const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start, end });
-          if (!Array.isArray(blocks)) {
-            setPersistenceMetaValue(checkpointKey, String(end));
-            return;
-          }
-
-          for (const raw of blocks) {
-            if (!raw || typeof raw !== 'string') continue;
-            let parsed: any = null;
-            try {
-              parsed = JSON.parse(raw);
-            } catch {
-              parsed = null;
+          for (let cursor = start; cursor < end; cursor += CHUNK_BLOCKS) {
+            const chunkEnd = Math.min(end, cursor + CHUNK_BLOCKS);
+            const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start: cursor, end: chunkEnd });
+            if (!Array.isArray(blocks) || blocks.length === 0) {
+              await flush(chunkEnd);
+              continue;
             }
 
-            if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
+            for (let i = 0; i < blocks.length; i++) {
+              const raw = blocks[i];
+              if (!raw || typeof raw !== 'string') continue;
+              let parsed: any = null;
+              try {
+                parsed = JSON.parse(raw);
+              } catch {
+                parsed = null;
+              }
 
-            // Emit via persistence functions indirectly by calling appendToCore projection?
-            // Since projection logic lives in appendToCore for new appends only, we emit here
-            // by reusing the same persistence entrypoints via dynamic import.
-            const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
-            if (!id) continue;
+              if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
 
-            const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
-            if (deleted) {
-              const { emitCardDeleted } = await import('./persistence');
-              await emitCardDeleted({ id, deletedAt: parsed.deletedAt || new Date().toISOString() } as any);
-            } else {
-              const { emitCardEvent } = await import('./persistence');
-              await emitCardEvent('CARD_CREATED', {
-                id,
-                type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
-                mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-                name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
-                hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
-                parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-                createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
-                metadata: {
-                  coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
-                  thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
-                  mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
-                  parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-                  mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-                  name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                  createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
-                  updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
-                },
-              } as any);
+              const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
+              if (!id) continue;
+
+              const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
+              const now = new Date().toISOString();
+              if (deleted) {
+                batch.push({
+                  type: 'CARD_DELETED',
+                  payload: {
+                    id,
+                    deletedAt: parsed.deletedAt || now,
+                  },
+                  timestamp: now,
+                });
+              } else {
+                batch.push({
+                  type: 'CARD_CREATED',
+                  payload: {
+                    id,
+                    type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
+                    mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                    name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                    tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
+                    hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
+                    parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                    createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : now,
+                    metadata: {
+                      coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
+                      thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
+                      mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
+                      parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                      mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                      name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                      createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+                      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+                    },
+                  },
+                  timestamp: now,
+                });
+              }
+
+              if (batch.length >= BATCH_EVENTS) {
+                await flush(cursor + i + 1);
+              }
             }
-          }
 
-          setPersistenceMetaValue(checkpointKey, String(end));
+            await flush(chunkEnd);
+          }
         } catch (err) {
           console.warn('[Persistence] card-library reconcile failed:', err);
         }

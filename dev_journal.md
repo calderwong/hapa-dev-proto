@@ -1808,3 +1808,158 @@
 
 **Tags:** #bugfix #sqlite #migration #persistence
 **Est. Avg. Human Dev Time:** 15 minutes
+
+## Entry 174 – Bugfix: Card Library header buttons covered by global status bar
+**Prompt:** "I can't hit the button in the card library because I can't scroll up high enough and the header is covering them, can you fix?"
+
+**Summary of actions:**
+- Traced the issue to the global top status bar potentially overlaying page content (depending on Astro web component CSS).
+- Updated `Layout.tsx` so the main scroll container applies a dynamic `padding-top` equal to any measured overlap between the status bar and the scroll region.
+  - Uses `ResizeObserver` + `window.resize` to keep the inset correct.
+  - Ensures Card Library (and any other page) can always scroll fully to the top and click header controls.
+- Verified `npm run typecheck` passes.
+
+**Files modified/created:**
+- Modified: `src/components/Layout.tsx`
+
+**Tags:** #bugfix #ui #layout #card_library
+**Est. Avg. Human Dev Time:** 20 minutes
+
+## Entry 175 – UX: Nexus 3D header stays on top without blocking Inspector/Rail panels
+**Prompt:** "Can you adjust the 3D nexus view to keep the header on top (I like it like that), but make it so the info panels don't get overwritten and are still usable? Almost maybe create a nicer slightly neon light outline around the header panel to make it more distinguished."
+
+**Summary of actions:**
+- Updated the Nexus 3D overlay (`Card3DViewer.tsx`) to dynamically measure the global `rux-global-status-bar` height and offset top-positioned Nexus UI elements (close button, rail/inspector toggles, title chip, left rail, right inspector) so they remain reachable/clickable.
+- Added a Nexus-only neon outline/glow treatment to the global status bar in `Layout.tsx` so the header reads as a deliberate top layer without needing to hide it.
+
+**Files modified/created:**
+- Modified: `src/components/Card3DViewer/Card3DViewer.tsx`
+- Modified: `src/components/Layout.tsx`
+
+**Tags:** #ux #nexus #ui #layout
+**Est. Avg. Human Dev Time:** 25 minutes
+
+## Entry 176 – Dev UX: alternate dev scripts to bypass Vite port 5173 collisions
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Diagnosed `npm run dev` failing because Vite is configured with `strictPort: true` on `5173` and the port was already in use.
+- Added alternate dev scripts that run Vite + Electron against port `5174` via `VITE_DEV_SERVER_URL` so smoke testing can proceed without killing unknown processes.
+
+**Files modified/created:**
+- Modified: `package.json`
+- Modified: `dev_journal.md`
+
+**Tags:** #devex #tooling #vite #electron
+**Est. Avg. Human Dev Time:** 10 minutes
+
+## Entry 177 – Bugfix: Card Library infinite scroll not requesting more pages
+**Prompt:** "ok it's finding the cards and not crashing anymore. But I'm not able to use the infinite scroll anymore."
+
+**Summary of actions:**
+- Traced the regression to nested flexbox sizing causing the scroll to occur on an outer container instead of the `VirtualCardGrid` scroll container, preventing its near-bottom logic from triggering `onRequestMore`.
+- Updated `VirtualCardGrid` to use a flex column root and a `flex-1 min-h-0` internal scroller so it reliably receives scroll events.
+- Updated `CardLibrary.tsx` flex/min-height wiring so the grid region constrains correctly and the virtual grid becomes the scroll container.
+
+**Files modified/created:**
+- Modified: `src/components/cards/VirtualCardGrid.tsx`
+- Modified: `src/pages/CardLibrary.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #ui #card_library #performance
+**Est. Avg. Human Dev Time:** 20 minutes
+
+## Entry 178 – Bugfix: Card Library scroll bounces upward before reaching bottom
+**Prompt:** "I can't scroll to the bottom without it bouncing back up"
+
+**Summary of actions:**
+- Diagnosed the scroll bounce as `VirtualCardGrid` recalculating `totalHeight` due to unstable column measurement and then clamping `scrollTop` during normal scrolling.
+- Stabilized column calculation by deriving `effectiveColumns` from the container width (instead of parsing `gridTemplateColumns`).
+- Updated scroll clamping to only adjust `scrollTop` when the scrollable range shrinks (e.g., layout/filter changes), not on every scroll update.
+- Aligned the virtual row gap calculation to match the CSS grid gap to reduce height jitter.
+
+**Files modified/created:**
+- Modified: `src/components/cards/VirtualCardGrid.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #ui #card_library #virtualization
+**Est. Avg. Human Dev Time:** 15 minutes
+
+## Entry 179 – Bugfix: Card Library scroll snap from ResizeObserver jitter
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Observed that minor 1px ResizeObserver jitter (height/width fluctuations) can shrink the computed scroll range and trigger the scroll clamping path, creating an upward snap while scrolling.
+- Added size-change tolerance (ignore <=1px changes) and an epsilon in the clamp condition so we only clamp when scrollTop is meaningfully out of range after a real shrink.
+
+**Files modified/created:**
+- Modified: `src/components/cards/VirtualCardGrid.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #ui #card_library #virtualization
+**Est. Avg. Human Dev Time:** 10 minutes
+
+## Entry 181 – Bugfix: Restore page scrolling blocked by global wheel handler
+**Prompt:** "still can't scroll down"
+
+**Summary of actions:**
+- Investigated why Card Library could not scroll at all and identified a global `wheel` listener in `DragCanvas` registered with capture + `preventDefault()` for overlay depth controls.
+- Updated the handler to avoid hijacking wheel events when the pointer is over a vertically scrollable container (e.g., Card Library virtual grid), restoring normal scroll behavior while keeping the overlay shortcut.
+
+**Files modified/created:**
+- Modified: `src/components/DragCanvas.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #ui #scroll
+**Est. Avg. Human Dev Time:** 10 minutes
+
+## Entry 180 – Bugfix: Stabilize virtual grid row height to stop scroll bounce
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Found that even with stable column counting, DOM-driven row height changes can still desync `totalHeight` vs rendered layout in a virtualized grid.
+- Enforced a fixed implicit row height by setting `gridAutoRows` based on `cardHeight` and explicitly setting `display: grid` + `gap` in the virtual grid styles.
+
+**Files modified/created:**
+- Modified: `src/components/cards/VirtualCardGrid.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #ui #card_library #virtualization
+**Est. Avg. Human Dev Time:** 10 minutes
+
+## Entry 182 – Bugfix: Card Library paging + Recover stuck at 120
+**Prompt:** "OK there's no bounce, but also no more cards load. And also the recover feature isn't working anymore and I'm stuck at 120 cards again."
+
+**Summary of actions:**
+- Hardened `nexus:index-page` persistence paging so the backend will continue paging when a full page is returned (`items.length >= limit`), even if the persisted `total`/`hasMore` signal is temporarily wrong.
+- Hardened Card Library progressive paging so the renderer:
+  - Infers `nextCursor` if the backend response omits it.
+  - Treats a full page as an indicator that more pages likely exist.
+- Updated the Card Library `Recover` flow to rebuild the SQLite projection (`persistenceRebuildCardLibraryIndex`) and then reload the grid so recovered cards become visible immediately.
+- Fixed a duplicate-key warning in the Card Sets selector by including a stable fallback in the React key.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `src/pages/CardLibrary.tsx`
+
+**Tags:** #bugfix #card_library #pagination #recovery
+**Est. Avg. Human Dev Time:** 30 minutes
+
+## Entry 183 – Bugfix/Perf: restore mouse-wheel scroll + speed up boot reconcile
+**Prompt:** "Ok cards are back now... I still can't scroll down with the mouse wheel... Also the initial app load is taking forever now..."
+
+**Summary of actions:**
+- Fixed a scroll regression caused by the overlay Formation HUD capturing wheel events and calling `preventDefault()`.
+  - `FormationHud.tsx`: Shift is now required for HUD wheel behavior; otherwise, wheel deltas are forwarded to the underlying scroll container.
+- Reduced Electron startup stalls from SQLite projection reconciliation:
+  - `electron/main.ts`: removed redundant core reads and per-record dynamic imports; reconciles the `card-library` Hypercore into SQLite in chunks, batching events into `adapter.applyEvents(...)` and yielding between batches.
+  - `electron/SqliteAdapter.ts`: made `applyEvents(...)` properly transactional by using a synchronous internal apply (`applyEventSync`) inside the sqlite transaction.
+
+**Files modified/created:**
+- Modified: `src/components/overlay/FormationHud.tsx`
+- Modified: `electron/main.ts`
+- Modified: `electron/SqliteAdapter.ts`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #performance #boot #scroll #sqlite
+**Est. Avg. Human Dev Time:** 45 minutes

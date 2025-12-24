@@ -223,9 +223,9 @@ export class SqliteAdapter implements PersistenceAdapter {
   // Projection Pipeline
   // ============================================================
 
-  async applyEvent(event: HypercoreEvent): Promise<void> {
+  private applyEventSync(event: HypercoreEvent): void {
     if (!this.db) throw new Error('Database not initialized');
-    
+
     switch (event.type) {
       case 'CARD_CREATED':
         this.handleCardCreated(event.payload as CardCreatedPayload);
@@ -247,12 +247,16 @@ export class SqliteAdapter implements PersistenceAdapter {
     }
   }
 
+  async applyEvent(event: HypercoreEvent): Promise<void> {
+    this.applyEventSync(event);
+  }
+
   async applyEvents(events: HypercoreEvent[]): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     
     const transaction = this.db.transaction(() => {
       for (const event of events) {
-        this.applyEvent(event);
+        this.applyEventSync(event);
       }
     });
     
