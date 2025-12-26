@@ -72,6 +72,10 @@ The app is built with **Electron**, **React + TypeScript**, and **Vite**.
   - On app launch, a lightweight splash screen plays videos from `.vibes` immediately.
   - The main window loads hidden in the background and is only shown once the renderer signals it is ready.
 
+- **Debug API (local-only, opt-in)**
+  - Optional localhost HTTP API in the Electron main process for querying safe app/renderer state during debugging.
+  - Token-authenticated, **read-only**, and bound to `127.0.0.1`.
+
 ---
 
 ## Tech Stack
@@ -147,6 +151,37 @@ Keys and configs are stored locally via Electron (no keys are committed to the r
 
 > Security note: Avoid hard-coding API keys or secrets in source files. Use the Settings UI and local storage instead.
 
+### Debug API (optional)
+
+Enable the local debug API by setting an environment flag (recommended for local dev only):
+
+- `HAPA_DEBUG_API=1` (or pass `--debug-api`)
+- Optional: `HAPA_DEBUG_API_PORT=<port>` (default: random available port)
+- Optional: `HAPA_DEBUG_API_TOKEN=<token>` (default: random token generated at start)
+
+When enabled, Electron will print the URL + token in the main-process console:
+
+- `GET /health` (no auth)
+- `GET /v1/info` (auth)
+- `GET /v1/renderer/state` (auth)
+- `GET /v1/renderer/dom?selector=...` (auth)
+- `GET /v1/renderer/navigate?path=/operator` (auth)
+- `GET /v1/renderer/click?text=Refresh` (auth)
+- `GET /v1/renderer/text?selector=...` (auth)
+- `GET /v1/checks/cards-loaded?min=120` (auth)
+- `GET /v1/checks/operator-panel-ready?requireSnapshot=true` (auth)
+- `GET /v1/ipc/p2p-get-length?coreName=card-library` (auth)
+- `GET /v1/ipc/system-stats` (auth)
+- `GET /v1/ipc/persistence-stats` (auth)
+- `GET /v1/ipc/persistence-rebuild-card-library-index` (auth)
+- `GET /v1/ipc/nexus-index-page?coreName=card-library&direction=reverse&limit=120` (auth)
+
+For the full reference (including auth examples and an Operator Reality Panel smoke-test script), see:
+
+- `docs/reference/HAPA_NODE_API_REFERENCE.md`
+
+Auth is via `Authorization: Bearer <token>` (preferred) or `?token=<token>`.
+
 ---
 
 ## P2P Hypercore Notes
@@ -220,6 +255,13 @@ Notes:
 git init
 git add .
 git commit -m "chore: initial hapa-ag setup"
+```
+
+- This repo uses **Git LFS** for large binary assets under `docs/` (e.g. videos, zips, images) so other contributors can pull full context without bloating git history.
+
+```bash
+git lfs install
+git lfs pull
 ```
 
 - Track work in `dev_journal.md` and keep the PRD updated as features evolve.

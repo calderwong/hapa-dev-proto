@@ -74,9 +74,8 @@ DB path:
 - `path.join(app.getPath('userData'), 'persistence.db')`
 
 Important caveat:
-- `initPersistence()` exists but is **not currently invoked** anywhere in `electron/main.ts` (imported but no call found by audit).
-- Result: the DB may not be created/used unless some other module calls `initPersistence()`.
-- IPC endpoints (e.g. `persistence:search-cards`) will return empty/defaults if the adapter isn’t initialized.
+- `initPersistence()` is invoked during app startup in `electron/main.ts` (before boot-time reconciliation of projected data).
+- If persistence initialization fails or the adapter is not ready, IPC endpoints (e.g. `persistence:search-cards`) will return empty/defaults.
 
 ---
 

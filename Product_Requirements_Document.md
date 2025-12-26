@@ -126,6 +126,12 @@ Phase 2 (Scalability & Performance):
 - The main application window must load hidden in the background.
 - The app window should only be shown once the renderer signals it is ready and the window is ready-to-show, to avoid flicker and improve perceived performance.
 
+### 2.11 Debug API (Localhost, Opt-in)
+- Provide an **optional** localhost-only HTTP API in the Electron main process for debugging and automation.
+- The API must be **read-only** and safe-by-default.
+- The API must bind to `127.0.0.1` (no LAN exposure) and reject non-local connections.
+- Require token authentication (Bearer token recommended).
+
 ## 3. Non-Functional Requirements
 
 - **Platform**: Desktop (Electron; Windows-focused, but cross-platform where possible).

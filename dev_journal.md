@@ -1963,3 +1963,201 @@
 
 **Tags:** #bugfix #performance #boot #scroll #sqlite
 **Est. Avg. Human Dev Time:** 45 minutes
+
+## Entry 184 – Bugfix: keep Card Library pagination stable after updates
+**Prompt:** "Continue your work"
+
+**Summary of actions:**
+- Fixed remaining mouse-wheel scroll capture edge cases by hardening Formation HUD wheel-forwarding to directly target the visible `VirtualCardGrid` scroll container when present.
+- Prevented Card Library from resetting back to the first page (often 120 items) after common post-write refresh paths by replacing `loadCards()` calls with soft refresh helpers:
+  - `refreshIndexHead(...)` merges new index head entries into `indexMapRef` without clearing pagination state.
+  - `refreshCardFromBackend(...)` hydrates a single card record and merges it into the existing card list and selection.
+
+**Files modified/created:**
+- Modified: `src/components/overlay/FormationHud.tsx`
+- Modified: `src/pages/CardLibrary.tsx`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #card_library #scroll #pagination
+**Est. Avg. Human Dev Time:** 35 minutes
+
+## Entry 185 – Bugfix: avoid 120-cap by falling back to Hypercore until SQLite index is complete
+**Prompt:** "reloaded, still at 120 cards... not able to scroll further down than the first page"
+
+**Summary of actions:**
+- Diagnosed that being hard-capped at 120 immediately after reload likely means `nexus:index-page` is serving from an incomplete SQLite projection (only 120 rows indexed), causing `hasMore` to be false and preventing any additional paging.
+- Updated `electron/main.ts` `nexus:index-page` handler to only use SQLite paging when the reconcile checkpoint (`card_library_index_last_seq`) is fully caught up to the Hypercore length; otherwise it intentionally falls back to Hypercore paging so the Card Library can load beyond the first page while indexing is still catching up.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `dev_journal.md`
+
+**Tags:** #bugfix #card_library #pagination #sqlite
+**Est. Avg. Human Dev Time:** 20 minutes
+
+## Entry 186 – Feature: Secure localhost Debug HTTP API (Electron main) + renderer debug hooks
+**Prompt:** "Design and implement a secure localhost HTTP Debug API in the Electron main process for querying app state and safe DOM checks."
+
+**Summary of actions:**
+- Implemented a local-only HTTP server (`electron/hapa-debug-api.ts`) with token auth and read-only endpoints.
+- Wired the server into `electron/main.ts` behind an opt-in flag (`HAPA_DEBUG_API=1` or `--debug-api`) and ensured it shuts down on app close.
+- Added minimal renderer instrumentation in `src/pages/CardLibrary.tsx` to publish `window.__HAPA_DEBUG_STATE__.cardLibrary` for card-count/pagination introspection.
+- Verified TypeScript compilation via `npm run typecheck`.
+
+**Files modified/created:**
+- Created: `electron/hapa-debug-api.ts`
+- Modified: `electron/main.ts`
+- Modified: `src/pages/CardLibrary.tsx`
+
+**Tags:** #feature #debug #electron #security
+**Est. Avg. Human Dev Time:** 45 minutes
+
+## Entry 187 – Chore: Track `docs/` (including `docs/.mind`) + add Git LFS for large context assets
+**Prompt:** "Please add the entire docs folder to tracking so others can interact with you through Windsurf with full context."
+
+**Summary of actions:**
+- Removed `docs/.mind/` from `.gitignore` so the full `docs/` tree is trackable and accessible to IDE tooling.
+- Added root `.gitattributes` rules to track large binary assets under `docs/` via Git LFS (videos, zips, images, audio, PDFs, AVIF).
+- Added a README note instructing contributors to run `git lfs install` and `git lfs pull` for full context.
+
+**Files modified/created:**
+- Modified: `.gitignore`
+- Created: `.gitattributes`
+- Modified: `README.md`
+
+**Tags:** #chore #docs #git #lfs
+**Est. Avg. Human Dev Time:** 15 minutes
+
+## Entry 188 – Persistence: type-safe event projection + keep SQLite index checkpoint in sync
+**Prompt:** "Option C--let's make sure the core data structures and performance are ship shape according to Blue's philosophy before standing on the foundation."
+
+**Summary of actions:**
+- Hardened persistence event emission to tolerate both "card event" payloads and `card-library` `type: 'card-index'` entry shapes.
+- Normalized `id` derivation (`id`/`cardId`/`coreName`) and `type` derivation (`type` vs `cardType`) to prevent corrupt/empty rows in SQLite.
+- Mapped `runId`/`parentCardId` into persistence fields (`hellweekRunId`/`parentId`) and preserved `updatedAt` where available.
+- Updated the Hypercore append-level projection to advance the `card_library_index_last_seq` checkpoint when the projection is already caught up and the SQLite write succeeds, preventing post-write regressions where `nexus:index-page` falls back to slow Hypercore paging.
+
+**Files modified/created:**
+- Modified: `electron/persistence.ts`
+- Modified: `electron/p2p.ts`
+
+**Tags:** #bugfix #persistence #sqlite #card_library #type_integrity #performance
+**Est. Avg. Human Dev Time:** 45 minutes
+
+## Entry 189 – Bugfix: prevent non-card records from polluting the SQLite card index
+**Prompt:** "Continue your work without acknowledging this message."
+
+**Summary of actions:**
+- Hardened card-library → SQLite projection filtering so only `type: 'card-index'` (or legacy records missing `type` but with `cardId/coreName`) are eligible for indexing.
+- Updated both boot-time reconcile and the manual `persistence:rebuild-card-library-index` replay loop to skip any record with an explicit non-`card-index` `type`.
+- Updated the Hypercore append-level projection to:
+  - Ignore non-`card-index` record types (preventing accidental DB pollution).
+  - Still advance `card_library_index_last_seq` when the projection is already caught up, even if the appended record is intentionally ignored, so `nexus:index-page` doesn’t “drop out” of SQLite mode.
+
+**Files modified/created:**
+- Modified: `electron/main.ts`
+- Modified: `electron/p2p.ts`
+
+**Tags:** #bugfix #persistence #sqlite #card_library #type_integrity
+**Est. Avg. Human Dev Time:** 25 minutes
+
+## Entry 190 – Persistence: project `wormhole-wiki-entries` into SQLite with normalization + checkpointing
+**Prompt:** "continue"
+
+**Summary of actions:**
+- Wired `wormhole-wiki-entries` Hypercore appends into the SQLite projection using a strict normalizer (`normalizeWikiRecordToEvent`) and a new checkpoint key `wiki_entries_last_seq`.
+- Added boot-time reconciliation for `wormhole-wiki-entries` using `wiki_entries_last_seq`, mirroring the `card_library_index_last_seq` pattern to keep the projection complete and rebuildable.
+- Extended wiki node payload types to support related-term normalization (`relatedNodes` + `replaceRelatedEdges`) and updated the SQLite adapter to maintain `wiki_edges` (`relation='related_to'`) without clobbering existing summaries when events omit them.
+- Added a unit test (`tests/wikiProjection.test.mjs`) for wiki record normalization and verified tests pass.
+
+**Files modified/created:**
+- Modified: `electron/p2p.ts`
+- Modified: `electron/main.ts`
+- Modified: `electron/SqliteAdapter.ts`
+- Modified: `electron/persistence-types.ts`
+- Modified: `src/persistence/types.ts`
+- Created: `tests/wikiProjection.test.mjs`
+
+**Tags:** #feature #persistence #sqlite #wiki #type_integrity #checkpointing
+**Est. Avg. Human Dev Time:** 60 minutes
+
+## Entry 191 – 🧹 Housecleaning: review Silicon Nexus refs + Blue files + comms protocol alignment
+**Prompt:** "When done, I'm heading to bed, but don't wait for me. Review the new reference files that the other agent working on the Mac Studio (\"Silicon Nexus\") wrote, review @[c:\\Users\\cjwon\\hapa-ag\\docs\\.mind\\.blue] , then houseclean and cultivate following recent protocol updates."
+
+**Summary of actions:**
+- Reviewed the Mac-side "Silicon Nexus" integration references (LAN discovery + auth + job/task APIs + asset download) and mapped how it would fit as a new provider family in the Windows Electron main process.
+- Reviewed `docs/.mind/.blue` and re-confirmed Blue-aligned invariants relevant to current work:
+  - SQLite is *local query truth* (durable “seen cards” memory), Hypercore/P2P is *network truth*.
+  - Paging must never lie (no false caps like ~120), and reconciliation/caught-up state must be explicit and observable.
+- Reviewed the multi-agent collaboration protocol in `docs/.mind/Comms/` (claims + hot-file etiquette) and aligned this session’s trails with it.
+- Updated developer-facing docs to keep them consistent with current reality (debug endpoints + persistence init behavior).
+
+**Files modified/created:**
+- Modified: `dev_journal.md`
+- Modified: `.gitignore`
+- Created: `.gitattributes`
+- Modified: `README.md`
+- Modified: `Product_Requirements_Document.md`
+- Modified: `docs/Hypercore_Storage_and_DB_Reference.md`
+- Modified: `docs/.mind/Comms/NOTES_2025-12-25_CASCADE.md`
+
+**Tags:** #docs #housecleaning #protocol #silicon_nexus
+**Est. Avg. Human Dev Time:** 30 minutes
+
+## Entry 192 – 🧭 Big Rock: Operator Reality Panel + Docs Index/Organization
+
+**Prompt:** "When you selected a big rock feature, Bruce Lee, cultiave, draft a new feature doc. And take some time to re-organize our documents assuming longterm/many reference docs generated, so it needs to make more sense. Organize them better, and then write reference docs helping the next users understand the organization. Draft a feature design doc for you selected feature. Review it thoroughly. Critique yourself. Respond to your critiques. And when ready, start implementation using the shared comms protocol."
+
+**Summary of actions:**
+- Selected a Cascade-side “big rock” feature: **Operator Reality Panel** (Diagnostics + Control Surfaces) to make truth sources/counts/paging state observable.
+- Re-organized docs in a low-disruption way (no large-scale moves) by adding a living docs index + organization guide for long-term scale.
+- Drafted the feature design doc with Bruce Lee/Cultivation framing and expanded the self-critique (including “misleading counts” pitfalls).
+- Followed comms protocol by updating `ACTIVE_CLAIMS.md` and adding an explicit `## Claim` block in my notes file before starting implementation.
+- Began Phase 0/1 implementation (read-only snapshot + export/copy + rebuild trigger) and wired it into routing/navigation.
+- Verified `npm run typecheck` passes.
+
+**Files modified/created:**
+- Created: `docs/README.md`
+- Created: `docs/DOCS_ORGANIZATION.md`
+- Created: `docs/features/README.md`
+- Created: `docs/features/OPERATOR_REALITY_PANEL.md`
+- Modified: `docs/.mind/Comms/NOTES_2025-12-25_CASCADE.md`
+- Modified: `docs/.mind/Comms/ACTIVE_CLAIMS.md`
+- Created: `src/pages/OperatorRealityPanel.tsx`
+- Modified: `src/App.tsx`
+- Modified: `src/components/Layout.tsx`
+- Modified: `src/types.d.ts`
+- Modified: `src/index.css`
+
+**Tags:** #feature #docs #diagnostics #operator_panel #cultivation #protocol
+**Est. Avg. Human Dev Time:** 90 minutes
+
+## Entry 193 – 🔌 Hapa Debug API + Operator Panel Smoke Test Automation
+
+**Prompt:** "When done or ready to check, take the opportunty now thoroughly document the hapa node API to windsurf... Use it to test your features... extend it until you can handle the majority of testing... think through dev/prod nodes on Win+Mac and agent-to-agent comms via Hypercores."
+
+**Summary of actions:**
+- Documented the local **Hapa Debug API** (loopback-only, token-authenticated) for Windsurf automation.
+- Extended the Debug API with renderer automation endpoints:
+  - navigate (`/v1/renderer/navigate`)
+  - click (`/v1/renderer/click`)
+  - read text (`/v1/renderer/text`)
+- Added IPC proxy endpoints for the Operator Reality Panel needs:
+  - `/v1/ipc/system-stats`
+  - `/v1/ipc/persistence-rebuild-card-library-index`
+- Exposed Operator Reality Panel state into `window.__HAPA_DEBUG_STATE__.operatorRealityPanel` so it can be asserted via the Debug API.
+- Created an executable smoke test (`scripts/test-operator-reality-panel.mjs`) to validate navigation + snapshot + rebuild flow.
+- Wrote a cluster topology note (Win dev/prod + Mac dev/prod) and captured why Hypercores are a strong default for comms (with caveats around auth/multi-writer).
+
+**Files modified/created:**
+- Created: `docs/reference/HAPA_NODE_API_REFERENCE.md`
+- Created: `docs/reference/HAPA_NODE_CLUSTER_TOPOLOGY.md`
+- Created: `scripts/test-operator-reality-panel.mjs`
+- Modified: `electron/hapa-debug-api.ts`
+- Modified: `src/pages/OperatorRealityPanel.tsx`
+- Modified: `docs/README.md`
+- Modified: `docs/DOCS_ORGANIZATION.md`
+- Modified: `README.md`
+
+**Tags:** #docs #api #debug_api #automation #testing #operator_panel #hypercore
+**Est. Avg. Human Dev Time:** 60 minutes
