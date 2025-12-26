@@ -71,7 +71,7 @@ async function main() {
       if (renderer.error) return null;
       return state;
     },
-    { timeoutMs: 30000, intervalMs: 600 },
+    { timeoutMs: 90000, intervalMs: 600 },
   );
 
   if (!rendererReady) {

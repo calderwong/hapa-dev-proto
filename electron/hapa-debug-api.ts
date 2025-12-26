@@ -59,6 +59,30 @@ const getRendererSnapshot = async (win: BrowserWindow | null) => {
     return { available: false, error: 'main_window_unavailable' };
   }
 
+  const href = (() => {
+    try {
+      return win.webContents.getURL();
+    } catch {
+      return '';
+    }
+  })();
+
+  const isLoading = (() => {
+    try {
+      return win.webContents.isLoading();
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!href || href === 'about:blank') {
+    return { available: true, href, loading: true, error: 'loading' };
+  }
+
+  if (isLoading) {
+    return { available: true, href, loading: true, error: 'loading' };
+  }
+
   try {
     const value = await withTimeout(
       win.webContents.executeJavaScript(
@@ -91,7 +115,7 @@ const getRendererSnapshot = async (win: BrowserWindow | null) => {
         })()`,
         true,
       ),
-      1500,
+      20000,
     );
 
     return { available: true, ...value };
@@ -115,6 +139,13 @@ const runDomQuery = async (win: BrowserWindow | null, selector: string) => {
   }
 
   try {
+    if (win.webContents.isLoading()) {
+      return { available: true, selector: safeSelector, error: 'loading' };
+    }
+  } catch {
+  }
+
+  try {
     const value = await withTimeout(
       win.webContents.executeJavaScript(
         `(() => {
@@ -128,7 +159,7 @@ const runDomQuery = async (win: BrowserWindow | null, selector: string) => {
         })()`,
         true,
       ),
-      1500,
+      20000,
     );
 
     return { available: true, ...value };
@@ -270,35 +301,119 @@ export async function startHapaDebugApi(options: StartHapaDebugApiOptions): Prom
           const tag = ${JSON.stringify(tag)};
           const index = ${JSON.stringify(index)};
           try {
+            const method = selector ? 'selector' : 'text';
             let nodes = [];
-            let mode = '';
+            let target = null;
 
             if (selector) {
-              mode = 'selector';
-              nodes = Array.from(document.querySelectorAll(selector));
+              try {
+                target = document.querySelector(selector);
+              } catch (err) {
+                return {
+                  ok: false,
+                  clicked: false,
+                  method,
+                  error: 'selector_invalid',
+                  message: String(err && err.message ? err.message : err),
+                  selector,
+                };
+              }
+
+              try {
+                nodes = Array.from(document.querySelectorAll(selector));
+              } catch {
+                nodes = target ? [target] : [];
+              }
+
+              if (index > 0) {
+                target = nodes[index] || null;
+              }
             } else {
-              mode = 'text';
+              const needle = String(text || '').trim().toLowerCase();
               nodes = Array.from(document.querySelectorAll(tag)).filter((el) => {
                 try {
                   const t = String(el && el.textContent ? el.textContent : '').trim().toLowerCase();
-                  return t.includes(String(text).trim().toLowerCase());
+                  return t.includes(needle);
                 } catch {
                   return false;
                 }
               });
+              target = nodes[index] || null;
             }
 
             const count = nodes.length;
-            const target = nodes[index] || null;
-            if (!target) return { ok: false, mode, count, error: 'no_match' };
-            try {
-              (target as any).click();
-            } catch (err) {
-              return { ok: false, mode, count, error: String(err && err.message ? err.message : err) };
+            if (!target) {
+              return { ok: false, clicked: false, method, error: 'not_found', count, index, selector, text, tag };
             }
-            return { ok: true, mode, count, index, tag, selector, text, clicked: true };
+
+            try {
+              if (typeof target.scrollIntoView === 'function') {
+                target.scrollIntoView({ block: 'center' });
+              }
+            } catch {
+            }
+
+            const matchedText = (() => {
+              try {
+                return String(target.textContent || '').trim();
+              } catch {
+                return '';
+              }
+            })();
+            const tagName = (() => {
+              try {
+                return String(target.tagName || '').trim();
+              } catch {
+                return '';
+              }
+            })();
+            const href = (() => {
+              try {
+                return typeof target.href === 'string' ? target.href : null;
+              } catch {
+                return null;
+              }
+            })();
+
+            try {
+              if (typeof target.click === 'function') {
+                target.click();
+              } else {
+                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+              }
+            } catch (err) {
+              return {
+                ok: false,
+                clicked: false,
+                method,
+                error: 'click_failed',
+                message: String(err && err.message ? err.message : err),
+                matchedText,
+                tag: tagName,
+                href,
+              };
+            }
+
+            return {
+              ok: true,
+              clicked: true,
+              method,
+              matchedText,
+              tag: tagName,
+              href,
+              count,
+              index,
+            };
           } catch (err) {
-            return { ok: false, error: String(err && err.message ? err.message : err) };
+            return {
+              ok: false,
+              clicked: false,
+              error: String(err && err.message ? err.message : err),
+              selector,
+              text,
+              tag,
+              index,
+            };
           }
         })()`,
         2500,

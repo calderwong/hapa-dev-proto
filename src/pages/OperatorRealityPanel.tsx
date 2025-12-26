@@ -94,13 +94,38 @@ const OperatorRealityPanel: React.FC = () => {
         updateDebugState({ lastAction: 'refresh', loading: true, error: null, status: null });
 
         try {
+            const callWithTimeout = async (fn: (() => Promise<any>) | null, timeoutMs: number) => {
+                if (!fn) return null;
+                let timer: number | null = null;
+                try {
+                    return await Promise.race([
+                        fn(),
+                        new Promise((resolve) => {
+                            timer = window.setTimeout(() => resolve({ ok: false, error: 'timeout' }), timeoutMs);
+                        }),
+                    ]);
+                } catch (err: any) {
+                    return { ok: false, error: err?.message || String(err) };
+                } finally {
+                    if (typeof timer === 'number') window.clearTimeout(timer);
+                }
+            };
+
+            const timeoutMs = 8000;
+            const getSystemStats = api.getSystemStats;
+            const getPersistenceStats = api.getPersistenceStats;
+            const nexusIndexPage = api.nexusIndexPage;
+            const getDiagnosticsSnapshot = api.getDiagnosticsSnapshot;
             const [systemStats, persistenceStats, paging, diagnostics] = await Promise.all([
-                api.getSystemStats ? api.getSystemStats() : null,
-                api.getPersistenceStats ? api.getPersistenceStats() : null,
-                api.nexusIndexPage
-                    ? api.nexusIndexPage({ coreName: CARD_LIBRARY_CORE_NAME, limit: 1, direction: 'reverse' })
-                    : null,
-                api.getDiagnosticsSnapshot ? api.getDiagnosticsSnapshot() : null,
+                callWithTimeout(getSystemStats ? () => getSystemStats() : null, timeoutMs),
+                callWithTimeout(getPersistenceStats ? () => getPersistenceStats() : null, timeoutMs),
+                callWithTimeout(
+                    nexusIndexPage
+                        ? () => nexusIndexPage({ coreName: CARD_LIBRARY_CORE_NAME, limit: 1, direction: 'reverse' })
+                        : null,
+                    timeoutMs,
+                ),
+                callWithTimeout(getDiagnosticsSnapshot ? () => getDiagnosticsSnapshot() : null, timeoutMs),
             ]);
 
             const w: any = window as any;
