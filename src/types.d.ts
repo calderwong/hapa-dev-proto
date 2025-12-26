@@ -239,6 +239,39 @@ export interface ElectronAPI {
     geminiSaveRequest: (entry: any) => Promise<any>;
     getAdminSettings: () => Promise<AdminSettings>;
     saveAdminSettings: (settings: AdminSettings) => Promise<boolean>;
+
+    getProfile?: () => Promise<UserProfile>;
+    saveProfile?: (profile: UserProfile) => Promise<boolean>;
+    saveProfileImage?: (params: { bytesBase64: string; mimeType: string }) => Promise<{ cardId: string; imageUrl: string }>;
+    getSystemStats?: () => Promise<SystemStats>;
+    getDiagnosticsSnapshot?: () => Promise<{
+        time: string;
+        storageDir: string;
+        cwd: string;
+        p2p: { peers: number; publicKey?: string };
+        cardLibrary: {
+            coreName: string;
+            hypercoreLength: number;
+            sqlite: {
+                ready: boolean;
+                checkpointKey: string;
+                checkpoint: number | null;
+                caughtUp: boolean;
+                stats: any | null;
+            };
+            paging: { mode: 'sqlite' | 'hypercore'; reason: string };
+        };
+        wiki: { coreName: string; hypercoreLength: number };
+    }>;
+    getPersistenceStats?: () => Promise<{
+        cardCount: number;
+        wikiNodeCount: number;
+        wikiEdgeCount: number;
+        embeddingCount: number;
+        dbSizeBytes: number;
+        projectionVersion: number;
+        lastUpdated: string;
+    } | null>;
     p2pCreateCore: (name: string) => Promise<{ key: string; discoveryKey: string; length: number }>;
     p2pAppend: (data: { name: string; data: string }) => Promise<number>;
     p2pRead: (name: string, options?: any) => Promise<string[]>;

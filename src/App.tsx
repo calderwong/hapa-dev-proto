@@ -31,6 +31,7 @@ import Pipeline from './pages/Pipeline';
 import Mermaid from './pages/Mermaid';
 import FlowForger from './pages/FlowForger';
 import Nexus from './pages/Nexus';
+import OperatorRealityPanel from './pages/OperatorRealityPanel';
 
 function App() {
   useEffect(() => {
@@ -49,7 +50,7 @@ function App() {
   return (
     <>
       {/* Hidden Stencil warmup - forces lazy-loaded components to fully initialize */}
-      <div style={{ position: 'absolute', left: '-9999px', visibility: 'hidden' }} aria-hidden="true">
+      <div className="stencil-warmup" aria-hidden="true">
         <rux-icon icon="check"></rux-icon>
         <rux-status status="normal"></rux-status>
       </div>
@@ -75,6 +76,7 @@ function App() {
                   <Route path="wormhole" element={<WormholeAstro />} />
                   <Route path="wiki" element={<Wiki />} />
                   <Route path="profile" element={<Profile />} />
+                  <Route path="operator" element={<OperatorRealityPanel />} />
                   <Route path="pets" element={<Pets />} />
                   <Route path="camp" element={<CampRefactor />} />
                   <Route path="pipeline" element={<Pipeline />} />

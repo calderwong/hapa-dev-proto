@@ -113,6 +113,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveProfile: (profile: any) => ipcRenderer.invoke('save-profile', profile),
     saveProfileImage: (params: any) => ipcRenderer.invoke('save-profile-image', params),
     getSystemStats: () => ipcRenderer.invoke('get-system-stats'),
+    getDiagnosticsSnapshot: () => ipcRenderer.invoke('diagnostics:get-snapshot'),
     // Video generation with Veo models
     // Supports: text-to-video, image-to-video (start frame), interpolation (start+end frame)
     generateVideoWithGemini: (data: {

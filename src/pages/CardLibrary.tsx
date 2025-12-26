@@ -148,12 +148,15 @@ const CardLibrary: React.FC = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [cards, setCards] = useState<CardIndexEntry[]>([]);
+    const cardsRef = useRef<CardIndexEntry[]>([]);
     const [indexHasMore, setIndexHasMore] = useState(false);
     const [indexCursor, setIndexCursor] = useState<number | undefined>(undefined);
     const [indexTotalLength, setIndexTotalLength] = useState<number | null>(null);
     const [isFetchingMore, setIsFetchingMore] = useState(false);
     const indexMapRef = useRef<Map<string, CardIndexEntry>>(new Map());
+    const requestMoreCallCountRef = useRef(0);
     const [selected, setSelected] = useState<CardIndexEntry | null>(null);
+    const selectedRef = useRef<CardIndexEntry | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [wormholeActionPending, setWormholeActionPending] = useState(false);
@@ -220,6 +223,56 @@ const CardLibrary: React.FC = () => {
         setInspectorVideoPath(null);
         setInspectorShowReveal(false);
     }, [selected?.cardId]);
+
+    useEffect(() => {
+        selectedRef.current = selected;
+    }, [selected]);
+
+    useEffect(() => {
+        cardsRef.current = cards;
+    }, [cards]);
+
+    useEffect(() => {
+        const w: any = window as any;
+        try {
+            if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+            if (!w.__HAPA_DEBUG_STATE__.cardLibrary || typeof w.__HAPA_DEBUG_STATE__.cardLibrary !== 'object') {
+                w.__HAPA_DEBUG_STATE__.cardLibrary = {};
+            }
+            w.__HAPA_DEBUG_STATE__.cardLibrary.active = true;
+            w.__HAPA_DEBUG_STATE__.cardLibrary.mountedAt = new Date().toISOString();
+        } catch {}
+
+        return () => {
+            try {
+                if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+                if (!w.__HAPA_DEBUG_STATE__.cardLibrary || typeof w.__HAPA_DEBUG_STATE__.cardLibrary !== 'object') {
+                    w.__HAPA_DEBUG_STATE__.cardLibrary = {};
+                }
+                w.__HAPA_DEBUG_STATE__.cardLibrary.active = false;
+                w.__HAPA_DEBUG_STATE__.cardLibrary.unmountedAt = new Date().toISOString();
+            } catch {}
+        };
+    }, []);
+
+    useEffect(() => {
+        try {
+            const w: any = window as any;
+            if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+            w.__HAPA_DEBUG_STATE__.cardLibrary = {
+                ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
+                active: true,
+                updatedAt: new Date().toISOString(),
+                cardsCount: cards.length,
+                indexCursor,
+                indexHasMore,
+                indexTotalLength,
+                isFetchingMore,
+                loading,
+                error,
+            };
+        } catch {}
+    }, [cards.length, indexCursor, indexHasMore, indexTotalLength, isFetchingMore, loading, error]);
 
     // Check Local Vision status
     useEffect(() => {
@@ -587,8 +640,52 @@ const CardLibrary: React.FC = () => {
                 const items = Array.isArray(res?.items) ? res.items : [];
                 const nextCursor =
                     typeof res?.nextCursor === 'number' ? res.nextCursor : 0 + items.length;
-                const hasMore = !!res?.hasMore || items.length >= pageSize;
                 const totalLength = typeof res?.totalLength === 'number' ? res.totalLength : null;
+                const hasMore =
+                    !!res?.hasMore ||
+                    items.length >= pageSize ||
+                    (typeof totalLength === 'number' ? nextCursor < totalLength : false);
+
+                try {
+                    const w: any = window as any;
+                    if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+                    if (!w.__HAPA_DEBUG_STATE__.cardLibrary || typeof w.__HAPA_DEBUG_STATE__.cardLibrary !== 'object') {
+                        w.__HAPA_DEBUG_STATE__.cardLibrary = {};
+                    }
+                    w.__HAPA_DEBUG_STATE__.cardLibrary = {
+                        ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
+                        lastInitialIndexPage: {
+                            at: new Date().toISOString(),
+                            pageSize,
+                            itemsLength: items.length,
+                            hasMore: res?.hasMore,
+                            nextCursor: res?.nextCursor,
+                            totalLength: res?.totalLength,
+                        },
+                    };
+                } catch {}
+
+                void (async () => {
+                    try {
+                        const [stats, coreLen] = await Promise.all([
+                            api.getPersistenceStats ? api.getPersistenceStats() : null,
+                            api.p2pGetLength ? api.p2pGetLength(CARD_LIBRARY_CORE_NAME) : null,
+                        ]);
+                        const w: any = window as any;
+                        if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+                        if (!w.__HAPA_DEBUG_STATE__.cardLibrary || typeof w.__HAPA_DEBUG_STATE__.cardLibrary !== 'object') {
+                            w.__HAPA_DEBUG_STATE__.cardLibrary = {};
+                        }
+                        w.__HAPA_DEBUG_STATE__.cardLibrary = {
+                            ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
+                            backendCounts: {
+                                at: new Date().toISOString(),
+                                persistenceStats: stats,
+                                cardLibraryCoreLength: coreLen,
+                            },
+                        };
+                    } catch {}
+                })();
 
                 setIndexCursor(nextCursor);
                 setIndexHasMore(hasMore);
@@ -721,6 +818,78 @@ const CardLibrary: React.FC = () => {
         }
     };
 
+    const refreshIndexHead = useCallback(async (preferredCardId?: string | null) => {
+        if (typeof window === 'undefined' || !window.electronAPI) return;
+        const api = (window as any).electronAPI as any;
+        if (!USE_PROGRESSIVE_LOADING || !api?.nexusIndexPage) return;
+
+        try {
+            const settings = api.nexusGetSettings ? await api.nexusGetSettings() : { globalRenderCap: 1000, globalPageSize: 120 };
+            const pageSize = typeof settings?.globalPageSize === 'number' ? settings.globalPageSize : 120;
+            const res = await api.nexusIndexPage({
+                coreName: CARD_LIBRARY_CORE_NAME,
+                cursor: undefined,
+                limit: pageSize,
+                direction: 'reverse',
+            });
+
+            const items = Array.isArray(res?.items) ? res.items : [];
+            const totalLength = typeof res?.totalLength === 'number' ? res.totalLength : null;
+            setIndexTotalLength(totalLength);
+
+            const pageEntries: CardIndexEntry[] = items
+                .map((data: any) => {
+                    const cardId = String(data?.cardId || '');
+                    if (!cardId) return null;
+                    return {
+                        cardId,
+                        name: typeof data?.name === 'string' ? data.name : undefined,
+                        createdAt: typeof data?.createdAt === 'string' ? data.createdAt : '',
+                        coreName: typeof data?.coreName === 'string' ? data.coreName : data?.cardId,
+                        thumbnail: typeof data?.thumbnail === 'string' ? data.thumbnail : undefined,
+                        mediaKind: data?.mediaKind,
+                        mediaLocalPath: typeof data?.mediaLocalPath === 'string' ? data.mediaLocalPath : undefined,
+                        parentCardId: typeof data?.parentCardId === 'string' ? data.parentCardId : undefined,
+                        raw: data,
+                    } as CardIndexEntry;
+                })
+                .filter(Boolean) as CardIndexEntry[];
+
+            for (const e of pageEntries) {
+                const existing = indexMapRef.current.get(e.cardId);
+                indexMapRef.current.set(e.cardId, existing ? { ...existing, ...e } : e);
+            }
+
+            const merged = Array.from(indexMapRef.current.values());
+            merged.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+            setCards(merged);
+
+            const targetId = preferredCardId || selectedRef.current?.cardId || null;
+            if (targetId) {
+                const match = merged.find((c) => c.cardId === targetId);
+                if (match) {
+                    setSelected(match);
+                    setEditingName(match.name || '');
+                }
+            }
+        } catch {
+        }
+    }, []);
+
+    const refreshCardFromBackend = useCallback(async (cardId: string) => {
+        if (!cardId) return;
+        const existing = indexMapRef.current.get(cardId) || cardsRef.current.find((c) => c.cardId === cardId) || (selectedRef.current?.cardId === cardId ? selectedRef.current : null);
+        if (!existing) return;
+
+        const hydrated = await hydrateSelectedCardRecord(existing);
+        const next = hydrated.cardRecord ? { ...hydrated, cardRecord: sanitizeCardRecord(hydrated.cardRecord) } : hydrated;
+
+        indexMapRef.current.set(cardId, { ...(indexMapRef.current.get(cardId) || existing), ...next });
+
+        setCards((prev) => prev.map((c) => (c.cardId === cardId ? { ...c, ...next } : c)));
+        setSelected((prev) => (prev && prev.cardId === cardId ? { ...prev, ...next } : prev));
+    }, [hydrateSelectedCardRecord]);
+
     useEffect(() => {
         const params = new URLSearchParams(location.search || '');
         const preferredCardId = params.get('cardId');
@@ -732,8 +901,31 @@ const CardLibrary: React.FC = () => {
         if (typeof window === 'undefined' || !window.electronAPI) return;
         const api = (window as any).electronAPI as any;
         if (!USE_PROGRESSIVE_LOADING || !api?.nexusIndexPage) return;
-        if (isFetchingMore) return;
-        if (!indexHasMore) return;
+
+        requestMoreCallCountRef.current += 1;
+        const attemptNo = requestMoreCallCountRef.current;
+        const skipReason = isFetchingMore ? 'isFetchingMore' : !indexHasMore ? 'indexHasMore_false' : null;
+        try {
+            const w: any = window as any;
+            if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+            if (!w.__HAPA_DEBUG_STATE__.cardLibrary || typeof w.__HAPA_DEBUG_STATE__.cardLibrary !== 'object') {
+                w.__HAPA_DEBUG_STATE__.cardLibrary = {};
+            }
+            w.__HAPA_DEBUG_STATE__.cardLibrary = {
+                ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
+                requestMoreAttempts: attemptNo,
+                lastRequestMoreAttempt: {
+                    at: new Date().toISOString(),
+                    attemptNo,
+                    indexCursor,
+                    indexHasMore,
+                    isFetchingMore,
+                    skipReason,
+                },
+            };
+        } catch {}
+
+        if (skipReason) return;
 
         try {
             setIsFetchingMore(true);
@@ -750,8 +942,35 @@ const CardLibrary: React.FC = () => {
             const offset = typeof indexCursor === 'number' ? indexCursor : 0;
             const nextCursor =
                 typeof res?.nextCursor === 'number' ? res.nextCursor : offset + items.length;
-            const hasMore = !!res?.hasMore || items.length >= pageSize;
             const totalLength = typeof res?.totalLength === 'number' ? res.totalLength : null;
+            const hasMore =
+                !!res?.hasMore ||
+                items.length >= pageSize ||
+                (typeof totalLength === 'number' ? nextCursor < totalLength : false);
+
+            try {
+                const w: any = window as any;
+                if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+                if (!w.__HAPA_DEBUG_STATE__.cardLibrary || typeof w.__HAPA_DEBUG_STATE__.cardLibrary !== 'object') {
+                    w.__HAPA_DEBUG_STATE__.cardLibrary = {};
+                }
+                w.__HAPA_DEBUG_STATE__.cardLibrary = {
+                    ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
+                    lastRequestMoreResponse: {
+                        at: new Date().toISOString(),
+                        attemptNo,
+                        cursor: indexCursor,
+                        pageSize,
+                        itemsLength: items.length,
+                        hasMore: res?.hasMore,
+                        nextCursor: res?.nextCursor,
+                        totalLength: res?.totalLength,
+                        computedNextCursor: nextCursor,
+                        computedHasMore: hasMore,
+                        computedTotalLength: totalLength,
+                    },
+                };
+            } catch {}
 
             setIndexCursor(nextCursor);
             setIndexHasMore(hasMore);
@@ -840,11 +1059,9 @@ const CardLibrary: React.FC = () => {
                 if (payload.status === 'complete') {
                     // Delay slightly to let backend finish saving
                     setTimeout(() => {
-                        loadCards().then(() => {
-                            // Re-select the card to refresh its data
-                            if (selected) {
-                                loadCards(selected.cardId);
-                            }
+                        refreshIndexHead().then(() => {
+                            const sid = selectedRef.current?.cardId;
+                            if (sid) refreshCardFromBackend(sid);
                         });
                     }, 500);
                 }
@@ -852,7 +1069,7 @@ const CardLibrary: React.FC = () => {
         });
 
         return cleanup;
-    }, [selected]);
+    }, []);
 
     // Helper to find text content from various possible fields
     const findTextContent = (record: any, raw: any) => {
@@ -1034,7 +1251,8 @@ const CardLibrary: React.FC = () => {
                 await window.electronAPI.wormholeRunWikiUpdate!({ cardId, overrideModel } as any);
             }
 
-            await loadCards(cardId);
+            await refreshIndexHead();
+            await refreshCardFromBackend(cardId);
         } catch (e: any) {
             // eslint-disable-next-line no-console
             console.error('Wormhole processing from Card Library failed:', e);
@@ -1523,6 +1741,29 @@ const CardLibrary: React.FC = () => {
         return result;
     }, [cards, search, filterTiers, filterTypes, sortBy, activeSetId, activeSetCardIds]);
 
+    useEffect(() => {
+        try {
+            const w: any = window as any;
+            if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+            if (!w.__HAPA_DEBUG_STATE__.cardLibrary || typeof w.__HAPA_DEBUG_STATE__.cardLibrary !== 'object') {
+                w.__HAPA_DEBUG_STATE__.cardLibrary = {};
+            }
+            w.__HAPA_DEBUG_STATE__.cardLibrary = {
+                ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
+                filteredCardsLength: filteredCards.length,
+                filters: {
+                    search,
+                    filterTiers,
+                    filterTypes,
+                    sortBy,
+                    activeSetId,
+                    activeSetCardIdsLength: activeSetCardIds.length,
+                },
+                filtersUpdatedAt: new Date().toISOString(),
+            };
+        } catch {}
+    }, [filteredCards.length, search, filterTiers, filterTypes, sortBy, activeSetId, activeSetCardIds.length]);
+
     // Calculate tier distribution for stats
     const tierStats = useMemo(() => {
         const stats: Record<CardQualityTier, number> = {
@@ -1653,7 +1894,9 @@ const CardLibrary: React.FC = () => {
             }));
 
             // Refresh cards
-            await loadCards(selected.cardId);
+            await refreshIndexHead(childCoreName);
+            await refreshCardFromBackend(selected.cardId);
+            await refreshCardFromBackend(childCoreName);
 
         } catch (err) {
             console.error('Extraction failed:', err);
@@ -2091,7 +2334,9 @@ const CardLibrary: React.FC = () => {
                 setImageGenState('complete');
 
                 // Reload cards to show the new image card
-                await loadCards(selected.cardId);
+                await refreshIndexHead(imageCardId);
+                await refreshCardFromBackend(selected.cardId);
+                await refreshCardFromBackend(imageCardId);
 
                 setTimeout(() => setImageGenState('idle'), 2000);
             }
@@ -2136,7 +2381,7 @@ const CardLibrary: React.FC = () => {
                     name: coreToUse,
                     data: JSON.stringify(updatedRecord)
                 });
-                await loadCards(selected.cardId);
+                await refreshCardFromBackend(selected.cardId);
             } catch (err) {
                 console.error('[ImageGen] Failed to set hero:', err);
             }
@@ -2174,7 +2419,7 @@ const CardLibrary: React.FC = () => {
                     name: coreToUse,
                     data: JSON.stringify(updatedRecord)
                 });
-                await loadCards(selected.cardId);
+                await refreshCardFromBackend(selected.cardId);
             } catch (err) {
                 console.error('[ImageGen] Failed to reorder:', err);
             }
@@ -2306,7 +2551,10 @@ const CardLibrary: React.FC = () => {
                 }
 
                 // Reload cards
-                await loadCards(selected.cardId);
+                await refreshIndexHead(result.videoCardId);
+                await refreshCardFromBackend(loopParentCardId);
+                if (selected?.cardId) await refreshCardFromBackend(selected.cardId);
+                if (result.videoCardId) await refreshCardFromBackend(result.videoCardId);
 
                 setLoopGenStatus(prev => ({
                     ...prev,
@@ -2403,7 +2651,9 @@ const CardLibrary: React.FC = () => {
                 }
 
                 // Reload to show the new video
-                await loadCards(imageId);
+                await refreshIndexHead(result.videoCardId);
+                await refreshCardFromBackend(imageId);
+                if (result.videoCardId) await refreshCardFromBackend(result.videoCardId);
 
                 setLoopGenStatus(prev => ({
                     ...prev,
@@ -2663,7 +2913,8 @@ const CardLibrary: React.FC = () => {
             } catch {
             }
 
-            loadCards();
+            await refreshIndexHead(cardId);
+            await refreshCardFromBackend(cardId);
         } catch (e) {
             console.error("Failed to save workspace changes", e);
         }
@@ -2724,7 +2975,8 @@ const CardLibrary: React.FC = () => {
                                         } catch { }
                                     }
                                     setActiveWorkspaceCard(prev => prev ? ({ ...prev, cardRecord: latest }) : null);
-                                    loadCards();
+                                    await refreshIndexHead(activeWorkspaceCard.cardId);
+                                    await refreshCardFromBackend(activeWorkspaceCard.cardId);
                                 } catch (e) { console.error("Failed to refresh workspace card", e); }
                             }
                         }}
@@ -4751,7 +5003,7 @@ const CardLibrary: React.FC = () => {
                                                                                 cardId: selected.cardId,
                                                                                 scrollCardId: scroll.cardId,
                                                                             });
-                                                                            await loadCards(selected.cardId);
+                                                                            await refreshCardFromBackend(selected.cardId);
                                                                         } catch (e: any) {
                                                                             setError(e?.message || 'Failed to detach scroll');
                                                                         }
@@ -4884,7 +5136,7 @@ const CardLibrary: React.FC = () => {
                                                         cardId: selected.cardId,
                                                         scrollCardId: scrollCard.cardId,
                                                     });
-                                                    await loadCards(selected.cardId);
+                                                    await refreshCardFromBackend(selected.cardId);
                                                     setShowScrollPicker(false);
                                                 } catch (e: any) {
                                                     setError(e?.message || 'Failed to attach scroll');

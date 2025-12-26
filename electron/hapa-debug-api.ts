@@ -1,0 +1,601 @@
+import * as http from 'http';
+import { randomBytes } from 'crypto';
+import type { BrowserWindow } from 'electron';
+
+export type HapaDebugApiHandle = {
+  port: number;
+  token: string;
+  baseUrl: string;
+  close: () => Promise<void>;
+};
+
+type StartHapaDebugApiOptions = {
+  getMainWindow: () => BrowserWindow | null;
+  port?: number;
+  token?: string;
+};
+
+const isLocalAddress = (addr: string): boolean => {
+  const normalized = String(addr || '').trim();
+  return (
+    normalized === '127.0.0.1' ||
+    normalized === '::1' ||
+    normalized === '::ffff:127.0.0.1' ||
+    normalized.endsWith('127.0.0.1')
+  );
+};
+
+const getBearerToken = (req: http.IncomingMessage): string | null => {
+  const auth = req.headers.authorization;
+  if (!auth || typeof auth !== 'string') return null;
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1]?.trim() || null : null;
+};
+
+const sendJson = (res: http.ServerResponse, status: number, payload: any) => {
+  const body = JSON.stringify(payload ?? null);
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.setHeader('cache-control', 'no-store');
+  res.end(body);
+};
+
+const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const getRendererSnapshot = async (win: BrowserWindow | null) => {
+  if (!win || win.isDestroyed()) {
+    return { available: false, error: 'main_window_unavailable' };
+  }
+
+  try {
+    const value = await withTimeout(
+      win.webContents.executeJavaScript(
+        `(() => {
+          const state = (typeof window !== 'undefined' && window.__HAPA_DEBUG_STATE__) ? window.__HAPA_DEBUG_STATE__ : null;
+          const scroller = document.querySelector('[data-virtual-grid-scroll-container="true"]');
+          const scrollerMetrics = scroller ? (() => {
+            try {
+              const r = scroller.getBoundingClientRect();
+              return {
+                scrollTop: scroller.scrollTop,
+                scrollHeight: scroller.scrollHeight,
+                clientHeight: scroller.clientHeight,
+                rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+                atBottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2,
+              };
+            } catch {
+              return null;
+            }
+          })() : null;
+          return {
+            href: location.href,
+            pathname: location.pathname,
+            hash: location.hash,
+            title: document.title,
+            hasVirtualGridScroller: !!scroller,
+            virtualGridScroller: scrollerMetrics,
+            debugState: state,
+          };
+        })()`,
+        true,
+      ),
+      1500,
+    );
+
+    return { available: true, ...value };
+  } catch (err: any) {
+    return { available: true, error: err?.message || String(err) };
+  }
+};
+
+const runDomQuery = async (win: BrowserWindow | null, selector: string) => {
+  if (!win || win.isDestroyed()) {
+    return { available: false, error: 'main_window_unavailable' };
+  }
+
+  const safeSelector = String(selector || '').trim();
+  if (!safeSelector) {
+    return { available: true, selector: safeSelector, error: 'selector_required' };
+  }
+
+  if (safeSelector.length > 250) {
+    return { available: true, selector: safeSelector.slice(0, 250), error: 'selector_too_long' };
+  }
+
+  try {
+    const value = await withTimeout(
+      win.webContents.executeJavaScript(
+        `(() => {
+          const selector = ${JSON.stringify(safeSelector)};
+          try {
+            const count = document.querySelectorAll(selector).length;
+            return { selector, count, exists: count > 0 };
+          } catch (err) {
+            return { selector, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        true,
+      ),
+      1500,
+    );
+
+    return { available: true, ...value };
+  } catch (err: any) {
+    return { available: true, selector: safeSelector, error: err?.message || String(err) };
+  }
+};
+
+const evalInRenderer = async (win: BrowserWindow | null, script: string, timeoutMs: number = 1500) => {
+  if (!win || win.isDestroyed()) {
+    return { available: false, error: 'main_window_unavailable' };
+  }
+
+  try {
+    const value = await withTimeout(win.webContents.executeJavaScript(script, true), timeoutMs);
+    return { available: true, value };
+  } catch (err: any) {
+    return { available: true, error: err?.message || String(err) };
+  }
+};
+
+export async function startHapaDebugApi(options: StartHapaDebugApiOptions): Promise<HapaDebugApiHandle> {
+  const token =
+    typeof options.token === 'string' && options.token.trim().length > 0
+      ? options.token.trim()
+      : randomBytes(32).toString('hex');
+
+  const host = '127.0.0.1';
+
+  const server = http.createServer(async (req, res) => {
+    const remoteAddr = req.socket.remoteAddress || '';
+    if (!isLocalAddress(remoteAddr)) {
+      sendJson(res, 403, { ok: false, error: 'forbidden' });
+      return;
+    }
+
+    const url = new URL(req.url || '/', 'http://127.0.0.1');
+    const method = (req.method || 'GET').toUpperCase();
+
+    if (method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
+      return;
+    }
+
+    if (url.pathname === '/' || url.pathname === '/health') {
+      sendJson(res, 200, { ok: true, service: 'hapa-debug-api', time: new Date().toISOString() });
+      return;
+    }
+
+    const providedToken = getBearerToken(req) || url.searchParams.get('token');
+    if (!providedToken || providedToken !== token) {
+      sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      return;
+    }
+
+    const win = options.getMainWindow();
+
+    if (url.pathname === '/v1/info') {
+      sendJson(res, 200, {
+        ok: true,
+        pid: process.pid,
+        platform: process.platform,
+        versions: process.versions,
+      });
+      return;
+    }
+
+    if (url.pathname === '/v1/renderer/state') {
+      const snapshot = await getRendererSnapshot(win);
+      sendJson(res, 200, { ok: true, renderer: snapshot });
+      return;
+    }
+
+    if (url.pathname === '/v1/renderer/dom') {
+      const selector = url.searchParams.get('selector') || '';
+      const result = await runDomQuery(win, selector);
+      sendJson(res, 200, { ok: true, dom: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/renderer/navigate') {
+      const raw = String(url.searchParams.get('hash') || url.searchParams.get('path') || '').trim();
+      if (!raw) {
+        sendJson(res, 200, { ok: true, navigate: null, error: 'hash_or_path_required' });
+        return;
+      }
+
+      if (raw.length > 200) {
+        sendJson(res, 200, { ok: true, navigate: null, error: 'hash_or_path_too_long' });
+        return;
+      }
+
+      const nextHash = raw.startsWith('#') ? raw : raw.startsWith('/') ? `#${raw}` : `#/${raw}`;
+      const result = await evalInRenderer(
+        win,
+        `(() => {
+          const nextHash = ${JSON.stringify(nextHash)};
+          try {
+            const before = String(location.hash || '');
+            location.hash = nextHash;
+            return { ok: true, before, after: String(location.hash || ''), requested: nextHash };
+          } catch (err) {
+            return { ok: false, error: String(err && err.message ? err.message : err), requested: nextHash };
+          }
+        })()`,
+        2000,
+      );
+      sendJson(res, 200, { ok: true, navigate: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/renderer/click') {
+      const selector = String(url.searchParams.get('selector') || '').trim();
+      const text = String(url.searchParams.get('text') || '').trim();
+      const tag = String(url.searchParams.get('tag') || 'rux-button,button,a').trim();
+      const indexRaw = url.searchParams.get('index');
+      const index = indexRaw ? Number.parseInt(indexRaw, 10) : 0;
+
+      if (!Number.isFinite(index) || index < 0 || index > 200) {
+        sendJson(res, 200, { ok: true, click: null, error: 'index_invalid' });
+        return;
+      }
+
+      if (!selector && !text) {
+        sendJson(res, 200, { ok: true, click: null, error: 'selector_or_text_required' });
+        return;
+      }
+
+      if (selector.length > 250 || text.length > 120 || tag.length > 120) {
+        sendJson(res, 200, { ok: true, click: null, error: 'input_too_long' });
+        return;
+      }
+
+      const result = await evalInRenderer(
+        win,
+        `(() => {
+          const selector = ${JSON.stringify(selector)};
+          const text = ${JSON.stringify(text)};
+          const tag = ${JSON.stringify(tag)};
+          const index = ${JSON.stringify(index)};
+          try {
+            let nodes = [];
+            let mode = '';
+
+            if (selector) {
+              mode = 'selector';
+              nodes = Array.from(document.querySelectorAll(selector));
+            } else {
+              mode = 'text';
+              nodes = Array.from(document.querySelectorAll(tag)).filter((el) => {
+                try {
+                  const t = String(el && el.textContent ? el.textContent : '').trim().toLowerCase();
+                  return t.includes(String(text).trim().toLowerCase());
+                } catch {
+                  return false;
+                }
+              });
+            }
+
+            const count = nodes.length;
+            const target = nodes[index] || null;
+            if (!target) return { ok: false, mode, count, error: 'no_match' };
+            try {
+              (target as any).click();
+            } catch (err) {
+              return { ok: false, mode, count, error: String(err && err.message ? err.message : err) };
+            }
+            return { ok: true, mode, count, index, tag, selector, text, clicked: true };
+          } catch (err) {
+            return { ok: false, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        2500,
+      );
+
+      sendJson(res, 200, { ok: true, click: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/renderer/text') {
+      const selector = String(url.searchParams.get('selector') || '').trim();
+      if (!selector) {
+        sendJson(res, 200, { ok: true, text: null, error: 'selector_required' });
+        return;
+      }
+      if (selector.length > 250) {
+        sendJson(res, 200, { ok: true, text: null, error: 'selector_too_long' });
+        return;
+      }
+
+      const result = await evalInRenderer(
+        win,
+        `(() => {
+          const selector = ${JSON.stringify(selector)};
+          try {
+            const el = document.querySelector(selector);
+            if (!el) return { ok: false, selector, error: 'not_found' };
+            const value = String(el.textContent || '').trim();
+            return { ok: true, selector, value };
+          } catch (err) {
+            return { ok: false, selector, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        2000,
+      );
+
+      sendJson(res, 200, { ok: true, text: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/ipc/p2p-get-length') {
+      const coreName = String(url.searchParams.get('coreName') || url.searchParams.get('name') || '').trim();
+      if (!coreName) {
+        sendJson(res, 200, { ok: true, result: null, error: 'coreName_required' });
+        return;
+      }
+
+      if (coreName.length > 200) {
+        sendJson(res, 200, { ok: true, result: null, error: 'coreName_too_long' });
+        return;
+      }
+
+      const result = await evalInRenderer(
+        win,
+        `(async () => {
+          const api = (window).electronAPI;
+          if (!api || typeof api.p2pGetLength !== 'function') return { ok: false, error: 'electron_api_unavailable' };
+          try {
+            const length = await api.p2pGetLength(${JSON.stringify(coreName)});
+            return { ok: true, coreName: ${JSON.stringify(coreName)}, length };
+          } catch (err) {
+            return { ok: false, coreName: ${JSON.stringify(coreName)}, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        2500,
+      );
+      sendJson(res, 200, { ok: true, p2pGetLength: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/ipc/persistence-stats') {
+      const result = await evalInRenderer(
+        win,
+        `(async () => {
+          const api = (window).electronAPI;
+          if (!api || typeof api.getPersistenceStats !== 'function') return { ok: false, error: 'electron_api_unavailable' };
+          try {
+            const stats = await api.getPersistenceStats();
+            return { ok: true, stats };
+          } catch (err) {
+            return { ok: false, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        2500,
+      );
+      sendJson(res, 200, { ok: true, persistenceStats: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/ipc/system-stats') {
+      const result = await evalInRenderer(
+        win,
+        `(async () => {
+          const api = (window).electronAPI;
+          if (!api || typeof api.getSystemStats !== 'function') return { ok: false, error: 'electron_api_unavailable' };
+          try {
+            const stats = await api.getSystemStats();
+            return { ok: true, stats };
+          } catch (err) {
+            return { ok: false, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        10000,
+      );
+      sendJson(res, 200, { ok: true, systemStats: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/ipc/diagnostics-snapshot') {
+      const result = await evalInRenderer(
+        win,
+        `(async () => {
+          const api = (window).electronAPI;
+          if (!api || typeof api.getDiagnosticsSnapshot !== 'function') return { ok: false, error: 'electron_api_unavailable' };
+          try {
+            const snapshot = await api.getDiagnosticsSnapshot();
+            return { ok: true, snapshot };
+          } catch (err) {
+            return { ok: false, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        10000,
+      );
+      sendJson(res, 200, { ok: true, diagnosticsSnapshot: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/ipc/persistence-rebuild-card-library-index') {
+      const result = await evalInRenderer(
+        win,
+        `(async () => {
+          const api = (window).electronAPI;
+          if (!api || typeof api.persistenceRebuildCardLibraryIndex !== 'function') return { ok: false, error: 'electron_api_unavailable' };
+          try {
+            const res = await api.persistenceRebuildCardLibraryIndex();
+            return { ok: true, res };
+          } catch (err) {
+            return { ok: false, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        60000,
+      );
+      sendJson(res, 200, { ok: true, persistenceRebuildCardLibraryIndex: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/ipc/nexus-index-page') {
+      const coreName = String(url.searchParams.get('coreName') || 'card-library').trim();
+      if (!coreName) {
+        sendJson(res, 200, { ok: true, result: null, error: 'coreName_required' });
+        return;
+      }
+      if (coreName.length > 200) {
+        sendJson(res, 200, { ok: true, result: null, error: 'coreName_too_long' });
+        return;
+      }
+
+      const cursorRaw = url.searchParams.get('cursor');
+      const limitRaw = url.searchParams.get('limit');
+      const direction = String(url.searchParams.get('direction') || 'reverse').trim() || 'reverse';
+
+      let cursor: number | undefined = undefined;
+      if (typeof cursorRaw === 'string' && cursorRaw.trim().length > 0) {
+        const parsed = Number.parseInt(cursorRaw, 10);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          sendJson(res, 200, { ok: true, result: null, error: 'cursor_invalid' });
+          return;
+        }
+        cursor = parsed;
+      } else if (direction !== 'reverse') {
+        cursor = 0;
+      }
+
+      const limitParsed = typeof limitRaw === 'string' && limitRaw.trim().length > 0 ? Number.parseInt(limitRaw, 10) : null;
+      const limit =
+        typeof limitParsed === 'number' && Number.isFinite(limitParsed) && limitParsed > 0
+          ? Math.min(limitParsed, 5000)
+          : undefined;
+
+      const payload: any = {
+        coreName,
+        direction,
+      };
+      if (typeof cursor === 'number') payload.cursor = cursor;
+      if (typeof limit === 'number') payload.limit = limit;
+
+      const result = await evalInRenderer(
+        win,
+        `(async () => {
+          const api = (window).electronAPI;
+          if (!api || typeof api.nexusIndexPage !== 'function') return { ok: false, error: 'electron_api_unavailable' };
+          const payload = ${JSON.stringify(payload)};
+          try {
+            const res = await api.nexusIndexPage(payload);
+            return { ok: true, payload, res };
+          } catch (err) {
+            return { ok: false, payload, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        4000,
+      );
+      sendJson(res, 200, { ok: true, nexusIndexPage: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/checks/cards-loaded') {
+      const minRaw = url.searchParams.get('min');
+      const min = minRaw ? Number.parseInt(minRaw, 10) : 120;
+      const snapshot = await getRendererSnapshot(win);
+      const count =
+        snapshot &&
+        snapshot.debugState &&
+        snapshot.debugState.cardLibrary &&
+        typeof snapshot.debugState.cardLibrary.cardsCount === 'number'
+          ? snapshot.debugState.cardLibrary.cardsCount
+          : null;
+
+      if (typeof count !== 'number') {
+        sendJson(res, 200, { ok: true, result: null, error: 'card_library_state_unavailable', renderer: snapshot });
+        return;
+      }
+
+      sendJson(res, 200, { ok: true, min, count, result: count > min });
+      return;
+    }
+
+    if (url.pathname === '/v1/checks/operator-panel-ready') {
+      const requireSnapshotRaw = url.searchParams.get('requireSnapshot');
+      const requireSnapshot = requireSnapshotRaw === '1' || requireSnapshotRaw === 'true';
+      const snapshot = await getRendererSnapshot(win);
+      const panel = snapshot && (snapshot as any).debugState && (snapshot as any).debugState.operatorRealityPanel
+        ? (snapshot as any).debugState.operatorRealityPanel
+        : null;
+
+      const active = !!(panel && panel.active);
+      const hasSnapshot = !!(panel && panel.snapshot);
+      const ok = requireSnapshot ? (active && hasSnapshot) : active;
+
+      sendJson(res, 200, {
+        ok: true,
+        requireSnapshot,
+        active,
+        hasSnapshot,
+        result: ok,
+        operatorRealityPanel: panel,
+      });
+      return;
+    }
+
+    sendJson(res, 404, { ok: false, error: 'not_found' });
+  });
+
+  const requestedPort =
+    typeof options.port === 'number' && Number.isFinite(options.port) && options.port > 0 ? options.port : 0;
+
+  const listenOn = (port: number) =>
+    new Promise<void>((resolve, reject) => {
+      const onError = (err: any) => {
+        server.removeListener('listening', onListening);
+        reject(err);
+      };
+
+      const onListening = () => {
+        server.removeListener('error', onError);
+        resolve();
+      };
+
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(port, host);
+    });
+
+  try {
+    await listenOn(requestedPort);
+  } catch (err: any) {
+    if (err?.code === 'EADDRINUSE' && requestedPort !== 0) {
+      await listenOn(0);
+    } else {
+      throw err;
+    }
+  }
+
+  const address = server.address();
+  const port = typeof address === 'object' && address && typeof address.port === 'number' ? address.port : requestedPort;
+  const baseUrl = `http://${host}:${port}`;
+
+  return {
+    port,
+    token,
+    baseUrl,
+    close: () =>
+      new Promise<void>((resolve) => {
+        try {
+          server.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      }),
+  };
+}

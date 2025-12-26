@@ -31,6 +31,7 @@ const NAV_ITEMS: NavItemConfig[] = [
     { path: '/revid', label: 'Revid (Video)', icon: 'videocam' },
     { path: '/revid-media', label: 'Revid Media', icon: 'movie' },
     { path: '/p2p', label: 'P2P Network', icon: 'device-hub' },
+    { path: '/operator', label: 'Operator', icon: 'security' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
     { path: '/admin', label: 'Admin', icon: 'security' },
     { path: '/pets', label: 'Sanctuary', icon: 'pets' },

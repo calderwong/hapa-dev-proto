@@ -15,6 +15,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { initP2P, createCore, appendToCore, readCore, getCoreLength, getP2PStats, setStorageDir, getStorageDir } from './p2p';
 import { initPipeline } from './pipeline';
 import { thorsHammaManager } from './thors-hamma';
+import { startHapaDebugApi, type HapaDebugApiHandle } from './hapa-debug-api';
+import { getDiagnosticsSnapshot } from './diagnostics';
 import {
   isVertexAIConfigured,
   getVertexAIClient,
@@ -41,6 +43,7 @@ let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let rendererBootReady = false;
 let mainReadyToShow = false;
+let debugApiHandle: HapaDebugApiHandle | null = null;
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -110,7 +113,10 @@ if (!gotTheLock) {
             parsed = null;
           }
 
-          if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
+          if (!parsed) continue;
+          const recordType = typeof parsed.type === 'string' ? parsed.type.trim() : '';
+          if (recordType && recordType !== 'card-index') continue;
+          if (!recordType && !parsed.cardId && !parsed.coreName) continue;
 
           const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
           if (!id) continue;
@@ -226,6 +232,9 @@ const HAPA_STRESS_MEMORY =
 const HAPA_STRESS_HEADLESS =
   process.env.HAPA_STRESS_HEADLESS === '1' ||
   process.argv.includes('--stress-headless');
+const HAPA_DEBUG_API =
+  process.env.HAPA_DEBUG_API === '1' ||
+  process.argv.includes('--debug-api');
 const WORMHOLE_INGEST_SET_ID = 'set-wormhole-ingests';
 
 type AudioMode = 'transcribe' | 'realtime';
@@ -6973,6 +6982,16 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
         if (coreName === CARD_LIBRARY_CORE_NAME) {
           const adapter: any = getPersistence();
           if (adapter && adapter.isReady && adapter.isReady() && typeof adapter.listIndexPage === 'function') {
+            const checkpointKey = 'card_library_index_last_seq';
+            const checkpointStr = getPersistenceMetaValue(checkpointKey);
+            const checkpoint = checkpointStr ? Number.parseInt(checkpointStr, 10) : 0;
+            const hyperLen = await getCoreLength(coreName);
+            const end = typeof hyperLen === 'number' ? hyperLen : 0;
+
+            if (!(end > 0 && Number.isFinite(checkpoint) && checkpoint >= end)) {
+              throw new Error('persistence_index_incomplete');
+            }
+
             const offset = typeof payload?.cursor === 'number' && payload.cursor >= 0 ? payload.cursor : 0;
             const page = adapter.listIndexPage({ offset, limit });
             const items = Array.isArray(page?.items) ? page.items : [];
@@ -7732,6 +7751,10 @@ Output ONLY the video motion prompt, under 80 words. Focus purely on describing 
     };
   });
 
+  ipcMain.handle('diagnostics:get-snapshot', async () => {
+    return await getDiagnosticsSnapshot();
+  });
+
   // Repair/Migration: Fix Hell Week cards to have Set Card as parent
   ipcMain.handle('repair-hell-week-parents', async () => {
     console.log('[Repair] Starting Hell Week parent repair...');
@@ -7926,6 +7949,24 @@ app.on('ready', async () => {
     }
   }
 
+  if (HAPA_DEBUG_API) {
+    try {
+      const port = parsePositiveInt(process.env.HAPA_DEBUG_API_PORT, 0);
+      const token =
+        typeof process.env.HAPA_DEBUG_API_TOKEN === 'string' && process.env.HAPA_DEBUG_API_TOKEN.trim().length > 0
+          ? process.env.HAPA_DEBUG_API_TOKEN.trim()
+          : undefined;
+
+      debugApiHandle = await startHapaDebugApi({ getMainWindow: () => mainWindow, port, token });
+      console.log('[DebugAPI] Listening', {
+        baseUrl: debugApiHandle.baseUrl,
+        token: debugApiHandle.token,
+      });
+    } catch (err) {
+      console.error('[DebugAPI] Failed to start:', err);
+    }
+  }
+
   setTimeout(() => {
     try {
       const llamaSettings = getLlamaSettingsInternal();
@@ -7948,10 +7989,10 @@ app.on('ready', async () => {
     // Ordering matters: P2P must be initialized before we can open/read Hypercores.
     initPersistence()
       .then(async () => {
-        try {
-          const adapter: any = getPersistence();
-          if (!adapter || !adapter.isReady || !adapter.isReady()) return;
+        const adapter: any = getPersistence();
+        if (!adapter || !adapter.isReady || !adapter.isReady()) return;
 
+        try {
           const checkpointKey = 'card_library_index_last_seq';
           const lastSeqStr = getPersistenceMetaValue(checkpointKey);
           const lastSeq = lastSeqStr ? Number.parseInt(lastSeqStr, 10) : 0;
@@ -7959,87 +8000,90 @@ app.on('ready', async () => {
 
           const len = await getCoreLength(CARD_LIBRARY_CORE_NAME);
           const end = typeof len === 'number' ? len : 0;
-          if (end <= start) return;
+          if (end > start) {
+            const CHUNK_BLOCKS = 500;
+            const BATCH_EVENTS = 250;
+            const batch: any[] = [];
+            const flush = async (checkpointValue: number) => {
+              if (batch.length > 0) {
+                await adapter.applyEvents(batch as any);
+                batch.length = 0;
+              }
+              setPersistenceMetaValue(checkpointKey, String(checkpointValue));
+              await new Promise((r) => setTimeout(r, 0));
+            };
 
-          const CHUNK_BLOCKS = 500;
-          const BATCH_EVENTS = 250;
-          const batch: any[] = [];
-          const flush = async (checkpointValue: number) => {
-            if (batch.length > 0) {
-              await adapter.applyEvents(batch as any);
-              batch.length = 0;
-            }
-            setPersistenceMetaValue(checkpointKey, String(checkpointValue));
-            await new Promise((r) => setTimeout(r, 0));
-          };
-
-          for (let cursor = start; cursor < end; cursor += CHUNK_BLOCKS) {
-            const chunkEnd = Math.min(end, cursor + CHUNK_BLOCKS);
-            const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start: cursor, end: chunkEnd });
-            if (!Array.isArray(blocks) || blocks.length === 0) {
-              await flush(chunkEnd);
-              continue;
-            }
-
-            for (let i = 0; i < blocks.length; i++) {
-              const raw = blocks[i];
-              if (!raw || typeof raw !== 'string') continue;
-              let parsed: any = null;
-              try {
-                parsed = JSON.parse(raw);
-              } catch {
-                parsed = null;
+            for (let cursor = start; cursor < end; cursor += CHUNK_BLOCKS) {
+              const chunkEnd = Math.min(end, cursor + CHUNK_BLOCKS);
+              const blocks = await readCore(CARD_LIBRARY_CORE_NAME, { start: cursor, end: chunkEnd });
+              if (!Array.isArray(blocks) || blocks.length === 0) {
+                await flush(chunkEnd);
+                continue;
               }
 
-              if (!parsed || (parsed.type !== 'card-index' && !parsed.cardId && !parsed.coreName)) continue;
+              for (let i = 0; i < blocks.length; i++) {
+                const raw = blocks[i];
+                if (!raw || typeof raw !== 'string') continue;
+                let parsed: any = null;
+                try {
+                  parsed = JSON.parse(raw);
+                } catch {
+                  parsed = null;
+                }
 
-              const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
-              if (!id) continue;
+                if (!parsed) continue;
+                const recordType = typeof parsed.type === 'string' ? parsed.type.trim() : '';
+                if (recordType && recordType !== 'card-index') continue;
+                if (!recordType && !parsed.cardId && !parsed.coreName) continue;
 
-              const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
-              const now = new Date().toISOString();
-              if (deleted) {
-                batch.push({
-                  type: 'CARD_DELETED',
-                  payload: {
-                    id,
-                    deletedAt: parsed.deletedAt || now,
-                  },
-                  timestamp: now,
-                });
-              } else {
-                batch.push({
-                  type: 'CARD_CREATED',
-                  payload: {
-                    id,
-                    type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
-                    mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
-                    name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                    tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
-                    hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
-                    parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
-                    createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : now,
-                    metadata: {
-                      coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
-                      thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
-                      mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
-                      parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                const id = String(parsed.cardId || parsed.id || parsed.coreName || '').trim();
+                if (!id) continue;
+
+                const deleted = parsed.deleted === true || parsed.isDeleted === true || parsed.status === 'deleted';
+                const now = new Date().toISOString();
+                if (deleted) {
+                  batch.push({
+                    type: 'CARD_DELETED',
+                    payload: {
+                      id,
+                      deletedAt: parsed.deletedAt || now,
+                    },
+                    timestamp: now,
+                  });
+                } else {
+                  batch.push({
+                    type: 'CARD_CREATED',
+                    payload: {
+                      id,
+                      type: typeof parsed.cardType === 'string' ? parsed.cardType : 'standard',
                       mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
                       name: typeof parsed.name === 'string' ? parsed.name : undefined,
-                      createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
-                      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+                      tier: typeof parsed.tier === 'number' ? parsed.tier : undefined,
+                      hellweekRunId: typeof parsed.runId === 'string' ? parsed.runId : undefined,
+                      parentId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                      createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : now,
+                      metadata: {
+                        coreName: typeof parsed.coreName === 'string' ? parsed.coreName : id,
+                        thumbnail: typeof parsed.thumbnail === 'string' ? parsed.thumbnail : undefined,
+                        mediaLocalPath: typeof parsed.mediaLocalPath === 'string' ? parsed.mediaLocalPath : undefined,
+                        parentCardId: typeof parsed.parentCardId === 'string' ? parsed.parentCardId : undefined,
+                        mediaKind: typeof parsed.mediaKind === 'string' ? parsed.mediaKind : undefined,
+                        name: typeof parsed.name === 'string' ? parsed.name : undefined,
+                        createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+                        updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+                      },
                     },
-                  },
-                  timestamp: now,
-                });
+                    timestamp: now,
+                  });
+                }
+
+                if (batch.length >= BATCH_EVENTS) {
+                  await flush(cursor + i + 1);
+                }
               }
 
-              if (batch.length >= BATCH_EVENTS) {
-                await flush(cursor + i + 1);
-              }
+              await flush(chunkEnd);
             }
-
-            await flush(chunkEnd);
           }
         } catch (err) {
           console.warn('[Persistence] card-library reconcile failed:', err);
@@ -8058,6 +8102,14 @@ app.on('ready', async () => {
 });
 
 app.on('window-all-closed', () => {
+  if (debugApiHandle) {
+    try {
+      void debugApiHandle.close();
+    } catch {
+      // ignore
+    }
+    debugApiHandle = null;
+  }
   if (process.platform !== 'darwin') {
     app.quit();
   }
