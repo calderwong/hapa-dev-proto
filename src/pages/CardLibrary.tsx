@@ -296,7 +296,12 @@ const CardLibrary: React.FC = () => {
                 baseState.pageTotalLength = totalLength;
                 baseState.pageCurrentCount = pages.current?.items?.length ?? 0;
                 baseState.pageHasMore = pages.current?.hasMore ?? false;
-                baseState.pageNextCursor = pages.next?.cursor ?? null;
+                baseState.pageNextCursor = nextCursorValue;
+                baseState.pageNumber = pageNumber;
+                baseState.pageCount = pageCount;
+                baseState.pageShowingA = showingA;
+                baseState.pageShowingB = showingB;
+                baseState.pageCurrentHasMore = currentHasMore;
             } else {
                 baseState.indexCursor = indexCursor;
                 baseState.indexHasMore = indexHasMore;
@@ -306,7 +311,27 @@ const CardLibrary: React.FC = () => {
 
             w.__HAPA_DEBUG_STATE__.cardLibrary = baseState;
         } catch {}
-    }, [cards.length, error, indexCursor, indexHasMore, indexTotalLength, isFetchingMore, loading, pageCursor, pageSize, pages.current, pages.next, totalLength]);
+    }, [
+        USE_PAGINATION,
+        cards.length,
+        error,
+        indexCursor,
+        indexHasMore,
+        indexTotalLength,
+        isFetchingMore,
+        loading,
+        pageCursor,
+        pageSize,
+        pages.current,
+        pages.next,
+        totalLength,
+        pageNumber,
+        pageCount,
+        showingA,
+        showingB,
+        currentHasMore,
+        nextCursorValue,
+    ]);
 
     // Check Local Vision status
     useEffect(() => {
@@ -693,43 +718,141 @@ const CardLibrary: React.FC = () => {
         [mapIndexItemsToEntries],
     );
 
+    const prefetchNextForPage = useCallback(
+        (page: Page, limitOverride?: number) => {
+            if (!page.hasMore) {
+                setPages((prev) => ({ ...prev, next: undefined }));
+                return;
+            }
+            const nextCursor = page.nextCursor;
+            void (async () => {
+                try {
+                    const nextPage = await fetchPage(nextCursor, limitOverride ?? pageSize);
+                    setPages((prev) => {
+                        if (prev.current?.cursor !== page.cursor) return prev;
+                        return { ...prev, next: nextPage };
+                    });
+                } catch {
+                    // ignore prefetch errors
+                }
+            })();
+        },
+        [fetchPage, pageSize],
+    );
+
     const loadPage = useCallback(
-        async (cursor: number) => {
+        async (cursor: number, limitOverride?: number) => {
             if (!USE_PAGINATION) return;
             const clamped = Math.max(0, Number.isFinite(cursor) ? cursor : 0);
+            const effectiveLimit = limitOverride ?? pageSize;
             setIsFetchingPage(true);
             setError(null);
             try {
-                const page = await fetchPage(clamped, pageSize);
+                const page = await fetchPage(clamped, effectiveLimit);
                 setTotalLength((prev) => page.totalLength ?? prev);
                 setPageCursor(page.cursor);
                 setPages({ current: page });
                 setCards(page.items);
-
-                if (page.hasMore) {
-                    const nextCursor = page.nextCursor;
-                    void (async () => {
-                        try {
-                            const nextPage = await fetchPage(nextCursor, pageSize);
-                            setPages((prev) => {
-                                if (prev.current?.cursor !== page.cursor) return prev;
-                                return { ...prev, next: nextPage };
-                            });
-                        } catch {
-                            // ignore prefetch errors
-                        }
-                    })();
-                } else {
-                    setPages((prev) => ({ ...prev, next: undefined }));
-                }
+                prefetchNextForPage(page, effectiveLimit);
             } catch (e: any) {
                 setError(e?.message || 'Failed to load page');
             } finally {
                 setIsFetchingPage(false);
             }
         },
-        [fetchPage, pageSize],
+        [USE_PAGINATION, fetchPage, pageSize, prefetchNextForPage],
     );
+
+    const goNext = useCallback(() => {
+        if (!USE_PAGINATION) return;
+        if (isFetchingPage) return;
+
+        if (pages.next) {
+            const nextPage = pages.next;
+            setPages({ current: nextPage, next: undefined });
+            setPageCursor(nextPage.cursor);
+            setTotalLength((prev) => nextPage.totalLength ?? prev);
+            setCards(nextPage.items);
+            prefetchNextForPage(nextPage);
+            return;
+        }
+
+        const current = pages.current;
+        if (!current) {
+            void loadPage(0);
+            return;
+        }
+        if (!current.hasMore) return;
+
+        const targetCursor = typeof current.nextCursor === 'number' ? current.nextCursor : current.cursor + pageSize;
+        void loadPage(targetCursor);
+    }, [USE_PAGINATION, isFetchingPage, loadPage, pageSize, pages.current, pages.next, prefetchNextForPage]);
+
+    const goPrev = useCallback(() => {
+        if (!USE_PAGINATION) return;
+        if (isFetchingPage) return;
+
+        const current = pages.current;
+        const targetCursor = Math.max(0, (current?.cursor ?? pageCursor) - pageSize);
+        if (current && targetCursor === current.cursor) return;
+        void loadPage(targetCursor);
+    }, [USE_PAGINATION, isFetchingPage, loadPage, pageCursor, pageSize, pages.current]);
+
+    const goHome = useCallback(() => {
+        if (!USE_PAGINATION) return;
+        if (isFetchingPage) return;
+        void loadPage(0);
+    }, [USE_PAGINATION, isFetchingPage, loadPage]);
+
+    const goEnd = useCallback(() => {
+        if (!USE_PAGINATION) return;
+        if (isFetchingPage) return;
+        if (typeof totalLength !== 'number') return;
+        const targetCursor = Math.max(0, totalLength - pageSize);
+        void loadPage(targetCursor);
+    }, [USE_PAGINATION, isFetchingPage, loadPage, pageSize, totalLength]);
+
+    const handlePageSizeChange = useCallback(
+        (nextSize: number) => {
+            setPageSize(nextSize);
+            if (!USE_PAGINATION) return;
+            setPageCursor(0);
+            setPages({});
+            setCards([]);
+            setTotalLength(null);
+            void loadPage(0, nextSize);
+        },
+        [USE_PAGINATION, loadPage],
+    );
+
+    useEffect(() => {
+        if (!USE_PAGINATION) return;
+        const handler = (e: KeyboardEvent) => {
+            const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+            const editable =
+                tag === 'input' ||
+                tag === 'textarea' ||
+                tag === 'select' ||
+                (e.target as HTMLElement | null)?.isContentEditable;
+            if (editable) return;
+
+            if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                goNext();
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                goPrev();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                goHome();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                goEnd();
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [USE_PAGINATION, goNext, goPrev, goHome, goEnd]);
 
     const computeFiltersHash = useCallback(() => {
         return JSON.stringify({
@@ -752,7 +875,7 @@ const CardLibrary: React.FC = () => {
         setCards([]);
         void loadPage(0);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [computeFiltersHash, filtersHash]);
+    }, [USE_PAGINATION, computeFiltersHash, filtersHash, loadPage]);
 
     const loadCards = async (preferredCardId?: string | null) => {
         if (typeof window === 'undefined' || !window.electronAPI) {
@@ -1891,6 +2014,26 @@ const CardLibrary: React.FC = () => {
     }, [USE_PAGINATION, pages.current, cards, search, filterTiers, filterTypes, sortBy, activeSetId, activeSetCardIds]);
 
     const displayCards = useMemo(() => filteredCards, [filteredCards]);
+
+    const pageNumber = useMemo(() => {
+        if (!USE_PAGINATION) return null;
+        return Math.floor(pageCursor / pageSize) + 1;
+    }, [USE_PAGINATION, pageCursor, pageSize]);
+
+    const pageCount = useMemo(() => {
+        if (!USE_PAGINATION) return null;
+        if (typeof totalLength === 'number' && totalLength > 0) {
+            return Math.max(1, Math.ceil(totalLength / pageSize));
+        }
+        return null;
+    }, [USE_PAGINATION, pageSize, totalLength]);
+
+    const showingA = USE_PAGINATION && displayCards.length > 0 ? pageCursor + 1 : 0;
+    const showingB = USE_PAGINATION ? pageCursor + displayCards.length : filteredCards.length;
+    const currentHasMore = USE_PAGINATION ? pages.current?.hasMore ?? false : false;
+    const nextCursorValue = USE_PAGINATION ? pages.next?.cursor ?? pages.current?.nextCursor ?? null : null;
+    const canGoPrev = USE_PAGINATION && pageCursor > 0 && !isFetchingPage;
+    const canGoNext = USE_PAGINATION && !isFetchingPage && (!!pages.next || !!pages.current?.hasMore);
 
     // Calculate lineage (ancestors/descendants) for all cards
     const lineageMap = useMemo(() => {
@@ -3507,6 +3650,77 @@ const CardLibrary: React.FC = () => {
                                         No cards detected. Generate artifacts in Chat to populate the library.
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {USE_PAGINATION && (
+                            <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-gray-200">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={goPrev}
+                                        disabled={!canGoPrev}
+                                        className={`px-3 py-1 rounded border border-gray-700 bg-gray-800/70 hover:bg-gray-700 transition-colors ${!canGoPrev ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                        title="Previous page (←)"
+                                    >
+                                        ← Prev
+                                    </button>
+                                    <button
+                                        onClick={goNext}
+                                        disabled={!canGoNext}
+                                        className={`px-3 py-1 rounded border border-gray-700 bg-gray-800/70 hover:bg-gray-700 transition-colors ${!canGoNext ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                        title="Next page (→)"
+                                    >
+                                        Next →
+                                    </button>
+                                </div>
+
+                                <div className="h-4 w-px bg-gray-700"></div>
+
+                                <div className="flex items-center gap-2 text-xs text-gray-400">
+                                    <span>Page</span>
+                                    <span className="font-mono text-gray-200">{pageNumber ?? '—'}</span>
+                                    {pageCount ? (
+                                        <span className="text-gray-500">/ {pageCount}</span>
+                                    ) : (
+                                        <span className="text-gray-500">/ ?</span>
+                                    )}
+                                </div>
+
+                                <div className="flex items-center gap-2 text-xs text-gray-400">
+                                    <span>Showing</span>
+                                    <span className="font-mono text-gray-200">
+                                        {showingA}–{showingB}
+                                    </span>
+                                    {typeof totalLength === 'number' ? (
+                                        <span className="text-gray-500">of {totalLength}</span>
+                                    ) : (
+                                        <span className="text-gray-500">of ?</span>
+                                    )}
+                                </div>
+
+                                <div className="h-4 w-px bg-gray-700"></div>
+
+                                <label className="flex items-center gap-2 text-xs text-gray-400">
+                                    <span>Page size:</span>
+                                    <select
+                                        value={pageSize}
+                                        onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                                        className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:border-purple-500 focus:outline-none"
+                                        title="Page size"
+                                        disabled={isFetchingPage}
+                                    >
+                                        {[60, 120, 240].map((size) => (
+                                            <option key={size} value={size}>{size}</option>
+                                        ))}
+                                    </select>
+                                </label>
+
+                                {isFetchingPage && (
+                                    <div className="flex items-center gap-2 text-xs text-cyan-300">
+                                        <rux-progress type="circular" className="w-4 h-4"></rux-progress>
+                                        <span className="font-mono">Loading page…</span>
+                                    </div>
+                                )}
                             </div>
                         )}
 
