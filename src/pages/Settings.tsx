@@ -29,7 +29,9 @@ const Settings: React.FC = () => {
         keyTerms: { provider: 'gemini', model: '' },
         wikiUpdate: { provider: 'gemini', model: '' },
     });
+    const [cardLibraryPaging, setCardLibraryPaging] = useState<'pagination' | 'legacy'>('pagination');
     const [status, setStatus] = useState('');
+    const [loadedSettings, setLoadedSettings] = useState<any | null>(null);
 
     const [geminiModels, setGeminiModels] = useState<ModelInfo[]>([]);
     const [openaiModels, setOpenaiModels] = useState<ModelInfo[]>([]);
@@ -88,6 +90,10 @@ USER REQUEST: {{USER_PROMPT}}`;
                 setAimlapiKey(settings.aimlapiKey || '');
                 setFirebaseConfig(settings.firebaseConfig);
                 setRevidKey(settings.revidKey || '');
+                setLoadedSettings(settings);
+                setCardLibraryPaging(
+                    settings.cardLibraryPaging === 'legacy' ? 'legacy' : 'pagination',
+                );
 
                 const wormholeSettings = (settings as any).wormhole || {};
                 const normalizeStep = (step: any, defaultProvider: WormholeProviderId) => ({
@@ -115,6 +121,35 @@ USER REQUEST: {{USER_PROMPT}}`;
         loadSettings();
         loadModels();
     }, [loadModels]);
+
+    const saveCardLibraryPaging = async (next: 'pagination' | 'legacy') => {
+        if (!window.electronAPI?.saveSettings) return;
+        setCardLibraryPaging(next);
+        const wormholePayload = {
+            transcription: wormhole.transcription,
+            summarization: wormhole.summarization,
+            keyTerms: wormhole.keyTerms,
+            wikiUpdate: wormhole.wikiUpdate,
+        };
+        try {
+            await window.electronAPI.saveSettings({
+                ...(loadedSettings || {}),
+                geminiKey,
+                openaiKey,
+                aimlapiKey,
+                firebaseConfig,
+                revidKey,
+                wormhole: wormholePayload,
+                cardLibraryPaging: next,
+            });
+            setLoadedSettings((prev) => ({ ...(prev || {}), cardLibraryPaging: next }));
+            setStatus('Configuration Saved');
+            setTimeout(() => setStatus(''), 3000);
+        } catch (err) {
+            setStatus('Failed to save setting');
+            setTimeout(() => setStatus(''), 3000);
+        }
+    };
 
     const handleValidateFirebase = () => {
         try {
@@ -164,6 +199,7 @@ USER REQUEST: {{USER_PROMPT}}`;
                 firebaseConfig,
                 revidKey,
                 wormhole: wormholePayload,
+                cardLibraryPaging,
             });
             setStatus('Configuration Saved');
             setTimeout(() => setStatus(''), 3000);
@@ -403,6 +439,42 @@ USER REQUEST: {{USER_PROMPT}}`;
 
                     {/* Right Column: Data Core & Protocols */}
                     <div className="space-y-8">
+                        {/* Card Library */}
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-2 text-blue-300 font-bold tracking-widest text-xs uppercase mb-2">
+                                <rux-icon icon="library-books" size="extra-small"></rux-icon>
+                                Card Library
+                            </div>
+                            <div className="glass-panel p-6 rounded-xl relative overflow-hidden group">
+                                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 opacity-60 group-hover:opacity-100 transition-opacity"></div>
+                                <div className="flex items-center gap-3 mb-2">
+                                    <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                                        Browsing mode
+                                    </h4>
+                                    <span className="text-[10px] font-mono text-blue-300/70">pagination vs legacy scroll</span>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <label className="text-sm opacity-80 w-40" htmlFor="card-library-browsing-mode">
+                                        Browsing mode
+                                    </label>
+                                    <select
+                                        id="card-library-browsing-mode"
+                                        aria-label="Card Library browsing mode"
+                                        title="Card Library browsing mode"
+                                        className="px-3 py-2 rounded border border-white/10 bg-black/20 text-sm"
+                                        value={cardLibraryPaging ?? 'pagination'}
+                                        onChange={(e) => {
+                                            const next = e.target.value === 'legacy' ? 'legacy' : 'pagination';
+                                            void saveCardLibraryPaging(next);
+                                        }}
+                                    >
+                                        <option value="pagination">Pagination (recommended)</option>
+                                        <option value="legacy">Legacy infinite scroll</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
                         {/* Data Core */}
                         <div className="space-y-6">
                             <div className="flex items-center gap-2 text-orange-400 font-bold tracking-widest text-xs uppercase mb-2">

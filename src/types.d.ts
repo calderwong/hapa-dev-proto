@@ -5,6 +5,7 @@ export interface Settings {
     firebaseConfig: string;
     revidKey: string;
     wormhole?: WormholeSettings;
+    cardLibraryPaging?: 'pagination' | 'legacy';
 }
 
 export type AudioMode = 'transcribe' | 'realtime';

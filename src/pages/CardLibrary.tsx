@@ -9,8 +9,8 @@ import VirtualCardGrid from '../components/cards/VirtualCardGrid';
 
 // Feature flag for progressive loading (set to true to use new system)
 const USE_PROGRESSIVE_LOADING = true;
-// Temporary feature flag for pagination refactor (phase A)
-const USE_PAGINATION = true;
+// Default for pagination (can be overridden by settings)
+const DEFAULT_USE_PAGINATION = true;
 
 type Page = {
     cursor: number;
@@ -165,6 +165,8 @@ const CardLibrary: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const [cards, setCards] = useState<CardIndexEntry[]>([]);
     const cardsRef = useRef<CardIndexEntry[]>([]);
+    const [usePagination, setUsePagination] = useState(DEFAULT_USE_PAGINATION);
+    const USE_PAGINATION = usePagination;
     const [pageSize, setPageSize] = useState(120);
     const [pageCursor, setPageCursor] = useState(0);
     const [totalLength, setTotalLength] = useState<number | null>(null);
@@ -288,6 +290,9 @@ const CardLibrary: React.FC = () => {
                 cardsCount: cards.length,
                 loading,
                 error,
+                mode: USE_PAGINATION ? 'pagination' : 'legacy',
+                prefetchNextReady: USE_PAGINATION ? !!pages.next : false,
+                prefetchNextCursor: USE_PAGINATION ? pages.next?.cursor ?? null : null,
             };
 
             if (USE_PAGINATION) {
@@ -885,7 +890,18 @@ const CardLibrary: React.FC = () => {
 
         const api = (window as any).electronAPI as any;
 
-        if (USE_PAGINATION) {
+        let shouldUsePagination = USE_PAGINATION;
+        try {
+            const settings = api.getSettings ? await api.getSettings() : null;
+            if (settings && typeof settings === 'object') {
+                shouldUsePagination = settings.cardLibraryPaging === 'legacy' ? false : true;
+                setUsePagination(shouldUsePagination);
+            }
+        } catch {
+            // ignore settings fetch error; fall back to current state
+        }
+
+        if (shouldUsePagination) {
             setLoading(true);
             setError(null);
             setPages({});
