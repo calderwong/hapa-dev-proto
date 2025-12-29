@@ -3353,6 +3353,7 @@ const CardLibrary: React.FC = () => {
                                 className="flex-1 min-h-0 pb-10"
                                 onRequestMore={requestMoreCards}
                                 isFetchingMore={isFetchingMore}
+                                hasMore={indexHasMore}
                                 renderCard={(card) => {
                                     const quality = calculateCardQuality(card);
                                     const isSetCard = card.cardType === 'set';

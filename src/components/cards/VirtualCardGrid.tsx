@@ -28,6 +28,7 @@ interface VirtualCardGridProps {
   bufferScreens?: number; // Buffer by N viewport-heights on each side
   onRequestMore?: () => void;
   isFetchingMore?: boolean;
+  hasMore?: boolean;
 }
 
 // Skeleton placeholder component
@@ -101,6 +102,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   bufferScreens = 3,
   onRequestMore,
   isFetchingMore = false,
+  hasMore = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -218,7 +220,13 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
     if (isFetchingMore) return;
     if (cards.length <= 0) return;
 
-    if (totalHeight <= containerHeight) return;
+    if (totalHeight <= containerHeight) {
+      if (hasMore && !isFetchingMore && !requestMoreLockRef.current) {
+        requestMoreLockRef.current = true;
+        onRequestMore?.();
+      }
+      return;
+    }
 
     const remainingPx = totalHeight - (scrollTop + containerHeight);
     const thresholdPx = containerHeight * 1.5;
@@ -231,7 +239,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
     } else {
       requestMoreLockRef.current = false;
     }
-  }, [cards.length, containerHeight, isFetchingMore, onRequestMore, scrollTop, totalHeight]);
+  }, [cards.length, containerHeight, hasMore, isFetchingMore, onRequestMore, scrollTop, totalHeight]);
   
   // Measure container on mount/resize
   useEffect(() => {
