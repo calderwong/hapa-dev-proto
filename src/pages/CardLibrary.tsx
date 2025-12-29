@@ -2035,6 +2035,17 @@ const CardLibrary: React.FC = () => {
     const canGoPrev = USE_PAGINATION && pageCursor > 0 && !isFetchingPage;
     const canGoNext = USE_PAGINATION && !isFetchingPage && (!!pages.next || !!pages.current?.hasMore);
 
+    const gridOnRequestMore = useCallback(() => {
+        if (!USE_PAGINATION) {
+            requestMoreCards();
+            return;
+        }
+        if (isFetchingPage) return;
+        if (!pages.next) return; // only advance when prefetched
+        if (!canGoNext) return;
+        goNext();
+    }, [USE_PAGINATION, canGoNext, goNext, isFetchingPage, pages.next, requestMoreCards]);
+
     // Calculate lineage (ancestors/descendants) for all cards
     const lineageMap = useMemo(() => {
         if (cards.length === 0) return new Map<string, LineageInfo>();
@@ -3733,9 +3744,8 @@ const CardLibrary: React.FC = () => {
                                 getPortalColorMode={(card) => (card?.provider === 'revid' ? 'red' : 'blue')}
                                 selectedCardId={selected?.cardId}
                                 className="flex-1 min-h-0 pb-10"
-                                // Pagination is the source of truth; no infinite scroll in commit A
-                                onRequestMore={undefined}
-                                isFetchingMore={false}
+                                onRequestMore={gridOnRequestMore}
+                                isFetchingMore={isFetchingPage}
                                 renderCard={(card) => {
                                     const quality = calculateCardQuality(card);
                                     const isSetCard = card.cardType === 'set';
