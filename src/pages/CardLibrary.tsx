@@ -86,7 +86,7 @@ const CardContent: React.FC<CardContentProps> = ({
     const wikiCount = children.filter((c: any) => c.type === 'wiki-entry').length;
 
     return (
-        <>
+        <div className="relative flex flex-col h-full">
             {/* Set Card Badge */}
             {isSetCard && (
                 <div className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-amber-400/30 bg-gradient-to-r from-amber-900/80 via-amber-800/80 to-amber-900/80 text-amber-300">
@@ -155,7 +155,7 @@ const CardContent: React.FC<CardContentProps> = ({
                     )}
                 </div>
             </div>
-        </>
+        </div>
     );
 };
 
@@ -278,65 +278,6 @@ const CardLibrary: React.FC = () => {
             } catch {}
         };
     }, []);
-
-    useEffect(() => {
-        try {
-            const w: any = window as any;
-            if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
-            const baseState: any = {
-                ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
-                active: true,
-                updatedAt: new Date().toISOString(),
-                cardsCount: cards.length,
-                loading,
-                error,
-                mode: USE_PAGINATION ? 'pagination' : 'legacy',
-                prefetchNextReady: USE_PAGINATION ? !!pages.next : false,
-                prefetchNextCursor: USE_PAGINATION ? pages.next?.cursor ?? null : null,
-            };
-
-            if (USE_PAGINATION) {
-                baseState.pageCursor = pageCursor;
-                baseState.pageSize = pageSize;
-                baseState.pageTotalLength = totalLength;
-                baseState.pageCurrentCount = pages.current?.items?.length ?? 0;
-                baseState.pageHasMore = pages.current?.hasMore ?? false;
-                baseState.pageNextCursor = nextCursorValue;
-                baseState.pageNumber = pageNumber;
-                baseState.pageCount = pageCount;
-                baseState.pageShowingA = showingA;
-                baseState.pageShowingB = showingB;
-                baseState.pageCurrentHasMore = currentHasMore;
-            } else {
-                baseState.indexCursor = indexCursor;
-                baseState.indexHasMore = indexHasMore;
-                baseState.indexTotalLength = indexTotalLength;
-                baseState.isFetchingMore = isFetchingMore;
-            }
-
-            w.__HAPA_DEBUG_STATE__.cardLibrary = baseState;
-        } catch {}
-    }, [
-        USE_PAGINATION,
-        cards.length,
-        error,
-        indexCursor,
-        indexHasMore,
-        indexTotalLength,
-        isFetchingMore,
-        loading,
-        pageCursor,
-        pageSize,
-        pages.current,
-        pages.next,
-        totalLength,
-        pageNumber,
-        pageCount,
-        showingA,
-        showingB,
-        currentHasMore,
-        nextCursorValue,
-    ]);
 
     // Check Local Vision status
     useEffect(() => {
@@ -2031,25 +1972,125 @@ const CardLibrary: React.FC = () => {
 
     const displayCards = useMemo(() => filteredCards, [filteredCards]);
 
-    const pageNumber = useMemo(() => {
-        if (!USE_PAGINATION) return null;
-        return Math.floor(pageCursor / pageSize) + 1;
-    }, [USE_PAGINATION, pageCursor, pageSize]);
-
-    const pageCount = useMemo(() => {
-        if (!USE_PAGINATION) return null;
-        if (typeof totalLength === 'number' && totalLength > 0) {
-            return Math.max(1, Math.ceil(totalLength / pageSize));
+    const pagingView = useMemo(() => {
+        if (!USE_PAGINATION) {
+            return {
+                pageNumber: null,
+                pageCount: null,
+                showingA: 0,
+                showingB: filteredCards.length,
+                currentHasMore: false,
+                nextCursorValue: null as number | null,
+                canGoPrev: false,
+                canGoNext: false,
+            };
         }
-        return null;
-    }, [USE_PAGINATION, pageSize, totalLength]);
 
-    const showingA = USE_PAGINATION && displayCards.length > 0 ? pageCursor + 1 : 0;
-    const showingB = USE_PAGINATION ? pageCursor + displayCards.length : filteredCards.length;
-    const currentHasMore = USE_PAGINATION ? pages.current?.hasMore ?? false : false;
-    const nextCursorValue = USE_PAGINATION ? pages.next?.cursor ?? pages.current?.nextCursor ?? null : null;
-    const canGoPrev = USE_PAGINATION && pageCursor > 0 && !isFetchingPage;
-    const canGoNext = USE_PAGINATION && !isFetchingPage && (!!pages.next || !!pages.current?.hasMore);
+        const pageNumber = Math.floor(pageCursor / pageSize) + 1;
+        const pageCount =
+            typeof totalLength === 'number' && totalLength > 0
+                ? Math.max(1, Math.ceil(totalLength / pageSize))
+                : null;
+        const showingA = displayCards.length > 0 ? pageCursor + 1 : 0;
+        const showingB = pageCursor + displayCards.length;
+        const currentHasMore = pages.current?.hasMore ?? false;
+        const nextCursorValue = pages.next?.cursor ?? pages.current?.nextCursor ?? null;
+        const canGoPrev = pageCursor > 0 && !isFetchingPage;
+        const canGoNext = !isFetchingPage && (!!pages.next || currentHasMore);
+
+        return {
+            pageNumber,
+            pageCount,
+            showingA,
+            showingB,
+            currentHasMore,
+            nextCursorValue,
+            canGoPrev,
+            canGoNext,
+        };
+    }, [
+        USE_PAGINATION,
+        displayCards.length,
+        filteredCards.length,
+        isFetchingPage,
+        pageCursor,
+        pageSize,
+        pages.current,
+        pages.next,
+        totalLength,
+    ]);
+
+    const {
+        pageNumber,
+        pageCount,
+        showingA,
+        showingB,
+        currentHasMore,
+        nextCursorValue,
+        canGoPrev,
+        canGoNext,
+    } = pagingView;
+
+    const gridHeightStyle = useMemo(() => ({ height: 'calc(100vh - 220px)' }), []);
+
+    useEffect(() => {
+        try {
+            const w: any = window as any;
+            if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
+            const baseState: any = {
+                ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
+                active: true,
+                updatedAt: new Date().toISOString(),
+                cardsCount: cards.length,
+                loading,
+                error,
+                mode: USE_PAGINATION ? 'pagination' : 'legacy',
+                prefetchNextReady: USE_PAGINATION ? !!pages.next : false,
+                prefetchNextCursor: USE_PAGINATION ? pages.next?.cursor ?? null : null,
+            };
+
+            if (USE_PAGINATION) {
+                baseState.pageCursor = pageCursor;
+                baseState.pageSize = pageSize;
+                baseState.pageTotalLength = totalLength;
+                baseState.pageCurrentCount = pages.current?.items?.length ?? 0;
+                baseState.pageHasMore = pages.current?.hasMore ?? false;
+                baseState.pageNextCursor = nextCursorValue;
+                baseState.pageNumber = pageNumber;
+                baseState.pageCount = pageCount;
+                baseState.pageShowingA = showingA;
+                baseState.pageShowingB = showingB;
+                baseState.pageCurrentHasMore = currentHasMore;
+            } else {
+                baseState.indexCursor = indexCursor;
+                baseState.indexHasMore = indexHasMore;
+                baseState.indexTotalLength = indexTotalLength;
+                baseState.isFetchingMore = isFetchingMore;
+            }
+
+            w.__HAPA_DEBUG_STATE__.cardLibrary = baseState;
+        } catch {}
+    }, [
+        USE_PAGINATION,
+        cards.length,
+        error,
+        indexCursor,
+        indexHasMore,
+        indexTotalLength,
+        isFetchingMore,
+        loading,
+        pageCursor,
+        pageSize,
+        pages.current,
+        pages.next,
+        totalLength,
+        pageNumber,
+        pageCount,
+        showingA,
+        showingB,
+        currentHasMore,
+        nextCursorValue,
+    ]);
 
     const gridOnRequestMore = useCallback(() => {
         if (!USE_PAGINATION) {
@@ -3600,12 +3641,12 @@ const CardLibrary: React.FC = () => {
                     </div>
                 )}
 
-                <div className="flex-1 min-h-0 overflow-hidden p-6">
+                <div className="flex flex-col flex-1 min-h-[70vh] overflow-auto p-6 custom-scrollbar">
                     <style>{`
                 .card-grid {
                     display: grid;
                     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-                    gap: 1.5rem;
+                    gap: 1rem;
                 }
                 .glass-overlay {
                     background: rgba(15, 23, 42, 0.95);
@@ -3736,7 +3777,7 @@ const CardLibrary: React.FC = () => {
                                         title="Page size"
                                         disabled={isFetchingPage}
                                     >
-                                        {[60, 120, 240].map((size) => (
+                                        {[30, 60, 120, 240].map((size) => (
                                             <option key={size} value={size}>{size}</option>
                                         ))}
                                     </select>
@@ -3759,9 +3800,11 @@ const CardLibrary: React.FC = () => {
                                 onCardDragStart={(e, card) => handleDragStart(e, card)}
                                 getPortalColorMode={(card) => (card?.provider === 'revid' ? 'red' : 'blue')}
                                 selectedCardId={selected?.cardId}
-                                className="flex-1 min-h-0 pb-10"
+                                className="flex-1 min-h-0 h-full pb-10"
+                                cardHeight={300}
                                 onRequestMore={gridOnRequestMore}
                                 isFetchingMore={isFetchingPage}
+                                hasMore={!!pages.next || currentHasMore || canGoNext}
                                 renderCard={(card) => {
                                     const quality = calculateCardQuality(card);
                                     const isSetCard = card.cardType === 'set';
@@ -3790,7 +3833,8 @@ const CardLibrary: React.FC = () => {
                                 onCardDragStart={(e, card) => handleDragStart(e, card)}
                                 getPortalColorMode={(card) => (card?.provider === 'revid' ? 'red' : 'blue')}
                                 selectedCardId={selected?.cardId}
-                                className="flex-1 min-h-0 pb-10"
+                                className="flex-1 min-h-0 h-full pb-10"
+                                cardHeight={300}
                                 onRequestMore={requestMoreCards}
                                 isFetchingMore={isFetchingMore}
                                 hasMore={indexHasMore}
@@ -3846,17 +3890,19 @@ const CardLibrary: React.FC = () => {
                                                         data-tooltip={`Set Card • ${containedCount} cards`}
                                                         data-tooltip-pos="bottom"
                                                     >
-                                                        <span>📦</span> SET CARD
+                                                        <rux-icon icon="auto-awesome" size="extra-small" className="text-amber-200"></rux-icon>
+                                                        <span>Set Card</span>
                                                     </div>
                                                 )}
                                                 {/* Merged Set Badge */}
                                                 {isMergedSet && (
                                                     <div
-                                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-violet-400/30 bg-gradient-to-r from-violet-900/80 via-violet-800/80 to-violet-900/80 text-violet-300"
-                                                        data-tooltip="Merged Set"
+                                                        className="absolute top-0 left-0 right-0 z-10 py-1 flex items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.2em] backdrop-blur-sm border-b border-violet-400/30 bg-gradient-to-r from-violet-900/80 via-violet-800/80 to-violet-900/80 text-violet-200"
+                                                        data-tooltip={`Merged Set • ${containedCount} cards`}
                                                         data-tooltip-pos="bottom"
                                                     >
-                                                        <span>🔮</span> MERGED SET
+                                                        <rux-icon icon="hub" size="extra-small" className="text-violet-200"></rux-icon>
+                                                        <span>Merged Set</span>
                                                     </div>
                                                 )}
                                                 {/* Standard Card Tier Badge (Quality Bar) */}

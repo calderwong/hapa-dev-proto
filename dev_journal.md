@@ -393,15 +393,28 @@
 - Identified the error as a RocksDB `db/LOCK` contention symptom (most often caused by multiple Electron instances opening the same storage).
 - Added `app.requestSingleInstanceLock()` to ensure only one Hapa app instance can run at a time; second launches focus the existing window.
 - Audited Hypercore storage selection (`electron/main.ts` + `electron/p2p.ts`) and ensured we do not accidentally switch storage directories and “hide” existing cards.
-
-**Files modified/created:**
-- Modified: `electron/main.ts`
 - Modified: `dev_journal.md`
 
-**Tags:** #bugfix #storage #electron
-**Est. Avg. Human Dev Time:** 30 minutes
+**Tags:** #bugfix #storage #rocksdb
+**Est. Avg. Human Dev Time:** 20 minutes
 
-## Entry 106 – 🧹 Housecleaning: open-task triage + restore type integrity
+## Entry 106 – Card Library pagination mode toggle + debug
+**Prompt:** "Add Settings UI toggle for Card Library browsing mode; make mode debuggable; ship commit."
+
+**Summary of actions:**
+- Added Card Library “Browsing mode” select (Pagination vs Legacy) in Settings with accessible labeling; persists via `saveSettings/getSettings`.
+- Updated CardLibrary to record mode and prefetch info in `__HAPA_DEBUG_STATE__.cardLibrary`.
+- Ran `npm run typecheck`; committed as `feat(settings): toggle pagination mode for Card Library`.
+
+**Files modified/created:**
+- Modified: `src/pages/Settings.tsx`
+- Modified: `src/pages/CardLibrary.tsx`
+- Modified: `src/types.d.ts`
+
+**Tags:** #feature #card_library #settings #debug
+**Est. Avg. Human Dev Time:** 35 minutes
+
+## Entry 106 – Housecleaning: open-task triage + restore type integrity
 **Prompt:** "house clean and pick up any open tasks"
 
 **Summary of actions:**
@@ -2161,3 +2174,41 @@
 
 **Tags:** #docs #api #debug_api #automation #testing #operator_panel #hypercore
 **Est. Avg. Human Dev Time:** 60 minutes
+
+## Entry 194 – Test: Card Library paging automation (UI-driven scroll)
+
+**Prompt:** "Modify the Card Library paging test to drive paging through the UI's scroll mechanism rather than direct IPC calls."
+
+**Summary of actions:**
+- Added a safe Debug API endpoint to scroll the Card Library `VirtualCardGrid` scroller (`/v1/renderer/scroll-virtual-grid`) for deterministic UI-driven paging tests.
+- Updated `scripts/test-card-library-paging.mjs` to trigger paging by scrolling (matching the real `VirtualCardGrid` → `requestMoreCards` flow) and to record per-step UI/scroller deltas.
+- Documented the new endpoint in the Debug API reference.
+
+**Files modified/created:**
+- Modified: `electron/hapa-debug-api.ts`
+- Modified: `scripts/test-card-library-paging.mjs`
+- Modified: `docs/reference/HAPA_NODE_API_REFERENCE.md`
+- Modified: `dev_journal.md`
+
+**Tags:** #test #debug_api #card_library #pagination #automation
+**Est. Avg. Human Dev Time:** 25 minutes
+
+## Entry 195 – Verification: Card Library paging cold-start stress test (two runs)
+**Prompt:** "Run Step 2B cold-start stress testing: restart the Electron app with Debug API enabled, run `scripts/test-card-library-paging.mjs` twice, and capture `/health` + `/v1/renderer/state` after each run."
+
+**Summary of actions:**
+- Started the app with Debug API enabled (`HAPA_DEBUG_API=1`, `HAPA_DEBUG_API_PORT=46830`, `HAPA_DEBUG_API_TOKEN=local-dev`).
+- Verified Debug API readiness via `GET http://127.0.0.1:46830/health`.
+- Ran `node scripts/test-card-library-paging.mjs` (UI-driven scroll) with `HAPA_DEBUG_API_BASE_URL=http://127.0.0.1:46830` and `HAPA_DEBUG_API_TOKEN=local-dev`.
+- Captured `/v1/renderer/state` (auth token `local-dev`) after the run to confirm end-state truth.
+- Performed a full restart (killed the processes listening on ports `5173` and `46830`), then repeated the health check + test run + renderer state capture.
+
+**Results:**
+- Run 1: `PASS` (target 600 reached via UI scroll).
+- Run 2: `PASS` (target 600 reached via UI scroll).
+
+**Files modified/created:**
+- Modified: `dev_journal.md`
+
+**Tags:** #test #debug_api #card_library #pagination #verification
+**Est. Avg. Human Dev Time:** 20 minutes

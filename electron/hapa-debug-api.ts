@@ -151,8 +151,57 @@ const runDomQuery = async (win: BrowserWindow | null, selector: string) => {
         `(() => {
           const selector = ${JSON.stringify(safeSelector)};
           try {
-            const count = document.querySelectorAll(selector).length;
-            return { selector, count, exists: count > 0 };
+            const nodes = Array.from(document.querySelectorAll(selector));
+            const count = nodes.length;
+            const items = nodes.slice(0, 3).map((el, idx) => {
+              try {
+                const r = el.getBoundingClientRect();
+                const scrollHeight = el.scrollHeight ?? null;
+                const clientHeight = el.clientHeight ?? null;
+                const scrollTop = el.scrollTop ?? null;
+                const area = r ? r.width * r.height : null;
+                const scrollable =
+                  typeof scrollHeight === 'number' &&
+                  typeof clientHeight === 'number' &&
+                  scrollHeight > clientHeight + 2;
+                return {
+                  index: idx,
+                  rect: r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null,
+                  scrollHeight,
+                  clientHeight,
+                  scrollTop,
+                  atBottom:
+                    typeof scrollTop === 'number' &&
+                    typeof clientHeight === 'number' &&
+                    typeof scrollHeight === 'number'
+                      ? scrollTop + clientHeight >= scrollHeight - 2
+                      : null,
+                  area,
+                  scrollable,
+                };
+              } catch {
+                return { index: idx, error: 'metric_error' };
+              }
+            });
+
+            const scrollableCandidates = items.filter((it) => it && it.scrollable && typeof it.area === 'number');
+            const chosen =
+              scrollableCandidates.length > 0
+                ? scrollableCandidates.reduce((best, it) => (it.area! > (best.area ?? -1) ? it : best), scrollableCandidates[0])
+                : null;
+            const chooseCandidateIndex =
+              chosen && typeof chosen.index === 'number' && Number.isFinite(chosen.index) ? chosen.index : null;
+
+            const hasAnyScrollable = scrollableCandidates.length > 0;
+
+            return {
+              selector,
+              count,
+              exists: count > 0,
+              hasAnyScrollable,
+              chooseCandidateIndex,
+              items,
+            };
           } catch (err) {
             return { selector, error: String(err && err.message ? err.message : err) };
           }
@@ -237,6 +286,154 @@ export async function startHapaDebugApi(options: StartHapaDebugApiOptions): Prom
       const selector = url.searchParams.get('selector') || '';
       const result = await runDomQuery(win, selector);
       sendJson(res, 200, { ok: true, dom: result });
+      return;
+    }
+
+    if (url.pathname === '/v1/renderer/scroll-virtual-grid') {
+      const modeRaw = String(url.searchParams.get('mode') || '').trim();
+      const mode = modeRaw === 'wheel' ? 'wheel' : 'scrollTop';
+      const to = String(url.searchParams.get('to') || '').trim();
+      const topRaw = url.searchParams.get('top');
+      const deltaRaw = url.searchParams.get('delta');
+      const deltaYRaw = url.searchParams.get('deltaY');
+
+      const parseIntSafe = (raw: string | null): number | null => {
+        if (typeof raw !== 'string') return null;
+        const t = raw.trim();
+        if (!t) return null;
+        const parsed = Number.parseInt(t, 10);
+        if (!Number.isFinite(parsed)) return null;
+        return parsed;
+      };
+
+      const parseNumberSafe = (raw: string | null): number | null => {
+        if (typeof raw !== 'string') return null;
+        const t = raw.trim();
+        if (!t) return null;
+        const parsed = Number.parseFloat(t);
+        if (!Number.isFinite(parsed)) return null;
+        return parsed;
+      };
+
+      const top = parseIntSafe(topRaw);
+      const delta = parseIntSafe(deltaRaw);
+      const deltaY = parseNumberSafe(deltaYRaw);
+
+      const allowedTo = ['top', 'bottom', 'start', 'end', 'near-bottom', 'near-top'];
+      if (mode === 'scrollTop' && to && !allowedTo.includes(to)) {
+        sendJson(res, 200, { ok: true, scrollVirtualGrid: null, error: 'to_invalid' });
+        return;
+      }
+
+      if (mode === 'scrollTop' && !to && typeof top !== 'number' && typeof delta !== 'number') {
+        sendJson(res, 200, { ok: true, scrollVirtualGrid: null, error: 'to_or_top_or_delta_required' });
+        return;
+      }
+      if (mode === 'wheel' && typeof deltaY !== 'number') {
+        sendJson(res, 200, { ok: true, scrollVirtualGrid: null, error: 'deltaY_required_for_wheel' });
+        return;
+      }
+
+      const limitedTop = typeof top === 'number' ? Math.max(0, Math.min(top, 50_000_000)) : null;
+      const limitedDelta = typeof delta === 'number' ? Math.max(-500_000, Math.min(delta, 500_000)) : null;
+      const limitedDeltaY =
+        typeof deltaY === 'number' ? Math.max(-500_000, Math.min(deltaY, 500_000)) : null;
+
+      const result = await evalInRenderer(
+        win,
+        `(() => {
+          const mode = ${JSON.stringify(mode)};
+          const to = ${JSON.stringify(to)};
+          const top = ${JSON.stringify(limitedTop)};
+          const delta = ${JSON.stringify(limitedDelta)};
+          const deltaY = ${JSON.stringify(limitedDeltaY)};
+          try {
+            const nodes = Array.from(document.querySelectorAll('[data-virtual-grid-scroll-container="true"]'));
+            if (!nodes.length) return { ok: false, error: 'scroller_not_found', candidatesCount: 0 };
+
+            const candidates = nodes.map((el, idx) => {
+              const r = el.getBoundingClientRect();
+              const scrollHeight = el.scrollHeight ?? 0;
+              const clientHeight = el.clientHeight ?? 0;
+              const area = r ? r.width * r.height : 0;
+              const scrollable = scrollHeight > clientHeight + 2;
+              return { el, idx, area, scrollHeight, clientHeight, scrollable };
+            });
+
+            const scrollableCandidates = candidates.filter((c) => c.scrollable);
+            const chosen =
+              scrollableCandidates.length > 0
+                ? scrollableCandidates.reduce((best, c) => (c.area > best.area ? c : best), scrollableCandidates[0])
+                : null;
+
+            const scroller = chosen ? chosen.el : candidates[0].el;
+            const chosenIndex = chosen ? chosen.idx : 0;
+            const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            const before = {
+              scrollTop: scroller.scrollTop,
+              scrollHeight: scroller.scrollHeight,
+              clientHeight: scroller.clientHeight,
+              maxScrollTop,
+              atBottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2,
+            };
+
+            if (mode === 'wheel') {
+              try {
+                scroller.dispatchEvent(
+                  new WheelEvent('wheel', { deltaY: typeof deltaY === 'number' ? deltaY : 0, bubbles: true, cancelable: true }),
+                );
+              } catch (err) {
+                return { ok: false, error: String(err && err.message ? err.message : err), mode };
+              }
+            } else {
+              let next = before.scrollTop;
+              if (to) {
+                if (to === 'top' || to === 'start' || to === 'near-top') next = 0;
+                if (to === 'bottom' || to === 'end' || to === 'near-bottom') next = maxScrollTop;
+              } else if (typeof top === 'number') {
+                next = top;
+              } else if (typeof delta === 'number') {
+                next = before.scrollTop + delta;
+              }
+
+              if (!Number.isFinite(next)) next = before.scrollTop;
+              next = Math.max(0, Math.min(next, maxScrollTop));
+
+              try {
+                scroller.scrollTop = next;
+              } catch {
+              }
+              try {
+                scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+              } catch {
+              }
+            }
+
+            const after = {
+              scrollTop: scroller.scrollTop,
+              scrollHeight: scroller.scrollHeight,
+              clientHeight: scroller.clientHeight,
+              maxScrollTop,
+              atBottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2,
+            };
+
+            return {
+              ok: true,
+              mode,
+              requested: { to, top, delta, deltaY },
+              selectedIndex: chosenIndex,
+              candidatesCount: candidates.length,
+              before,
+              after,
+            };
+          } catch (err) {
+            return { ok: false, error: String(err && err.message ? err.message : err) };
+          }
+        })()`,
+        2500,
+      );
+
+      sendJson(res, 200, { ok: true, scrollVirtualGrid: result });
       return;
     }
 

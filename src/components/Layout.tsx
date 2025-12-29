@@ -613,88 +613,79 @@ const Layout: React.FC = () => {
                         <SystemClock />
 
                         <div className="flex items-center gap-3 border-l border-gray-700 pl-4">
-                            <Link to="/profile" className="w-8 h-8 rounded-full bg-gradient-to-tr from-astro-primary to-purple-600 p-[1px] hover:scale-105 transition-transform cursor-pointer">
-                                <div className="w-full h-full rounded-full bg-gray-900 flex items-center justify-center overflow-hidden">
-                                    {userAvatar ? (
-                                        <img src={userAvatar} alt="Profile" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <rux-icon icon="person" size="small" className="text-white"></rux-icon>
-                                    )}
-                                </div>
-                            </Link>
+                            {/* right-side controls placeholder */}
                         </div>
                     </div>
                 </rux-global-status-bar>
-                <div className="flex-1 relative overflow-hidden">
-                    <div className="absolute inset-0 overflow-auto relative pb-28">
-                        <Outlet />
-                    </div>
 
-                    <div ref={bottomDockRef} className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[60] pointer-events-auto">
-                        <div className="relative group">
-                            <div className="absolute -inset-4 pointer-events-none">
-                                <div className="absolute inset-0 bg-cyan-500/10 blur-2xl opacity-35 group-hover:opacity-55 transition-opacity duration-500" />
-                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-400/15 to-transparent opacity-70 animate-pulse" />
+                <div className="flex-1 relative overflow-auto pb-32">
+                    <Outlet />
+                </div>
+
+                <div ref={bottomDockRef} className="fixed bottom-3 left-1/2 -translate-x-1/2 z-[60] pointer-events-none">
+                    <div className="relative group pointer-events-auto">
+                        <div className="absolute -inset-4 pointer-events-none">
+                            <div className="absolute inset-0 bg-cyan-500/10 blur-2xl opacity-35 group-hover:opacity-55 transition-opacity duration-500" />
+                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-400/15 to-transparent opacity-70 animate-pulse" />
+                        </div>
+
+                        <div className="relative rounded-2xl border border-cyan-500/20 bg-gradient-to-b from-gray-950/70 to-gray-950/45 shadow-[0_0_26px_rgba(34,211,238,0.12)] backdrop-blur-md overflow-hidden">
+                            <div className="absolute inset-0 pointer-events-none">
+                                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-400/60 to-transparent" />
+                                <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/6 via-transparent to-transparent" />
+                                <div className="absolute -left-10 -top-10 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl opacity-40 group-hover:opacity-60 transition-opacity duration-700" />
+                                <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl opacity-35 group-hover:opacity-55 transition-opacity duration-700" />
                             </div>
 
-                            <div className="relative rounded-2xl border border-cyan-500/20 bg-gradient-to-b from-gray-950/70 to-gray-950/45 shadow-[0_0_26px_rgba(34,211,238,0.12)] backdrop-blur-md overflow-hidden">
-                                <div className="absolute inset-0 pointer-events-none">
-                                    <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-cyan-400/60 to-transparent" />
-                                    <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/6 via-transparent to-transparent" />
-                                    <div className="absolute -left-10 -top-10 w-40 h-40 bg-cyan-500/10 rounded-full blur-3xl opacity-40 group-hover:opacity-60 transition-opacity duration-700" />
-                                    <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-purple-500/10 rounded-full blur-3xl opacity-35 group-hover:opacity-55 transition-opacity duration-700" />
+                            <div className="relative flex items-center gap-2 px-3 py-2">
+                                <div className="flex items-center gap-1.5 rounded-xl border border-gray-800/70 bg-gray-900/20 px-1.5 py-1">
+                                    {NAV_ITEMS.slice(0, 7).map((item) => {
+                                        const active = location.pathname === item.path;
+                                        return (
+                                            <Link
+                                                key={`dock:${item.path}`}
+                                                to={item.path}
+                                                title={active ? `${item.label} (active)` : item.label}
+                                                className={`w-10 h-10 flex items-center justify-center rounded-xl border transition-all ${
+                                                    active
+                                                        ? 'border-cyan-300/60 bg-cyan-500/10 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.18)]'
+                                                        : 'border-gray-800/70 bg-gray-950/20 text-gray-300 hover:bg-gray-800/50 hover:border-cyan-500/20'
+                                                }`}
+                                            >
+                                                <rux-icon icon={item.icon} size="extra-small" className={active ? 'text-cyan-200' : 'text-gray-400'}></rux-icon>
+                                            </Link>
+                                        );
+                                    })}
                                 </div>
 
-                                <div className="relative flex items-center gap-2 px-3 py-2">
-                                    <div className="flex items-center gap-1.5 rounded-xl border border-gray-800/70 bg-gray-900/20 px-1.5 py-1">
-                                        {NAV_ITEMS.slice(0, 7).map((item) => {
-                                            const active = location.pathname === item.path;
-                                            return (
-                                                <Link
-                                                    key={`dock:${item.path}`}
-                                                    to={item.path}
-                                                    title={active ? `${item.label} (active)` : item.label}
-                                                    className={`w-10 h-10 flex items-center justify-center rounded-xl border transition-all ${
-                                                        active
-                                                            ? 'border-cyan-300/60 bg-cyan-500/10 text-cyan-100 shadow-[0_0_18px_rgba(34,211,238,0.18)]'
-                                                            : 'border-gray-800/70 bg-gray-950/20 text-gray-300 hover:bg-gray-800/50 hover:border-cyan-500/20'
-                                                    }`}
-                                                >
-                                                    <rux-icon icon={item.icon} size="extra-small" className={active ? 'text-cyan-200' : 'text-gray-400'}></rux-icon>
-                                                </Link>
-                                            );
-                                        })}
+                                <div className="w-px h-9 bg-gray-800/80 mx-1" />
+
+                                <button
+                                    type="button"
+                                    onClick={triggerHope}
+                                    title="Send it hope — spark the horizon"
+                                    className="relative overflow-hidden flex items-center gap-2 px-3 py-2 rounded-xl border border-cyan-400/35 bg-cyan-500/10 text-cyan-100 shadow-[0_0_22px_rgba(34,211,238,0.18)] hover:bg-cyan-500/15 hover:border-cyan-300/55 transition-all"
+                                >
+                                    <div className="absolute inset-0 pointer-events-none">
+                                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-300/10 to-transparent" />
                                     </div>
 
-                                    <div className="w-px h-9 bg-gray-800/80 mx-1" />
-
-                                    <button
-                                        type="button"
-                                        onClick={triggerHope}
-                                        title="Send it hope — spark the horizon"
-                                        className="relative overflow-hidden flex items-center gap-2 px-3 py-2 rounded-xl border border-cyan-400/35 bg-cyan-500/10 text-cyan-100 shadow-[0_0_22px_rgba(34,211,238,0.18)] hover:bg-cyan-500/15 hover:border-cyan-300/55 transition-all"
-                                    >
-                                        <div className="absolute inset-0 pointer-events-none">
-                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-cyan-300/10 to-transparent" />
-                                        </div>
-
-                                        {hopeBurstKey ? (
-                                            <div key={hopeBurstKey} className="absolute inset-0 pointer-events-none">
-                                                <div className="absolute left-1/2 top-1/2 w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-400/20 blur-md animate-ping" />
-                                                <div className="absolute left-1/2 top-1/2 w-16 h-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-300/30 animate-ping" />
-                                                <div className="absolute -left-2 top-1/2 -translate-y-1/2 rotate-6 opacity-70">
-                                                    <rux-icon icon="offline-bolt" size="extra-small" className="text-cyan-200"></rux-icon>
-                                                </div>
-                                                <div className="absolute -right-2 top-1/2 -translate-y-1/2 -rotate-6 opacity-70">
-                                                    <rux-icon icon="offline-bolt" size="extra-small" className="text-cyan-200"></rux-icon>
-                                                </div>
+                                    {hopeBurstKey ? (
+                                        <div key={hopeBurstKey} className="absolute inset-0 pointer-events-none">
+                                            <div className="absolute left-1/2 top-1/2 w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-400/20 blur-md animate-ping" />
+                                            <div className="absolute left-1/2 top-1/2 w-16 h-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-300/30 animate-ping" />
+                                            <div className="absolute -left-2 top-1/2 -translate-y-1/2 rotate-6 opacity-70">
+                                                <rux-icon icon="offline-bolt" size="extra-small" className="text-cyan-200"></rux-icon>
                                             </div>
-                                        ) : null}
+                                            <div className="absolute -right-2 top-1/2 -translate-y-1/2 -rotate-6 opacity-70">
+                                                <rux-icon icon="offline-bolt" size="extra-small" className="text-cyan-200"></rux-icon>
+                                            </div>
+                                        </div>
+                                    ) : null}
 
-                                        <rux-icon icon="flash-auto" size="extra-small" className="text-cyan-200"></rux-icon>
-                                        <span className="text-[10px] font-bold uppercase tracking-[0.22em]">Send Hope</span>
-                                    </button>
-                                </div>
+                                    <rux-icon icon="flash-auto" size="extra-small" className="text-cyan-200"></rux-icon>
+                                    <span className="text-[10px] font-bold uppercase tracking-[0.22em]">Send Hope</span>
+                                </button>
                             </div>
                         </div>
                     </div>

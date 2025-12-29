@@ -100,6 +100,11 @@ node scripts/test-operator-reality-panel.mjs
   - Optional:
     - `index=<n>` (default `0`) to choose among matches
 
+- `GET /v1/renderer/scroll-virtual-grid?to=near-bottom`
+  - Scrolls the Card Library `VirtualCardGrid` scroller (`[data-virtual-grid-scroll-container="true"]`)
+  - Params:
+    - `to=top|bottom|near-top|near-bottom` (or provide `top=<px>` / `delta=<px>`)
+
 - `GET /v1/renderer/text?selector=<css>`
   - Returns `.textContent` for the first match
 

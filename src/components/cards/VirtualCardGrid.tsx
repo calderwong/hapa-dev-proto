@@ -141,7 +141,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
   });
   
   // Calculate row height and total height
-  const rowHeight = cardHeight + 24; // card height + gap
+  const rowHeight = cardHeight + 16; // card height + gap (tightened)
   const totalRows = Math.ceil(cards.length / effectiveColumns);
   const totalHeight = totalRows * rowHeight;
   
@@ -350,7 +350,7 @@ export const VirtualCardGrid: React.FC<VirtualCardGridProps> = ({
             style={{
               transform: `translateY(${visibleRange.offsetY}px)`,
               display: 'grid',
-              gap: '1.5rem',
+              gap: '1rem',
               gridTemplateColumns: `repeat(${effectiveColumns}, minmax(240px, 1fr))`,
               gridAutoRows: `${cardHeight}px`,
             }}
