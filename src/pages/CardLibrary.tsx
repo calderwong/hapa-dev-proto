@@ -9,6 +9,22 @@ import VirtualCardGrid from '../components/cards/VirtualCardGrid';
 
 // Feature flag for progressive loading (set to true to use new system)
 const USE_PROGRESSIVE_LOADING = true;
+// Temporary feature flag for pagination refactor (phase A)
+const USE_PAGINATION = true;
+
+type Page = {
+    cursor: number;
+    items: CardIndexEntry[];
+    hasMore: boolean;
+    nextCursor: number;
+    totalLength: number | null;
+};
+
+type PageCache = {
+    prev?: Page;
+    current?: Page;
+    next?: Page;
+};
 
 import {
     calculateCardQuality,
@@ -149,6 +165,12 @@ const CardLibrary: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const [cards, setCards] = useState<CardIndexEntry[]>([]);
     const cardsRef = useRef<CardIndexEntry[]>([]);
+    const [pageSize, setPageSize] = useState(120);
+    const [pageCursor, setPageCursor] = useState(0);
+    const [totalLength, setTotalLength] = useState<number | null>(null);
+    const [pages, setPages] = useState<PageCache>({});
+    const [isFetchingPage, setIsFetchingPage] = useState(false);
+    const [filtersHash, setFiltersHash] = useState<string>('');
     const [indexHasMore, setIndexHasMore] = useState(false);
     const [indexCursor, setIndexCursor] = useState<number | undefined>(undefined);
     const [indexTotalLength, setIndexTotalLength] = useState<number | null>(null);
@@ -259,20 +281,32 @@ const CardLibrary: React.FC = () => {
         try {
             const w: any = window as any;
             if (!w.__HAPA_DEBUG_STATE__ || typeof w.__HAPA_DEBUG_STATE__ !== 'object') w.__HAPA_DEBUG_STATE__ = {};
-            w.__HAPA_DEBUG_STATE__.cardLibrary = {
+            const baseState: any = {
                 ...(w.__HAPA_DEBUG_STATE__.cardLibrary || {}),
                 active: true,
                 updatedAt: new Date().toISOString(),
                 cardsCount: cards.length,
-                indexCursor,
-                indexHasMore,
-                indexTotalLength,
-                isFetchingMore,
                 loading,
                 error,
             };
+
+            if (USE_PAGINATION) {
+                baseState.pageCursor = pageCursor;
+                baseState.pageSize = pageSize;
+                baseState.pageTotalLength = totalLength;
+                baseState.pageCurrentCount = pages.current?.items?.length ?? 0;
+                baseState.pageHasMore = pages.current?.hasMore ?? false;
+                baseState.pageNextCursor = pages.next?.cursor ?? null;
+            } else {
+                baseState.indexCursor = indexCursor;
+                baseState.indexHasMore = indexHasMore;
+                baseState.indexTotalLength = indexTotalLength;
+                baseState.isFetchingMore = isFetchingMore;
+            }
+
+            w.__HAPA_DEBUG_STATE__.cardLibrary = baseState;
         } catch {}
-    }, [cards.length, indexCursor, indexHasMore, indexTotalLength, isFetchingMore, loading, error]);
+    }, [cards.length, error, indexCursor, indexHasMore, indexTotalLength, isFetchingMore, loading, pageCursor, pageSize, pages.current, pages.next, totalLength]);
 
     // Check Local Vision status
     useEffect(() => {
@@ -605,6 +639,121 @@ const CardLibrary: React.FC = () => {
         return enriched;
     };
 
+    const mapIndexItemsToEntries = useCallback((items: any[]): CardIndexEntry[] => {
+        return items
+            .map((data: any) => {
+                const cardId = String(data?.cardId || '');
+                if (!cardId) return null;
+                return {
+                    cardId,
+                    name: typeof data?.name === 'string' ? data.name : undefined,
+                    createdAt: typeof data?.createdAt === 'string' ? data.createdAt : '',
+                    coreName: typeof data?.coreName === 'string' ? data.coreName : data?.cardId,
+                    thumbnail: typeof data?.thumbnail === 'string' ? data.thumbnail : undefined,
+                    mediaKind: data?.mediaKind,
+                    mediaLocalPath: typeof data?.mediaLocalPath === 'string' ? data.mediaLocalPath : undefined,
+                    parentCardId: typeof data?.parentCardId === 'string' ? data.parentCardId : undefined,
+                    raw: data,
+                } as CardIndexEntry;
+            })
+            .filter(Boolean) as CardIndexEntry[];
+    }, []);
+
+    const fetchPage = useCallback(
+        async (cursor: number, limit: number): Promise<Page> => {
+            if (typeof window === 'undefined' || !window.electronAPI) {
+                throw new Error('Card Library requires the Electron backend.');
+            }
+            const api = (window as any).electronAPI as any;
+            if (!api?.nexusIndexPage) {
+                throw new Error('Card Library requires the Electron backend.');
+            }
+
+            const res = await api.nexusIndexPage({
+                coreName: CARD_LIBRARY_CORE_NAME,
+                cursor,
+                limit,
+                direction: 'reverse',
+            });
+
+            const items = Array.isArray(res?.items) ? res.items : [];
+            const entries = mapIndexItemsToEntries(items);
+            const nextCursor = typeof res?.nextCursor === 'number' ? res.nextCursor : cursor + items.length;
+            const hasMore = !!res?.hasMore;
+            const tl = typeof res?.totalLength === 'number' ? res.totalLength : null;
+
+            return {
+                cursor,
+                items: entries,
+                hasMore,
+                nextCursor,
+                totalLength: tl,
+            };
+        },
+        [mapIndexItemsToEntries],
+    );
+
+    const loadPage = useCallback(
+        async (cursor: number) => {
+            if (!USE_PAGINATION) return;
+            const clamped = Math.max(0, Number.isFinite(cursor) ? cursor : 0);
+            setIsFetchingPage(true);
+            setError(null);
+            try {
+                const page = await fetchPage(clamped, pageSize);
+                setTotalLength((prev) => page.totalLength ?? prev);
+                setPageCursor(page.cursor);
+                setPages({ current: page });
+                setCards(page.items);
+
+                if (page.hasMore) {
+                    const nextCursor = page.nextCursor;
+                    void (async () => {
+                        try {
+                            const nextPage = await fetchPage(nextCursor, pageSize);
+                            setPages((prev) => {
+                                if (prev.current?.cursor !== page.cursor) return prev;
+                                return { ...prev, next: nextPage };
+                            });
+                        } catch {
+                            // ignore prefetch errors
+                        }
+                    })();
+                } else {
+                    setPages((prev) => ({ ...prev, next: undefined }));
+                }
+            } catch (e: any) {
+                setError(e?.message || 'Failed to load page');
+            } finally {
+                setIsFetchingPage(false);
+            }
+        },
+        [fetchPage, pageSize],
+    );
+
+    const computeFiltersHash = useCallback(() => {
+        return JSON.stringify({
+            search,
+            sortBy,
+            filterTiers: [...filterTiers].sort(),
+            filterTypes: [...filterTypes].sort(),
+            activeSetId,
+        });
+    }, [search, sortBy, filterTiers, filterTypes, activeSetId]);
+
+    useEffect(() => {
+        if (!USE_PAGINATION) return;
+        const nextHash = computeFiltersHash();
+        if (nextHash === filtersHash) return;
+        setFiltersHash(nextHash);
+        setPageCursor(0);
+        setTotalLength(null);
+        setPages({});
+        setCards([]);
+        void loadPage(0);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [computeFiltersHash, filtersHash]);
+
     const loadCards = async (preferredCardId?: string | null) => {
         if (typeof window === 'undefined' || !window.electronAPI) {
             setError('Card Library requires the Electron backend.');
@@ -612,6 +761,25 @@ const CardLibrary: React.FC = () => {
         }
 
         const api = (window as any).electronAPI as any;
+
+        if (USE_PAGINATION) {
+            setLoading(true);
+            setError(null);
+            setPages({});
+            setPageCursor(0);
+            setTotalLength(null);
+            setCards([]);
+            try {
+                const settings = api.nexusGetSettings ? await api.nexusGetSettings() : { globalPageSize: 120 };
+                const ps = typeof settings?.globalPageSize === 'number' ? settings.globalPageSize : 120;
+                setPageSize(ps);
+            } catch {
+                // ignore settings fetch error, fall back to default page size
+            }
+            await loadPage(0);
+            setLoading(false);
+            return;
+        }
 
         // Progressive / incremental path (preferred)
         if (USE_PROGRESSIVE_LOADING && api.nexusIndexPage) {
@@ -1658,34 +1826,15 @@ const CardLibrary: React.FC = () => {
         );
     };
 
-    // Calculate lineage (ancestors/descendants) for all cards
-    const lineageMap = useMemo(() => {
-        if (cards.length === 0) return new Map<string, LineageInfo>();
-
-        // Build lineage entries from cards
-        const lineageEntries = cards.map(c => ({
-            cardId: c.cardId,
-            parentCardId: c.cardRecord?.parentCardId || c.parentCardId || null,
-            children: c.cardRecord?.children || [],
-        }));
-
-        return calculateAllLineage(lineageEntries);
-    }, [cards]);
-
-    // Get the Hand context for drag-to-hand functionality
-    const { addCard: addToHand, hasCard: isInHand } = useHand();
-
-    // Enhanced filtering and sorting with quality system
     const filteredCards = useMemo(() => {
-        let result = [...cards];
+        const source = USE_PAGINATION ? (pages.current?.items ?? []) : cards;
+        let result = [...source];
 
         // Filter by Card Set (first, to narrow scope)
-        if (activeSetId && activeSetCardIds.length > 0) {
+        if (activeSetId) {
             const setCardIdSet = new Set(activeSetCardIds);
-            result = result.filter(c => {
-                // Direct member of the set
+            result = result.filter((c) => {
                 if (setCardIdSet.has(c.cardId)) return true;
-                // Child of a set member (loop videos, extractions, etc.)
                 const parentId = c.cardRecord?.parentCardId || c.parentCardId;
                 if (parentId && setCardIdSet.has(parentId)) return true;
                 return false;
@@ -1695,7 +1844,7 @@ const CardLibrary: React.FC = () => {
         // Text search filter
         if (search) {
             const q = search.toLowerCase();
-            result = result.filter(c =>
+            result = result.filter((c) =>
                 (c.name && c.name.toLowerCase().includes(q)) ||
                 c.cardId.toLowerCase().includes(q) ||
                 (c.provider && c.provider.toLowerCase().includes(q))
@@ -1704,7 +1853,7 @@ const CardLibrary: React.FC = () => {
 
         // Filter by tier
         if (filterTiers.length > 0) {
-            result = result.filter(c => {
+            result = result.filter((c) => {
                 const quality = calculateCardQuality(c);
                 return filterTiers.includes(quality.tier);
             });
@@ -1712,7 +1861,7 @@ const CardLibrary: React.FC = () => {
 
         // Filter by type
         if (filterTypes.length > 0) {
-            result = result.filter(c => {
+            result = result.filter((c) => {
                 const cardType = getCardType(c);
                 return filterTypes.includes(cardType);
             });
@@ -1739,7 +1888,26 @@ const CardLibrary: React.FC = () => {
         });
 
         return result;
-    }, [cards, search, filterTiers, filterTypes, sortBy, activeSetId, activeSetCardIds]);
+    }, [USE_PAGINATION, pages.current, cards, search, filterTiers, filterTypes, sortBy, activeSetId, activeSetCardIds]);
+
+    const displayCards = useMemo(() => filteredCards, [filteredCards]);
+
+    // Calculate lineage (ancestors/descendants) for all cards
+    const lineageMap = useMemo(() => {
+        if (cards.length === 0) return new Map<string, LineageInfo>();
+
+        // Build lineage entries from cards
+        const lineageEntries = cards.map(c => ({
+            cardId: c.cardId,
+            parentCardId: c.cardRecord?.parentCardId || c.parentCardId || null,
+            children: c.cardRecord?.children || [],
+        }));
+
+        return calculateAllLineage(lineageEntries);
+    }, [cards]);
+
+    // Get the Hand context for drag-to-hand functionality
+    const { addCard: addToHand, hasCard: isInHand } = useHand();
 
     useEffect(() => {
         try {
@@ -3342,8 +3510,40 @@ const CardLibrary: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Progressive Loading Grid (new) */}
-                        {USE_PROGRESSIVE_LOADING && filteredCards.length > 0 && (
+                        {/* Pagination path (phase A) */}
+                        {USE_PAGINATION && displayCards.length > 0 && (
+                            <VirtualCardGrid
+                                cards={displayCards}
+                                onCardClick={(card, e) => handleCardClick(card, e)}
+                                onCardDragStart={(e, card) => handleDragStart(e, card)}
+                                getPortalColorMode={(card) => (card?.provider === 'revid' ? 'red' : 'blue')}
+                                selectedCardId={selected?.cardId}
+                                className="flex-1 min-h-0 pb-10"
+                                // Pagination is the source of truth; no infinite scroll in commit A
+                                onRequestMore={undefined}
+                                isFetchingMore={false}
+                                renderCard={(card) => {
+                                    const quality = calculateCardQuality(card);
+                                    const isSetCard = card.cardType === 'set';
+                                    const isMergedSet = card.cardType === 'merged-set';
+                                    const containedCount = card.containedCardCount || card.containedCards?.length || 0;
+                                    return (
+                                        <CardContent
+                                            card={card}
+                                            quality={quality}
+                                            isSetCard={isSetCard}
+                                            isMergedSet={isMergedSet}
+                                            containedCount={containedCount}
+                                            renderThumbnail={renderThumbnail}
+                                            lineageMap={lineageMap}
+                                        />
+                                    );
+                                }}
+                            />
+                        )}
+
+                        {/* Progressive Loading Grid (existing path) */}
+                        {!USE_PAGINATION && USE_PROGRESSIVE_LOADING && filteredCards.length > 0 && (
                             <VirtualCardGrid
                                 cards={filteredCards}
                                 onCardClick={(card, e) => handleCardClick(card, e)}
