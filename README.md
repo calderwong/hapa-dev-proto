@@ -140,6 +140,37 @@ This will:
 
 ---
 
+## Hapa Forge Studio (Astro Forge)
+
+The `hapa-forge-studio/` subapp is a standalone Vite/React project for the Astro Forge experience.
+
+### Setup
+```bash
+cd hapa-forge-studio
+npm install
+```
+
+### Run dev
+```bash
+npm run dev -- --host
+```
+Then open the shown URL (defaults to port 5173). This runs browser-only; no Electron bridge required.
+
+### Build
+```bash
+npm run build
+```
+Output will be written to `hapa-forge-studio/dist/`.
+
+Key entry points:
+- `src/pages/LandingPage.tsx` – main entry surface.
+- `src/features/ships/AstraForgeApp.tsx` – ship/forge UI.
+- `src/features/character/CharacterStudioPage.tsx` – character generation surface.
+- `src/features/media/MediaStudioPage.tsx` – media/Veo tools.
+- `src/features/port/PortToHapaPage.tsx` – export/porting helpers.
+
+---
+
 ## Configuration
 
 All runtime configuration is done inside the **Settings** page in the app:

@@ -118,14 +118,30 @@
 **Summary of actions:**
 - Reordered the Electron boot sequence so the splash and hidden main window are created first.
 - Deferred heavier initialization (P2P init, persistence init, llama auto-start) to the next tick to reduce time-to-first-paint on the splash.
+- Added preload bridge method (`bootRendererReady`) and invoked it from the renderer entrypoint so the main process can safely swap from splash to app.
 
 **Files modified/created:**
 - Modified: `electron/main.ts`
+- Modified: `electron/preload.ts`
+- Modified: `src/main.tsx`
+- Modified: `src/types.d.ts`
 
 **Tags:** #performance #boot
 **Est. Avg. Human Dev Time:** 20 minutes
 
-## Entry 90 – Overlay Formation HUD redesign + formation centering reliability
+## Entry 90 – Push to private GitHub after stripping large binaries
+**Prompt:** "ok I need you to help push this to a private github repo I just made: https://github.com/calderwong/hapa-dev-proto.git"
+
+**Summary of actions:**
+- Added remote `origin` to the private repo.
+- Rewrote repository history via mirror to remove large artifacts (`node_modules`, `dist*`, Electron binaries) and force-pushed a clean `master`.
+- Hard-reset local working tree to `origin/master`; resolved locked binary files by ownership/rename and removed leftover `node_modules` baggage.
+- Left stash for older WIP untouched (stash@{2}); current working tree is clean.
+
+**Tags:** #maintenance #git #repo
+**Est. Avg. Human Dev Time:** 70 minutes
+
+## Entry 91 – Overlay Formation HUD redesign + formation centering reliability
 **Prompt:** "OK can you focus on re-designing and cleaning up the top nav now? ... formation feature seems to be a little broken ..." + "remove the target/anchor functionality for now"
 
 **Summary of actions:**

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Test</title>
+    <style>
+        .tab-button { padding: 10px 20px; margin: 5px; background: #333; color: white; border: none; cursor: pointer; }
+        .tab-button.active { background: #f59e0b; }
+        .tab-content { display: none; padding: 20px; border: 1px solid #ccc; margin: 10px 0; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body>
+    <h1>Simple Tab Test</h1>
+    
+    <button class="tab-button active" data-tab="tab1">Tab 1</button>
+    <button class="tab-button" data-tab="tab2">Tab 2</button>
+    <button class="tab-button" data-tab="tab3">Tab 3</button>
+    
+    <div id="tab1" class="tab-content active">
+        <h2>Tab 1 Content</h2>
+        <p>This is the content for tab 1.</p>
+    </div>
+    
+    <div id="tab2" class="tab-content">
+        <h2>Tab 2 Content</h2>
+        <p>This is the content for tab 2.</p>
+    </div>
+    
+    <div id="tab3" class="tab-content">
+        <h2>Tab 3 Content</h2>
+        <p>This is the content for tab 3.</p>
+    </div>
+
+    <script>
+        console.log('Script loaded');
+        
+        function switchTab(tabName) {
+            console.log('Switching to tab:', tabName);
+            
+            // Update tab buttons
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabName).classList.add('active');
+        }
+        
+        // Add event listeners
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', (e) => {
+                console.log('Button clicked:', e.target.dataset.tab);
+                switchTab(e.target.dataset.tab);
+            });
+        });
+        
+        console.log('Event listeners added');
+    </script>
+</body>
+</html>

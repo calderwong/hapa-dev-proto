@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Navigation Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: white;
+            padding: 20px;
+        }
+        
+        .tab-button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        .tab-button.active {
+            background: #f59e0b;
+        }
+        
+        .tab-content {
+            display: block;
+            padding: 20px;
+            background: #333;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+        
+        .tab-content.hidden {
+            display: none;
+        }
+        
+        .test-status {
+            background: #2d1b69;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-status">
+        <h2>Tab Navigation Test Page</h2>
+        <p>This is a simplified test to verify tab switching functionality.</p>
+        <p id="status">Status: Testing...</p>
+    </div>
+    
+    <nav>
+        <button class="tab-button active" data-tab="tab1">Tab 1</button>
+        <button class="tab-button" data-tab="tab2">Tab 2</button>
+        <button class="tab-button" data-tab="tab3">Tab 3</button>
+    </nav>
+    
+    <div id="tab1" class="tab-content">
+        <h3>Tab 1 Content</h3>
+        <p>This is the content for Tab 1. If you can see this, tab switching is working!</p>
+    </div>
+    
+    <div id="tab2" class="tab-content hidden">
+        <h3>Tab 2 Content</h3>
+        <p>This is the content for Tab 2. If you can see this after clicking "Tab 2", the system is working correctly!</p>
+    </div>
+    
+    <div id="tab3" class="tab-content hidden">
+        <h3>Tab 3 Content</h3>
+        <p>This is the content for Tab 3. Great job - tab navigation is fully functional!</p>
+    </div>
+    
+    <script>
+        // Simple tab switching test
+        document.addEventListener('DOMContentLoaded', function() {
+            const statusEl = document.getElementById('status');
+            
+            try {
+                // Test basic DOM manipulation
+                const buttons = document.querySelectorAll('.tab-button');
+                const contents = document.querySelectorAll('.tab-content');
+                
+                if (buttons.length === 0) {
+                    throw new Error('No tab buttons found');
+                }
+                
+                if (contents.length === 0) {
+                    throw new Error('No tab content found');
+                }
+                
+                // Add click listeners
+                buttons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        const tabName = this.dataset.tab;
+                        
+                        // Update buttons
+                        buttons.forEach(btn => btn.classList.remove('active'));
+                        this.classList.add('active');
+                        
+                        // Update content
+                        contents.forEach(content => content.classList.add('hidden'));
+                        document.getElementById(tabName).classList.remove('hidden');
+                        
+                        statusEl.textContent = `Status: Successfully switched to ${tabName}`;
+                    });
+                });
+                
+                statusEl.textContent = 'Status: Tab system initialized successfully! Click the tabs above to test.';
+                statusEl.style.color = '#4ade80';
+                
+            } catch (error) {
+                statusEl.textContent = `Status: Error - ${error.message}`;
+                statusEl.style.color = '#ef4444';
+                console.error('Tab system error:', error);
+            }
+        });
+    </script>
+</body>
+</html>
