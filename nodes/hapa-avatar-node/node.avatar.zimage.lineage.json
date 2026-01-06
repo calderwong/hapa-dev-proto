@@ -1,0 +1,50 @@
+{
+  "id": "node.avatar.zimage.lineage",
+  "label": "Avatar Lineage Expansion",
+  "type": [
+    "media",
+    "cardgen",
+    "lore",
+    "router"
+  ],
+  "description": "Generates avatar-based phamiliar lineages via Z-Image img2img expansion with variant styles, poses, lore, and card integration.",
+  "entrypoint": "main.ts",
+  "ui": {
+    "surface": "avatar-lineage-surface",
+    "features": [
+      "avatar upload",
+      "style variant config",
+      "pose generator",
+      "lineage preview",
+      "metadata export",
+      "forge bridge"
+    ]
+  },
+  "api": {
+    "expand": "POST /expand/avatar",
+    "status": "GET /status/:jobId",
+    "preview": "GET /preview/:avatarName",
+    "export": "POST /export/:avatarName",
+    "send": "POST /send/:targetNode"
+  },
+  "modules": [
+    "LineageEngine",
+    "ZImageClient",
+    "CardGenAdapter",
+    "LoreWriter",
+    "ForgeBridge"
+  ],
+  "storage": {
+    "media_dir": "media/avatars/{name}/",
+    "lineage_file": "lineage.json",
+    "card_yaml": "index.card.yaml",
+    "lore_dir": "lore/"
+  },
+  "activation_modes": [
+    "manual",
+    "watcher",
+    "embed"
+  ],
+  "status": "alpha",
+  "version": "0.1.0"
+}

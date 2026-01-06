@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hapa Keys Node</title>
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --panel: rgba(255, 255, 255, 0.06);
+        --border: rgba(255, 255, 255, 0.12);
+        --text: rgba(255, 255, 255, 0.92);
+        --muted: rgba(255, 255, 255, 0.62);
+        --accent: #7dd3fc;
+        --danger: #fb7185;
+        --ok: #34d399;
+        --warn: #fbbf24;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--sans);
+        background: radial-gradient(1200px 600px at 10% 10%, rgba(125, 211, 252, 0.10), transparent 60%),
+          radial-gradient(900px 600px at 70% 40%, rgba(52, 211, 153, 0.08), transparent 55%),
+          var(--bg);
+        color: var(--text);
+      }
+
+      .wrap {
+        max-width: 1080px;
+        padding: 24px;
+        margin: 0 auto;
+      }
+
+      .title {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .title h1 {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: 0.5px;
+      }
+
+      .title .sub {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        backdrop-filter: blur(10px);
+      }
+
+      .panel h2 {
+        margin: 0 0 12px 0;
+        font-size: 14px;
+        letter-spacing: 0.3px;
+        color: rgba(255, 255, 255, 0.86);
+      }
+
+      label {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.30);
+        color: var(--text);
+        font-family: var(--mono);
+        outline: none;
+      }
+
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .row1 {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      button {
+        border: 1px solid var(--border);
+        background: rgba(125, 211, 252, 0.12);
+        color: var(--text);
+        padding: 10px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-family: var(--mono);
+      }
+
+      button.secondary {
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      button.danger {
+        background: rgba(251, 113, 133, 0.14);
+        border-color: rgba(251, 113, 133, 0.35);
+      }
+
+      .status {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+
+      .status .ok { color: var(--ok); }
+      .status .warn { color: var(--warn); }
+      .status .bad { color: var(--danger); }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      th, td {
+        text-align: left;
+        padding: 10px 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+        vertical-align: top;
+      }
+
+      th {
+        color: rgba(255, 255, 255, 0.75);
+        font-weight: 600;
+      }
+
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        font-size: 11px;
+      }
+
+      .pill.ok { border-color: rgba(52, 211, 153, 0.40); color: rgba(52, 211, 153, 0.95); }
+      .pill.bad { border-color: rgba(251, 113, 133, 0.40); color: rgba(251, 113, 133, 0.95); }
+
+      .muted { color: var(--muted); }
+
+      .inline-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .inline-actions button {
+        padding: 6px 10px;
+      }
+
+      .footer {
+        margin-top: 14px;
+        font-size: 12px;
+        color: var(--muted);
+        font-family: var(--mono);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="title">
+        <h1>Hapa Keys Node</h1>
+        <div class="sub">centralized key vault (loopback-by-default)</div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <h2>Connection</h2>
+          <div class="row">
+            <div>
+              <label for="baseUrl">Base URL</label>
+              <input id="baseUrl" type="text" />
+            </div>
+            <div>
+              <label for="token">Bearer token</label>
+              <input id="token" type="password" autocomplete="off" />
+            </div>
+          </div>
+          <div class="actions">
+            <button id="btnConnect">Connect</button>
+            <button id="btnRefresh" class="secondary">Refresh Keys</button>
+            <button id="btnSelfTest" class="secondary">Self-Test</button>
+          </div>
+          <div id="status" class="status"></div>
+          <div class="footer">Token is persisted server-side in <span class="muted">.node_token</span>. This page never stores keys server-side; it only calls the node API.</div>
+        </div>
+
+        <div class="panel">
+          <h2>Set Key</h2>
+          <div class="row">
+            <div>
+              <label for="service">Service</label>
+              <input id="service" type="text" placeholder="gemini" />
+            </div>
+            <div>
+              <label for="value">Value</label>
+              <input id="value" type="password" autocomplete="off" placeholder="(hidden)" />
+            </div>
+          </div>
+          <div class="actions">
+            <button id="btnSet">Save</button>
+            <button id="btnClear" class="secondary">Clear</button>
+          </div>
+          <div class="row1" style="margin-top: 12px;">
+            <div>
+              <label for="output">Output</label>
+              <textarea id="output" readonly></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top: 16px;">
+        <h2>Keys</h2>
+        <div id="keys"></div>
+      </div>
+    </div>
+
+    <script>
+      const elBaseUrl = document.getElementById('baseUrl');
+      const elToken = document.getElementById('token');
+      const elStatus = document.getElementById('status');
+      const elKeys = document.getElementById('keys');
+      const elService = document.getElementById('service');
+      const elValue = document.getElementById('value');
+      const elOutput = document.getElementById('output');
+
+      const btnConnect = document.getElementById('btnConnect');
+      const btnRefresh = document.getElementById('btnRefresh');
+      const btnSet = document.getElementById('btnSet');
+      const btnClear = document.getElementById('btnClear');
+      const btnSelfTest = document.getElementById('btnSelfTest');
+
+      function isLocalhost() {
+        const h = String(window.location.hostname || '').toLowerCase();
+        return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.startsWith('127.');
+      }
+
+      const LS_TOKEN = 'hapa_keys_node_dev_token_v1';
+
+      function normalizeToken(t) {
+        const s = String(t || '').trim();
+        if (!s) return '';
+        const lower = s.toLowerCase();
+        if (lower.startsWith('bearer ')) return s.slice(7).trim();
+        return s;
+      }
+
+      function setStatus(kind, msg) {
+        const cls = kind === 'ok' ? 'ok' : kind === 'warn' ? 'warn' : 'bad';
+        elStatus.innerHTML = '<span class="' + cls + '">' + escapeHtml(msg) + '</span>';
+      }
+
+      function appendOutput(obj) {
+        const text = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+        elOutput.value = (elOutput.value ? (elOutput.value + '\n') : '') + text;
+      }
+
+      function clearOutput() {
+        elOutput.value = '';
+      }
+
+      function escapeHtml(s) {
+        return String(s || '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function baseUrl() {
+        return String(elBaseUrl.value || '').trim().replace(/\/+$/, '');
+      }
+
+      function token() {
+        return normalizeToken(elToken.value);
+      }
+
+      async function apiFetch(path, options) {
+        const url = baseUrl() + path;
+        const headers = Object.assign({}, (options && options.headers) ? options.headers : {});
+        const tok = token();
+        if (tok) headers['Authorization'] = 'Bearer ' + tok;
+
+        const opts = Object.assign({}, options || {}, { headers });
+        const res = await fetch(url, opts);
+        const text = await res.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
+        if (!res.ok) {
+          const msg = typeof data === 'object' && data && data.detail ? data.detail : String(text || res.statusText);
+          throw new Error('HTTP ' + res.status + ': ' + msg);
+        }
+        return data;
+      }
+
+      async function connect() {
+        clearOutput();
+        try {
+          const health = await apiFetch('/health', { method: 'GET', headers: {} });
+          setStatus('ok', 'health: ok | keys_stored=' + health.keys_stored);
+          appendOutput({ health });
+
+          const caps = await apiFetch('/capabilities', { method: 'GET' });
+          appendOutput({ capabilities: caps });
+
+          if (isLocalhost()) {
+            const tok = token();
+            if (tok) localStorage.setItem(LS_TOKEN, tok);
+          }
+
+          await refreshKeys();
+        } catch (e) {
+          setStatus('bad', String(e.message || e));
+          appendOutput(String(e.message || e));
+        }
+      }
+
+      function renderKeys(items) {
+        if (!Array.isArray(items) || items.length === 0) {
+          elKeys.innerHTML = '<div class="muted">No keys yet.</div>';
+          return;
+        }
+
+        let html = '';
+        html += '<table>';
+        html += '<thead><tr>';
+        html += '<th>service</th>';
+        html += '<th>configured</th>';
+        html += '<th>source</th>';
+        html += '<th>updated_at</th>';
+        html += '<th>actions</th>';
+        html += '</tr></thead>';
+        html += '<tbody>';
+
+        for (const it of items) {
+          const svc = String(it.service || '');
+          const configured = !!it.configured;
+          const source = String(it.source || '');
+          const updated = it.updated_at ? String(it.updated_at) : '';
+
+          html += '<tr>';
+          html += '<td>' + escapeHtml(svc) + '</td>';
+          html += '<td>' + (configured ? '<span class="pill ok">yes</span>' : '<span class="pill bad">no</span>') + '</td>';
+          html += '<td class="muted">' + escapeHtml(source) + '</td>';
+          html += '<td class="muted">' + escapeHtml(updated) + '</td>';
+          html += '<td>';
+          html += '<div class="inline-actions">';
+          html += '<button data-action="reveal" data-service="' + escapeHtml(svc) + '">Reveal</button>';
+          html += '<button class="danger" data-action="delete" data-service="' + escapeHtml(svc) + '">Delete</button>';
+          html += '</div>';
+          html += '</td>';
+          html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        elKeys.innerHTML = html;
+
+        for (const btn of elKeys.querySelectorAll('button[data-action]')) {
+          btn.addEventListener('click', async (ev) => {
+            ev.preventDefault();
+            const action = btn.getAttribute('data-action');
+            const svc = btn.getAttribute('data-service');
+            if (!svc) return;
+
+            if (action === 'reveal') {
+              clearOutput();
+              try {
+                const data = await apiFetch('/v1/keys/' + encodeURIComponent(svc) + '/value', { method: 'GET' });
+                appendOutput(data);
+                setStatus('ok', 'revealed: ' + svc + ' (' + String(data.source || 'unknown') + ')');
+              } catch (e) {
+                setStatus('bad', String(e.message || e));
+                appendOutput(String(e.message || e));
+              }
+            }
+
+            if (action === 'delete') {
+              clearOutput();
+              try {
+                const data = await apiFetch('/v1/keys/' + encodeURIComponent(svc), { method: 'DELETE' });
+                appendOutput(data);
+                setStatus('ok', 'deleted: ' + svc);
+                await refreshKeys();
+              } catch (e) {
+                setStatus('bad', String(e.message || e));
+                appendOutput(String(e.message || e));
+              }
+            }
+          });
+        }
+      }
+
+      async function refreshKeys() {
+        try {
+          const data = await apiFetch('/v1/keys', { method: 'GET' });
+          renderKeys(data.items || []);
+          setStatus('ok', 'keys refreshed');
+        } catch (e) {
+          setStatus('bad', String(e.message || e));
+        }
+      }
+
+      async function setKey() {
+        clearOutput();
+        const svc = String(elService.value || '').trim();
+        const val = String(elValue.value || '');
+        if (!svc) {
+          setStatus('warn', 'Missing service');
+          return;
+        }
+        if (!val.trim()) {
+          setStatus('warn', 'Missing value');
+          return;
+        }
+        try {
+          const data = await apiFetch('/v1/keys/' + encodeURIComponent(svc), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: val })
+          });
+          appendOutput(data);
+          elValue.value = '';
+          setStatus('ok', 'saved: ' + svc);
+          await refreshKeys();
+        } catch (e) {
+          setStatus('bad', String(e.message || e));
+          appendOutput(String(e.message || e));
+        }
+      }
+
+      async function selfTest() {
+        clearOutput();
+        try {
+          const svc = 'selftest-ui-' + Math.random().toString(16).slice(2);
+          const val = 'value-' + Math.random().toString(16).slice(2);
+
+          const health = await apiFetch('/health', { method: 'GET' });
+          appendOutput({ health });
+
+          const caps = await apiFetch('/capabilities', { method: 'GET' });
+          appendOutput({ capabilities: caps });
+
+          const put = await apiFetch('/v1/keys/' + encodeURIComponent(svc), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: val })
+          });
+          appendOutput({ put });
+
+          const got = await apiFetch('/v1/keys/' + encodeURIComponent(svc) + '/value', { method: 'GET' });
+          appendOutput({ get_value: got });
+
+          await apiFetch('/v1/keys/' + encodeURIComponent(svc), { method: 'DELETE' });
+          appendOutput({ delete: { service: svc } });
+
+          setStatus('ok', 'self-test ok');
+          await refreshKeys();
+        } catch (e) {
+          setStatus('bad', String(e.message || e));
+          appendOutput(String(e.message || e));
+        }
+      }
+
+      btnConnect.addEventListener('click', (ev) => { ev.preventDefault(); connect(); });
+      btnRefresh.addEventListener('click', (ev) => { ev.preventDefault(); refreshKeys(); });
+      btnSet.addEventListener('click', (ev) => { ev.preventDefault(); setKey(); });
+      btnClear.addEventListener('click', (ev) => { ev.preventDefault(); elService.value = ''; elValue.value = ''; clearOutput(); });
+      btnSelfTest.addEventListener('click', (ev) => { ev.preventDefault(); selfTest(); });
+
+      (function init() {
+        const origin = window.location.origin;
+        elBaseUrl.value = origin;
+
+        if (isLocalhost()) {
+          const saved = localStorage.getItem(LS_TOKEN);
+          if (saved) {
+            elToken.value = saved;
+          }
+        }
+      })();
+    </script>
+  </body>
+</html>

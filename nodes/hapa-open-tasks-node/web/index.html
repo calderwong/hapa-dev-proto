@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hapa Open Tasks</title>
+    <style>
+      :root {
+        --bg: #0a0a0a;
+        --panel: #121212;
+        --panel-2: #171717;
+        --border: #2a2a2a;
+        --text: #e7e7e7;
+        --muted: #a1a1aa;
+        --accent: #60a5fa;
+        --danger: #ef4444;
+        --ok: #10b981;
+        --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: linear-gradient(180deg, rgba(18, 18, 18, 0.98), rgba(10, 10, 10, 0.92));
+        border-bottom: 1px solid var(--border);
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .title {
+        font-weight: 650;
+        letter-spacing: 0.2px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .pill {
+        font-size: 12px;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.03);
+        padding: 6px 10px;
+        border-radius: 999px;
+      }
+
+      main {
+        padding: 16px 18px 24px;
+        display: grid;
+        grid-template-columns: 1.7fr 1fr;
+        gap: 14px;
+      }
+
+      @media (max-width: 1100px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+      }
+
+      .panel-header {
+        padding: 12px 12px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .panel-header h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 650;
+        color: var(--text);
+      }
+
+      .panel-body {
+        padding: 12px;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px 10px;
+        outline: none;
+      }
+
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+      }
+
+      label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .btn {
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+        padding: 10px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+
+      .btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .btn.primary {
+        border-color: rgba(96, 165, 250, 0.35);
+        background: rgba(96, 165, 250, 0.18);
+      }
+
+      .btn.primary:hover {
+        background: rgba(96, 165, 250, 0.24);
+      }
+
+      .btn.danger {
+        border-color: rgba(239, 68, 68, 0.35);
+        background: rgba(239, 68, 68, 0.16);
+      }
+
+      .btn.danger:hover {
+        background: rgba(239, 68, 68, 0.22);
+      }
+
+      .board {
+        padding: 12px;
+        overflow: auto;
+      }
+
+      .columns {
+        display: grid;
+        gap: 10px;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(240px, 1fr);
+        align-items: start;
+      }
+
+      .col {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        min-height: 140px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .col-head {
+        padding: 10px 10px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .col-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--muted);
+      }
+
+      .count {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .col-body {
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        background: var(--panel);
+        border-radius: 12px;
+        padding: 10px;
+        cursor: pointer;
+      }
+
+      .card:hover {
+        border-color: rgba(96, 165, 250, 0.35);
+      }
+
+      .card-title {
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 6px;
+      }
+
+      .card-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .notice {
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .notice.bad {
+        border-color: rgba(239, 68, 68, 0.35);
+        background: rgba(239, 68, 68, 0.12);
+        color: rgba(239, 68, 68, 0.9);
+      }
+
+      .notice.good {
+        border-color: rgba(16, 185, 129, 0.35);
+        background: rgba(16, 185, 129, 0.1);
+        color: rgba(16, 185, 129, 0.9);
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: 8px;
+        align-items: baseline;
+        font-size: 12px;
+      }
+
+      .kv div {
+        color: var(--muted);
+      }
+
+      .kv .v {
+        color: var(--text);
+      }
+
+      .refs {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .ref {
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .ref a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .ref a:hover {
+        text-decoration: underline;
+      }
+
+      pre {
+        margin: 0;
+        padding: 12px;
+        border-radius: 10px;
+        background: #0b0b0b;
+        border: 1px solid var(--border);
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="row">
+        <div class="title">Hapa Open Tasks</div>
+        <div id="statusPill" class="pill">Loading...</div>
+        <div id="countsPill" class="pill hidden"></div>
+      </div>
+      <div class="row" style="min-width: 320px; flex: 1; justify-content: flex-end">
+        <input id="tokenInput" type="password" placeholder="Write token (optional for read)" style="max-width: 360px" />
+        <button class="btn" id="refreshBtn">Refresh</button>
+        <button class="btn primary" id="newTaskBtn">New Task</button>
+        <button class="btn" id="editStatusesBtn">Edit Statuses</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Board</h2>
+          <div class="row">
+            <div class="pill mono" id="baseUrlPill"></div>
+          </div>
+        </div>
+        <div class="board">
+          <div id="boardColumns" class="columns"></div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-header">
+          <h2>Details</h2>
+          <div class="row">
+            <button class="btn" id="clearSelectionBtn">Clear</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="notice" class="notice">Select a task to view details.</div>
+
+          <div id="detail" class="split hidden">
+            <div>
+              <label>Title</label>
+              <input id="detailTitle" />
+            </div>
+            <div>
+              <label>Description</label>
+              <textarea id="detailDescription"></textarea>
+            </div>
+            <div>
+              <label>Status</label>
+              <select id="detailStatus"></select>
+            </div>
+            <div class="row">
+              <button class="btn primary" id="saveTaskBtn">Save</button>
+              <div class="pill mono" id="detailIdPill"></div>
+            </div>
+
+            <div>
+              <h2 style="margin: 8px 0 6px; font-size: 13px">References</h2>
+              <div id="refs" class="refs"></div>
+            </div>
+
+            <div>
+              <h2 style="margin: 8px 0 6px; font-size: 13px">Add reference</h2>
+              <div class="split">
+                <div>
+                  <label>Path</label>
+                  <input id="refPath" class="mono" placeholder="/Users/.../.Overwatch/FILE.md" />
+                </div>
+                <div>
+                  <label>Label</label>
+                  <input id="refLabel" placeholder="Optional" />
+                </div>
+                <button class="btn" id="addRefBtn">Add Ref</button>
+              </div>
+            </div>
+
+            <div id="markdownPreviewWrap" class="hidden">
+              <h2 style="margin: 8px 0 6px; font-size: 13px">Markdown preview</h2>
+              <pre id="markdownPreview" class="mono"></pre>
+            </div>
+          </div>
+
+          <div id="newTaskPanel" class="split hidden">
+            <div>
+              <label>Title</label>
+              <input id="newTitle" />
+            </div>
+            <div>
+              <label>Description</label>
+              <textarea id="newDescription"></textarea>
+            </div>
+            <div>
+              <label>Status</label>
+              <select id="newStatus"></select>
+            </div>
+            <div>
+              <label>Kind</label>
+              <select id="newKind">
+                <option value="task">task</option>
+                <option value="overwatch_request">overwatch_request</option>
+              </select>
+            </div>
+            <div class="row">
+              <button class="btn primary" id="createTaskBtn">Create</button>
+              <button class="btn" id="cancelNewTaskBtn">Cancel</button>
+            </div>
+          </div>
+
+          <div id="statusEditorPanel" class="split hidden">
+            <div class="notice">Posting status definitions requires the write token.</div>
+            <div>
+              <label>Status definitions JSON</label>
+              <textarea id="statusEditor" class="mono" spellcheck="false"></textarea>
+            </div>
+            <div class="row">
+              <button class="btn primary" id="saveStatusesBtn">Save Statuses</button>
+              <button class="btn" id="closeStatusEditorBtn">Close</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script>
+      const state = {
+        token: '',
+        statuses: [],
+        tasks: [],
+        selectedTaskId: null,
+        lastMarkdownPath: null,
+        system: null
+      };
+
+      const isLocalDev = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+      const TOKEN_STORAGE_KEY = 'hapa_open_tasks_dev_token_v1';
+
+      function $(id) {
+        return document.getElementById(id);
+      }
+
+      function setNotice(text, kind) {
+        const el = $('notice');
+        el.textContent = text;
+        el.className = 'notice' + (kind === 'bad' ? ' bad' : kind === 'good' ? ' good' : '');
+      }
+
+      function normalizeToken(t) {
+        return String(t || '').trim().replace(/^Bearer\s+/i, '');
+      }
+
+      function getAuthHeaders() {
+        const headers = {};
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        return headers;
+      }
+
+      async function api(path, opts = {}) {
+        const method = opts.method || 'GET';
+        const headers = { ...(opts.headers || {}) };
+        if (opts.auth) Object.assign(headers, getAuthHeaders());
+        if (opts.json !== undefined) headers['Content-Type'] = 'application/json';
+
+        const res = await fetch(path, {
+          method,
+          headers,
+          body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined
+        });
+
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { ok: false, error: text };
+        }
+
+        if (!res.ok) {
+          throw new Error(data?.error || `HTTP ${res.status}`);
+        }
+        return data;
+      }
+
+      function showPanel(panelId) {
+        for (const id of ['detail', 'newTaskPanel', 'statusEditorPanel']) {
+          $(id).classList.add('hidden');
+        }
+        if (panelId) $(panelId).classList.remove('hidden');
+      }
+
+      function populateStatusSelect(selectEl, statuses) {
+        selectEl.innerHTML = statuses
+          .slice()
+          .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+          .map((s) => `<option value="${s.status_key}">${s.name}</option>`)
+          .join('');
+      }
+
+      function renderBoard() {
+        const cols = $('boardColumns');
+        const statuses = state.statuses.slice().sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+
+        const tasksByStatus = new Map();
+        for (const s of statuses) tasksByStatus.set(s.status_key, []);
+        for (const t of state.tasks) {
+          const list = tasksByStatus.get(t.status_key) || [];
+          list.push(t);
+          tasksByStatus.set(t.status_key, list);
+        }
+
+        cols.innerHTML = statuses
+          .map((s) => {
+            const list = tasksByStatus.get(s.status_key) || [];
+            return `
+              <div class="col" data-status="${s.status_key}">
+                <div class="col-head">
+                  <div class="col-title">
+                    <span class="dot" style="background:${s.color || 'var(--muted)'}"></span>
+                    <span>${escapeHtml(s.name)}</span>
+                  </div>
+                  <div class="count">${list.length}</div>
+                </div>
+                <div class="col-body" data-drop="${s.status_key}">
+                  ${list
+                    .map(
+                      (t) => `
+                    <div class="card" draggable="true" data-task="${t.task_id}">
+                      <div class="card-title">${escapeHtml(t.title)}</div>
+                      <div class="card-meta">
+                        <span class="mono">${escapeHtml(t.kind)}</span>
+                        <span class="mono">${escapeHtml(t.task_id.slice(0, 8))}</span>
+                      </div>
+                    </div>
+                  `
+                    )
+                    .join('')}
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+        for (const card of cols.querySelectorAll('.card')) {
+          card.addEventListener('click', () => {
+            const id = card.getAttribute('data-task');
+            selectTask(id);
+          });
+
+          card.addEventListener('dragstart', (ev) => {
+            const id = card.getAttribute('data-task');
+            ev.dataTransfer.setData('text/plain', id);
+          });
+        }
+
+        for (const drop of cols.querySelectorAll('[data-drop]')) {
+          drop.addEventListener('dragover', (ev) => {
+            ev.preventDefault();
+          });
+          drop.addEventListener('drop', async (ev) => {
+            ev.preventDefault();
+            const taskId = ev.dataTransfer.getData('text/plain');
+            const statusKey = drop.getAttribute('data-drop');
+            if (!taskId || !statusKey) return;
+            await moveTask(taskId, statusKey);
+          });
+        }
+      }
+
+      function escapeHtml(s) {
+        return String(s || '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function getSelectedTask() {
+        if (!state.selectedTaskId) return null;
+        return state.tasks.find((t) => t.task_id === state.selectedTaskId) || null;
+      }
+
+      async function selectTask(taskId) {
+        state.selectedTaskId = taskId;
+        state.lastMarkdownPath = null;
+        $('markdownPreviewWrap').classList.add('hidden');
+
+        const resp = await api(`/v1/tasks/${taskId}`);
+        const task = resp.task;
+
+        $('detailTitle').value = task.title || '';
+        $('detailDescription').value = task.description || '';
+        $('detailStatus').value = task.status_key || '';
+        $('detailIdPill').textContent = task.task_id;
+
+        renderRefs(task);
+
+        setNotice('Task loaded.', 'good');
+        showPanel('detail');
+      }
+
+      function renderRefs(task) {
+        const wrap = $('refs');
+        const refs = Array.isArray(task.refs) ? task.refs : [];
+
+        if (refs.length === 0) {
+          wrap.innerHTML = `<div class="notice">No references.</div>`;
+          return;
+        }
+
+        wrap.innerHTML = refs
+          .slice()
+          .sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
+          .map((r) => {
+            const label = r.label ? escapeHtml(r.label) : escapeHtml(r.path);
+            const kind = escapeHtml(r.kind);
+            const p = escapeHtml(r.path);
+
+            const canPreview = r.kind === 'markdown';
+            const previewLink = canPreview
+              ? `<a href="#" data-preview="${escapeHtml(r.path)}">preview</a>`
+              : '';
+
+            return `
+              <div class="ref">
+                <div class="card-meta">
+                  <span class="mono">${kind}</span>
+                  <span class="mono">${escapeHtml(r.ref_id.slice(0, 8))}</span>
+                </div>
+                <div style="margin-top:6px; font-size:12px;">
+                  <div>${label}</div>
+                  <div class="mono" style="margin-top:4px; color:var(--muted)">${p}</div>
+                  <div style="margin-top:6px;">${previewLink}</div>
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+        for (const a of wrap.querySelectorAll('[data-preview]')) {
+          a.addEventListener('click', async (ev) => {
+            ev.preventDefault();
+            const p = a.getAttribute('data-preview');
+            if (!p) return;
+            await previewMarkdown(p);
+          });
+        }
+      }
+
+      async function previewMarkdown(p) {
+        try {
+          const resp = await api(`/v1/markdown?path=${encodeURIComponent(p)}`);
+          $('markdownPreview').textContent = resp.content;
+          $('markdownPreviewWrap').classList.remove('hidden');
+          state.lastMarkdownPath = p;
+        } catch (err) {
+          setNotice(String(err.message || err), 'bad');
+        }
+      }
+
+      async function saveSelectedTask() {
+        const task = getSelectedTask();
+        if (!task) return;
+
+        const patch = {
+          title: $('detailTitle').value,
+          description: $('detailDescription').value,
+          status_key: $('detailStatus').value
+        };
+
+        try {
+          const resp = await api(`/v1/tasks/${task.task_id}`, { method: 'PATCH', auth: true, json: patch });
+          const updated = resp.task;
+          state.tasks = state.tasks.map((t) => (t.task_id === updated.task_id ? updated : t));
+          renderBoard();
+          setNotice('Saved.', 'good');
+        } catch (err) {
+          setNotice(String(err.message || err), 'bad');
+        }
+      }
+
+      async function moveTask(taskId, statusKey) {
+        const task = state.tasks.find((t) => t.task_id === taskId);
+        if (!task) return;
+        if (task.status_key === statusKey) return;
+
+        try {
+          const resp = await api(`/v1/tasks/${taskId}`, { method: 'PATCH', auth: true, json: { status_key: statusKey } });
+          const updated = resp.task;
+          state.tasks = state.tasks.map((t) => (t.task_id === updated.task_id ? updated : t));
+          renderBoard();
+          if (state.selectedTaskId === taskId) {
+            await selectTask(taskId);
+          }
+        } catch (err) {
+          setNotice(String(err.message || err), 'bad');
+        }
+      }
+
+      async function createTask() {
+        const title = $('newTitle').value.trim();
+        if (!title) {
+          setNotice('Title is required.', 'bad');
+          return;
+        }
+
+        const payload = {
+          title,
+          description: $('newDescription').value,
+          status_key: $('newStatus').value,
+          kind: $('newKind').value
+        };
+
+        try {
+          const resp = await api('/v1/tasks', { method: 'POST', auth: true, json: payload });
+          state.tasks.push(resp.task);
+          renderBoard();
+          setNotice('Created.', 'good');
+          $('newTitle').value = '';
+          $('newDescription').value = '';
+          showPanel(null);
+        } catch (err) {
+          setNotice(String(err.message || err), 'bad');
+        }
+      }
+
+      async function addRef() {
+        const task = getSelectedTask();
+        if (!task) return;
+
+        const p = $('refPath').value.trim();
+        if (!p) {
+          setNotice('Path is required.', 'bad');
+          return;
+        }
+
+        try {
+          await api(`/v1/tasks/${task.task_id}/refs`, {
+            method: 'POST',
+            auth: true,
+            json: { kind: 'markdown', path: p, label: $('refLabel').value }
+          });
+          $('refPath').value = '';
+          $('refLabel').value = '';
+          await selectTask(task.task_id);
+        } catch (err) {
+          setNotice(String(err.message || err), 'bad');
+        }
+      }
+
+      function openStatusEditor() {
+        const statuses = state.statuses
+          .slice()
+          .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+          .map((s) => ({
+            status_key: s.status_key,
+            name: s.name,
+            order_index: s.order_index,
+            color: s.color,
+            is_terminal: !!s.is_terminal
+          }));
+
+        $('statusEditor').value = JSON.stringify(statuses, null, 2);
+        showPanel('statusEditorPanel');
+        setNotice('Editing status definitions.', null);
+      }
+
+      async function saveStatuses() {
+        let statuses;
+        try {
+          statuses = JSON.parse($('statusEditor').value);
+        } catch (err) {
+          setNotice('Invalid JSON.', 'bad');
+          return;
+        }
+
+        if (!Array.isArray(statuses)) {
+          setNotice('Expected a JSON array.', 'bad');
+          return;
+        }
+
+        try {
+          await api('/v1/status-definitions', { method: 'POST', auth: true, json: { statuses } });
+          await refreshAll();
+          showPanel(null);
+          setNotice('Status definitions updated.', 'good');
+        } catch (err) {
+          setNotice(String(err.message || err), 'bad');
+        }
+      }
+
+      async function refreshAll() {
+        try {
+          const [system, statusesResp, tasksResp] = await Promise.all([
+            api('/v1/system'),
+            api('/v1/status-definitions'),
+            api('/v1/tasks')
+          ]);
+
+          state.system = system;
+          state.statuses = statusesResp.statuses || [];
+          state.tasks = tasksResp.tasks || [];
+
+          $('statusPill').textContent = 'Connected';
+          $('countsPill').classList.remove('hidden');
+          $('countsPill').textContent = `tasks: ${state.tasks.length} | statuses: ${state.statuses.length}`;
+          $('baseUrlPill').textContent = system?.base_url || window.location.origin;
+
+          populateStatusSelect($('newStatus'), state.statuses);
+          populateStatusSelect($('detailStatus'), state.statuses);
+
+          renderBoard();
+        } catch (err) {
+          $('statusPill').textContent = 'Error';
+          setNotice(String(err.message || err), 'bad');
+        }
+      }
+
+      function loadTokenFromStorage() {
+        if (!isLocalDev) return;
+        const saved = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (saved) {
+          state.token = normalizeToken(saved);
+          $('tokenInput').value = state.token;
+        }
+      }
+
+      function persistTokenToStorage() {
+        if (!isLocalDev) return;
+        if (state.token) localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
+      }
+
+      $('tokenInput').addEventListener('input', () => {
+        state.token = normalizeToken($('tokenInput').value);
+        persistTokenToStorage();
+      });
+
+      $('refreshBtn').addEventListener('click', refreshAll);
+
+      $('newTaskBtn').addEventListener('click', () => {
+        showPanel('newTaskPanel');
+        setNotice('Creating a new task requires the write token.', null);
+      });
+
+      $('createTaskBtn').addEventListener('click', createTask);
+      $('cancelNewTaskBtn').addEventListener('click', () => {
+        showPanel(null);
+        setNotice('Canceled.', null);
+      });
+
+      $('editStatusesBtn').addEventListener('click', openStatusEditor);
+      $('saveStatusesBtn').addEventListener('click', saveStatuses);
+      $('closeStatusEditorBtn').addEventListener('click', () => {
+        showPanel(null);
+        setNotice('Closed.', null);
+      });
+
+      $('clearSelectionBtn').addEventListener('click', () => {
+        state.selectedTaskId = null;
+        showPanel(null);
+        setNotice('Select a task to view details.', null);
+      });
+
+      $('saveTaskBtn').addEventListener('click', saveSelectedTask);
+      $('addRefBtn').addEventListener('click', addRef);
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        $('baseUrlPill').textContent = window.location.origin;
+
+        loadTokenFromStorage();
+
+        if (isLocalDev && !state.token) {
+          setNotice('Write token is stored in .node_token (optional for read).', null);
+        }
+
+        await refreshAll();
+      });
+    </script>
+  </body>
+</html>
