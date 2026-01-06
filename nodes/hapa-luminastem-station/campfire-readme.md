@@ -1,0 +1,1 @@
+Take a look at the zip/demo/protoype in this folder (luminastem-3d(5).zip), then check-in with .Overwatch to get setup.  I want you to get this app up to Hapa andards, integrated with the Hapa node systep per protocols from .Overwatch.

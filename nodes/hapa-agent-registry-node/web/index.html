@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hapa Agent Registry</title>
+    <style>
+      :root {
+        --bg: #0a0a0a;
+        --panel: #121212;
+        --panel-2: #171717;
+        --border: #2a2a2a;
+        --text: #e7e7e7;
+        --muted: #a1a1aa;
+        --accent: #60a5fa;
+        --danger: #ef4444;
+        --ok: #10b981;
+        --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: linear-gradient(180deg, rgba(18, 18, 18, 0.98), rgba(10, 10, 10, 0.92));
+        border-bottom: 1px solid var(--border);
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .title {
+        font-weight: 650;
+        letter-spacing: 0.2px;
+      }
+
+      .pill {
+        font-size: 12px;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.03);
+        padding: 6px 10px;
+        border-radius: 999px;
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+
+      main {
+        padding: 16px 18px 24px;
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: 14px;
+      }
+
+      @media (max-width: 1100px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .panel-header {
+        padding: 12px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .panel-header h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .panel-body {
+        padding: 12px;
+      }
+
+      .btn {
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+        padding: 10px 12px;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+
+      .btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .btn.primary {
+        border-color: rgba(96, 165, 250, 0.35);
+        background: rgba(96, 165, 250, 0.18);
+      }
+
+      .btn.primary:hover {
+        background: rgba(96, 165, 250, 0.24);
+      }
+
+      .btn.danger {
+        border-color: rgba(239, 68, 68, 0.35);
+        background: rgba(239, 68, 68, 0.16);
+      }
+
+      .btn.danger:hover {
+        background: rgba(239, 68, 68, 0.22);
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px 10px;
+        outline: none;
+      }
+
+      textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+
+      label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .notice {
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .notice.bad {
+        border-color: rgba(239, 68, 68, 0.35);
+        background: rgba(239, 68, 68, 0.12);
+        color: rgba(239, 68, 68, 0.9);
+      }
+
+      .notice.good {
+        border-color: rgba(16, 185, 129, 0.35);
+        background: rgba(16, 185, 129, 0.1);
+        color: rgba(16, 185, 129, 0.9);
+      }
+
+      .list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 12px;
+        padding: 10px;
+        cursor: pointer;
+      }
+
+      .card:hover {
+        border-color: rgba(96, 165, 250, 0.35);
+      }
+
+      .card-title {
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 6px;
+      }
+
+      .card-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      pre {
+        margin: 0;
+        padding: 12px;
+        border-radius: 10px;
+        background: #0b0b0b;
+        border: 1px solid var(--border);
+        overflow: auto;
+        font-size: 12px;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: 8px;
+        align-items: baseline;
+        font-size: 12px;
+      }
+
+      .kv div {
+        color: var(--muted);
+      }
+
+      .kv .v {
+        color: var(--text);
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .badge.ok {
+        border-color: rgba(16, 185, 129, 0.35);
+        color: rgba(16, 185, 129, 0.9);
+        background: rgba(16, 185, 129, 0.08);
+      }
+
+      .badge.bad {
+        border-color: rgba(239, 68, 68, 0.35);
+        color: rgba(239, 68, 68, 0.9);
+        background: rgba(239, 68, 68, 0.08);
+      }
+
+      .badge.warn {
+        border-color: rgba(96, 165, 250, 0.35);
+        color: rgba(96, 165, 250, 0.9);
+        background: rgba(96, 165, 250, 0.08);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="row">
+        <div class="title">Hapa Agent Registry</div>
+        <div id="statusPill" class="pill">Loading...</div>
+        <div id="countsPill" class="pill hidden"></div>
+      </div>
+      <div class="row" style="min-width: 320px; flex: 1; justify-content: flex-end">
+        <input id="tokenInput" type="password" placeholder="Bearer token" style="max-width: 360px" />
+        <button class="btn" id="refreshBtn">Refresh</button>
+        <button class="btn primary" id="newAgentBtn">New Agent</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Agents</h2>
+          <div class="row">
+            <div class="pill mono" id="baseUrlPill"></div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="agentsNotice" class="notice">Enter token to load agents.</div>
+          <div id="agentsList" class="list hidden"></div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-header">
+          <h2>Details</h2>
+          <div class="row">
+            <button class="btn" id="clearSelectionBtn">Clear</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div id="detailNotice" class="notice">Select an agent to view details.</div>
+
+          <div id="newAgentPanel" class="split hidden">
+            <div>
+              <label>Agent name</label>
+              <input id="newAgentName" placeholder="e.g. Blue Architect" />
+            </div>
+            <div class="row">
+              <button class="btn primary" id="createAgentBtn">Create</button>
+              <button class="btn" id="cancelCreateBtn">Cancel</button>
+            </div>
+          </div>
+
+          <div id="detailPanel" class="split hidden">
+            <div class="kv">
+              <div>agent_id</div>
+              <div class="v mono" id="detailAgentId"></div>
+              <div>avatar_status</div>
+              <div class="v" id="detailAvatarStatus"></div>
+              <div>avatar_job_id</div>
+              <div class="v mono" id="detailAvatarJobId"></div>
+            </div>
+
+            <div>
+              <label>Name</label>
+              <input id="detailName" />
+            </div>
+            <div class="row">
+              <button class="btn primary" id="saveAgentBtn">Save</button>
+              <div class="pill mono" id="detailIdPill"></div>
+            </div>
+
+            <div class="split" style="margin-top: 4px">
+              <div>
+                <label>Avatar name</label>
+                <input id="avatarNameInput" placeholder="Optional (defaults to agent_* )" />
+              </div>
+              <div>
+                <label>Base prompt</label>
+                <textarea id="avatarPromptInput" placeholder="Optional"></textarea>
+              </div>
+              <div class="row">
+                <button class="btn primary" id="expandAvatarBtn">Expand Avatar</button>
+                <button class="btn" id="pollAvatarBtn">Poll Status</button>
+              </div>
+              <div class="row">
+                <button class="btn" id="previewAvatarBtn">Preview</button>
+                <button class="btn" id="exportAvatarBtn">Export</button>
+              </div>
+            </div>
+
+            <div>
+              <h2 style="margin: 8px 0 6px; font-size: 13px">Last response</h2>
+              <pre id="lastResponse" class="mono"></pre>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script>
+      const state = {
+        token: '',
+        system: null,
+        agents: [],
+        selectedAgentId: null
+      };
+
+      const isLocalDev = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+      const TOKEN_STORAGE_KEY = 'hapa_agent_registry_dev_token_v1';
+
+      function $(id) {
+        return document.getElementById(id);
+      }
+
+      function escapeHtml(s) {
+        return String(s || '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function normalizeToken(t) {
+        return String(t || '').trim().replace(/^Bearer\s+/i, '');
+      }
+
+      function getAuthHeaders() {
+        const headers = {};
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        return headers;
+      }
+
+      function setNotice(el, text, kind) {
+        el.textContent = text;
+        el.className = 'notice' + (kind === 'bad' ? ' bad' : kind === 'good' ? ' good' : '');
+      }
+
+      function setLastResponse(obj) {
+        const out = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+        $('lastResponse').textContent = out;
+      }
+
+      async function api(p, opts = {}) {
+        const headers = { ...(opts.headers || {}) };
+        if (opts.auth) Object.assign(headers, getAuthHeaders());
+        if (opts.json !== undefined) headers['Content-Type'] = 'application/json';
+
+        const res = await fetch(p, {
+          method: opts.method || 'GET',
+          headers,
+          body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined
+        });
+
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { ok: false, error: text };
+        }
+
+        if (!res.ok) {
+          throw new Error(data?.error || data?.detail || `HTTP ${res.status}`);
+        }
+
+        return data;
+      }
+
+      function showPanel(panelId) {
+        for (const id of ['newAgentPanel', 'detailPanel']) {
+          $(id).classList.add('hidden');
+        }
+        if (panelId) $(panelId).classList.remove('hidden');
+      }
+
+      function renderAgents() {
+        const list = $('agentsList');
+        const notice = $('agentsNotice');
+
+        if (!state.token) {
+          list.classList.add('hidden');
+          notice.classList.remove('hidden');
+          setNotice(notice, 'Enter token to load agents.', null);
+          return;
+        }
+
+        notice.classList.add('hidden');
+        list.classList.remove('hidden');
+
+        if (!state.agents.length) {
+          list.innerHTML = `<div class="notice">No agents yet.</div>`;
+          return;
+        }
+
+        list.innerHTML = state.agents
+          .slice()
+          .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+          .map((a) => {
+            const status = a.avatar_status || 'none';
+            const badge =
+              status === 'succeeded'
+                ? 'ok'
+                : status === 'failed'
+                  ? 'bad'
+                  : status === 'running'
+                    ? 'warn'
+                    : '';
+            const active = a.agent_id === state.selectedAgentId;
+
+            return `
+              <div class="card" data-agent="${escapeHtml(a.agent_id)}" style="border-color:${
+                active ? 'rgba(96, 165, 250, 0.55)' : 'var(--border)'
+              }">
+                <div class="card-title">${escapeHtml(a.name)}</div>
+                <div class="card-meta">
+                  <span class="badge ${badge}">${escapeHtml(status)}</span>
+                  <span class="mono">${escapeHtml(a.agent_id.slice(0, 8))}</span>
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+        for (const card of list.querySelectorAll('[data-agent]')) {
+          card.addEventListener('click', async () => {
+            const id = card.getAttribute('data-agent');
+            if (!id) return;
+            await selectAgent(id);
+          });
+        }
+      }
+
+      async function refreshAll() {
+        $('statusPill').textContent = 'Loading...';
+        $('countsPill').classList.add('hidden');
+
+        $('baseUrlPill').textContent = window.location.origin;
+
+        try {
+          if (state.token) {
+            const [system, agents] = await Promise.all([
+              api('/v1/system', { auth: true }),
+              api('/v1/agents', { auth: true })
+            ]);
+
+            state.system = system;
+            state.agents = agents.agents || [];
+
+            $('statusPill').textContent = 'Connected';
+            $('countsPill').classList.remove('hidden');
+            $('countsPill').textContent = `agents: ${state.agents.length}`;
+            $('baseUrlPill').textContent = system?.base_url || window.location.origin;
+
+            renderAgents();
+          } else {
+            $('statusPill').textContent = 'Token required';
+            renderAgents();
+          }
+        } catch (err) {
+          $('statusPill').textContent = 'Error';
+          setNotice($('agentsNotice'), String(err.message || err), 'bad');
+          $('agentsNotice').classList.remove('hidden');
+          $('agentsList').classList.add('hidden');
+        }
+      }
+
+      async function selectAgent(agentId) {
+        state.selectedAgentId = agentId;
+
+        try {
+          const resp = await api(`/v1/agents/${encodeURIComponent(agentId)}`, { auth: true });
+          const agent = resp.agent;
+
+          $('detailAgentId').textContent = agent.agent_id;
+          $('detailAvatarStatus').textContent = agent.avatar_status || 'none';
+          $('detailAvatarJobId').textContent = agent.avatar_job_id || '';
+          $('detailName').value = agent.name || '';
+          $('avatarNameInput').value = agent.avatar_name || '';
+          $('detailIdPill').textContent = agent.agent_id;
+
+          setLastResponse(resp);
+
+          $('detailNotice').classList.add('hidden');
+          showPanel('detailPanel');
+
+          await refreshAll();
+        } catch (err) {
+          setNotice($('detailNotice'), String(err.message || err), 'bad');
+          $('detailNotice').classList.remove('hidden');
+          showPanel(null);
+        }
+      }
+
+      async function createAgent() {
+        const name = $('newAgentName').value.trim();
+        if (!name) {
+          setNotice($('detailNotice'), 'Agent name is required.', 'bad');
+          $('detailNotice').classList.remove('hidden');
+          return;
+        }
+
+        try {
+          const resp = await api('/v1/agents', { method: 'POST', auth: true, json: { name, actor: 'ui' } });
+          $('newAgentName').value = '';
+          state.selectedAgentId = resp.agent?.agent_id;
+          await refreshAll();
+          await selectAgent(state.selectedAgentId);
+        } catch (err) {
+          setNotice($('detailNotice'), String(err.message || err), 'bad');
+          $('detailNotice').classList.remove('hidden');
+        }
+      }
+
+      async function saveAgent() {
+        if (!state.selectedAgentId) return;
+
+        const name = $('detailName').value.trim();
+        if (!name) {
+          setNotice($('detailNotice'), 'Name cannot be empty.', 'bad');
+          $('detailNotice').classList.remove('hidden');
+          return;
+        }
+
+        try {
+          const resp = await api(`/v1/agents/${encodeURIComponent(state.selectedAgentId)}`, {
+            method: 'PATCH',
+            auth: true,
+            json: { name, actor: 'ui' }
+          });
+          setLastResponse(resp);
+          await refreshAll();
+          await selectAgent(state.selectedAgentId);
+        } catch (err) {
+          setNotice($('detailNotice'), String(err.message || err), 'bad');
+          $('detailNotice').classList.remove('hidden');
+        }
+      }
+
+      async function expandAvatar() {
+        if (!state.selectedAgentId) return;
+
+        const avatar_name = $('avatarNameInput').value.trim();
+        const base_prompt = $('avatarPromptInput').value.trim();
+
+        const payload = { actor: 'ui' };
+        if (avatar_name) payload.avatar_name = avatar_name;
+        if (base_prompt) payload.base_prompt = base_prompt;
+        payload.async_mode = true;
+
+        try {
+          const resp = await api(`/v1/agents/${encodeURIComponent(state.selectedAgentId)}/avatar/expand`, {
+            method: 'POST',
+            auth: true,
+            json: payload
+          });
+          setLastResponse(resp);
+          await refreshAll();
+          await selectAgent(state.selectedAgentId);
+        } catch (err) {
+          setLastResponse({ ok: false, error: String(err.message || err) });
+        }
+      }
+
+      async function pollAvatar() {
+        if (!state.selectedAgentId) return;
+
+        try {
+          const resp = await api(`/v1/agents/${encodeURIComponent(state.selectedAgentId)}/avatar/status`, { auth: true });
+          setLastResponse(resp);
+          await refreshAll();
+          await selectAgent(state.selectedAgentId);
+        } catch (err) {
+          setLastResponse({ ok: false, error: String(err.message || err) });
+        }
+      }
+
+      async function previewAvatar() {
+        if (!state.selectedAgentId) return;
+
+        try {
+          const resp = await api(`/v1/agents/${encodeURIComponent(state.selectedAgentId)}/avatar/preview`, { auth: true });
+          setLastResponse(resp);
+        } catch (err) {
+          setLastResponse({ ok: false, error: String(err.message || err) });
+        }
+      }
+
+      async function exportAvatar() {
+        if (!state.selectedAgentId) return;
+
+        try {
+          const resp = await api(`/v1/agents/${encodeURIComponent(state.selectedAgentId)}/avatar/export`, {
+            method: 'POST',
+            auth: true
+          });
+          setLastResponse(resp);
+        } catch (err) {
+          setLastResponse({ ok: false, error: String(err.message || err) });
+        }
+      }
+
+      function loadTokenFromStorage() {
+        if (!isLocalDev) return;
+        const saved = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (saved) {
+          state.token = normalizeToken(saved);
+          $('tokenInput').value = state.token;
+        }
+      }
+
+      function persistTokenToStorage() {
+        if (!isLocalDev) return;
+        if (state.token) localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
+      }
+
+      $('tokenInput').addEventListener('input', () => {
+        state.token = normalizeToken($('tokenInput').value);
+        persistTokenToStorage();
+      });
+
+      $('refreshBtn').addEventListener('click', refreshAll);
+
+      $('newAgentBtn').addEventListener('click', () => {
+        $('detailNotice').classList.add('hidden');
+        showPanel('newAgentPanel');
+      });
+
+      $('createAgentBtn').addEventListener('click', createAgent);
+      $('cancelCreateBtn').addEventListener('click', () => {
+        showPanel(null);
+        $('detailNotice').classList.remove('hidden');
+      });
+
+      $('clearSelectionBtn').addEventListener('click', () => {
+        state.selectedAgentId = null;
+        $('detailNotice').classList.remove('hidden');
+        showPanel(null);
+        renderAgents();
+      });
+
+      $('saveAgentBtn').addEventListener('click', saveAgent);
+      $('expandAvatarBtn').addEventListener('click', expandAvatar);
+      $('pollAvatarBtn').addEventListener('click', pollAvatar);
+      $('previewAvatarBtn').addEventListener('click', previewAvatar);
+      $('exportAvatarBtn').addEventListener('click', exportAvatar);
+
+      document.addEventListener('DOMContentLoaded', async () => {
+        $('baseUrlPill').textContent = window.location.origin;
+        setLastResponse({ ok: true, message: 'Ready.' });
+
+        loadTokenFromStorage();
+
+        await refreshAll();
+      });
+    </script>
+  </body>
+</html>

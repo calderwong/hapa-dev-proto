@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hapa Lore Forge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --hapa-bg-blur-px: 12px;
+            --hapa-anim-ms: 300ms;
+            --panel-bg: rgba(10, 10, 10, 0.8);
+            --accent-blue: #3b82f6;
+            --accent-gold: #fbbf24;
+            --accent-lore: #8b5cf6; /* Purple for Lore mode */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #050505;
+            color: #e5e5e5;
+            overflow-x: hidden;
+        }
+
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(var(--hapa-bg-blur-px));
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all var(--hapa-anim-ms) ease;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        .lore-gradient {
+            background: linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%);
+        }
+
+        .lore-card:hover {
+            border-color: var(--accent-lore);
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.2);
+        }
+
+        [data-ui-mode="lore"] {
+            --panel-bg: rgba(15, 12, 25, 0.85);
+            --accent-blue: var(--accent-lore);
+        }
+
+        /* Scanline effect */
+        .scanline {
+            width: 100%;
+            height: 2px;
+            background: rgba(139, 92, 246, 0.1);
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            animation: scan 8s linear infinite;
+        }
+
+        @keyframes scan {
+            0% { top: 0; }
+            100% { top: 100%; }
+        }
+    </style>
+</head>
+<body data-ui-mode="lore" class="min-h-screen">
+    <div class="scanline pointer-events-none"></div>
+    
+    <!-- Top HUD -->
+    <header class="fixed top-0 left-0 right-0 h-16 glass-panel z-50 px-6 flex items-center justify-between border-b border-white/10">
+        <div class="flex items-center space-x-4">
+            <div class="w-8 h-8 lore-gradient rounded flex items-center justify-center font-bold text-white mono">L</div>
+            <h1 class="text-lg font-bold tracking-tight uppercase mono">Hapa Lore Node <span class="text-xs text-white/40 font-normal">v1.0.0</span></h1>
+        </div>
+        <div class="flex items-center space-x-6 mono text-xs">
+            <div id="connection-status" class="flex items-center space-x-2">
+                <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                <span class="text-white/60">DISCONNECTED</span>
+            </div>
+            <div class="h-4 w-px bg-white/10"></div>
+            <button id="connect-btn" class="px-3 py-1 bg-blue-600/20 text-blue-400 border border-blue-600/50 rounded hover:bg-blue-600/40 transition-all">CONNECT</button>
+        </div>
+    </header>
+
+    <main class="pt-24 pb-12 px-6 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Sidebar: Navigation & Stats -->
+        <aside class="lg:col-span-3 space-y-6">
+            <div class="glass-panel p-4 rounded-lg">
+                <h3 class="text-xs font-bold text-white/40 uppercase mb-4 mono tracking-widest">Navigation</h3>
+                <nav class="space-y-2">
+                    <button onclick="setView('timeline')" class="w-full text-left px-3 py-2 rounded bg-white/5 text-white border-l-2 border-accent-lore mono text-sm">TIMELINE</button>
+                    <button onclick="setView('wisdom')" class="w-full text-left px-3 py-2 rounded hover:bg-white/5 text-white/60 hover:text-white transition-all mono text-sm">WISDOM</button>
+                    <button onclick="setView('canon')" class="w-full text-left px-3 py-2 rounded hover:bg-white/5 text-white/60 hover:text-white transition-all mono text-sm">CANON</button>
+                    <button onclick="showRecordModal()" class="w-full mt-4 py-2 bg-accent-lore/20 text-accent-lore border border-accent-lore/50 rounded font-bold mono text-xs hover:bg-accent-lore/30 transition-all">RECORD LORE</button>
+                </nav>
+            </div>
+
+            <div class="glass-panel p-4 rounded-lg">
+                <h3 class="text-xs font-bold text-white/40 uppercase mb-4 mono tracking-widest">Ecosystem Stats</h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-white/60">Total Entries</span>
+                        <span id="stat-total" class="mono">--</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-white/60">Daily Logs</span>
+                        <span id="stat-daily" class="mono">--</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-white/60">Wisdom Nuggets</span>
+                        <span id="stat-wisdom" class="mono">--</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content: Lore Feed -->
+        <section class="lg:col-span-9 space-y-6">
+            <div class="flex items-center justify-between mb-2">
+                <h2 id="view-title" class="text-2xl font-bold mono">Chronicle Timeline</h2>
+                <div class="flex items-center space-x-4">
+                    <input type="text" id="lore-search" placeholder="Search the archive..." class="bg-white/5 border border-white/10 rounded px-4 py-2 text-sm focus:outline-none focus:border-accent-lore/50 w-64 mono">
+                </div>
+            </div>
+
+            <div id="lore-feed" class="space-y-4">
+                <!-- Loading State -->
+                <div class="glass-panel p-12 text-center rounded-lg border-dashed border-white/10">
+                    <div class="w-12 h-12 border-4 border-accent-lore/30 border-t-accent-lore rounded-full animate-spin mx-auto mb-4"></div>
+                    <p class="text-white/40 mono uppercase tracking-widest text-sm">Querying Lore Archive...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Entry Detail Overlay (Hidden) -->
+    <div id="entry-overlay" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] hidden items-center justify-center p-6">
+        <div class="glass-panel w-full max-w-4xl max-h-[90vh] rounded-xl overflow-hidden flex flex-col">
+            <div class="p-6 border-b border-white/10 flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <span id="overlay-type" class="px-2 py-0.5 bg-accent-lore/20 text-accent-lore text-[10px] font-bold mono rounded">DAILY_PROGRESS</span>
+                    <span id="overlay-date" class="text-xs text-white/40 mono">2026-01-03</span>
+                </div>
+                <button onclick="closeOverlay()" class="text-white/40 hover:text-white transition-all">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div id="overlay-content" class="p-8 overflow-y-auto prose prose-invert prose-purple max-w-none">
+                <!-- Content injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Record Lore Modal (Hidden) -->
+    <div id="record-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] hidden items-center justify-center p-6">
+        <div class="glass-panel w-full max-w-2xl rounded-xl p-8 space-y-6">
+            <h2 class="text-xl font-bold mono border-b border-white/10 pb-4">Record New Lore</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-white/40 uppercase mono">Category</label>
+                    <select id="record-type" class="w-full bg-white/5 border border-white/10 rounded p-2 text-sm focus:outline-none focus:border-accent-lore/50">
+                        <option value="WISDOM_NUGGET">Wisdom Nugget</option>
+                        <option value="DAILY_PROGRESS">Daily Progress</option>
+                        <option value="CANON_ENTRY">Canon Entry</option>
+                        <option value="VOICE_OF_THE_PILOT">Voice of the Pilot</option>
+                        <option value="AGENT_REFLECTION">Agent Reflection</option>
+                    </select>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-[10px] font-bold text-white/40 uppercase mono">Title</label>
+                    <input type="text" id="record-title" class="w-full bg-white/5 border border-white/10 rounded p-2 text-sm focus:outline-none focus:border-accent-lore/50">
+                </div>
+            </div>
+            <div class="space-y-2">
+                <label class="text-[10px] font-bold text-white/40 uppercase mono">Content (Markdown)</label>
+                <textarea id="record-content" rows="6" class="w-full bg-white/5 border border-white/10 rounded p-2 text-sm focus:outline-none focus:border-accent-lore/50 mono"></textarea>
+            </div>
+            <div class="flex justify-end space-x-4 pt-4">
+                <button onclick="hideRecordModal()" class="px-4 py-2 text-white/60 hover:text-white transition-all mono text-xs">CANCEL</button>
+                <button onclick="submitLore()" class="px-6 py-2 bg-accent-lore text-white font-bold rounded hover:bg-accent-lore/80 transition-all mono text-xs">COMMENCE RECORDING</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let _state = {
+            token: localStorage.getItem('hapa_lore_dev_token_v1') || '',
+            connected: false,
+            view: 'timeline',
+            entries: []
+        };
+
+        const API_BASE = window.location.origin;
+
+        async function init() {
+            if (_state.token) {
+                connect();
+            } else {
+                renderDisconnected();
+            }
+        }
+
+        async function connect() {
+            try {
+                const resp = await fetch(`${API_BASE}/health`);
+                if (resp.ok) {
+                    _state.connected = true;
+                    renderConnected();
+                    refreshLore();
+                }
+            } catch (e) {
+                console.error("Connection failed", e);
+                renderDisconnected();
+            }
+        }
+
+        function renderConnected() {
+            const status = document.getElementById('connection-status');
+            status.innerHTML = `<span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span><span class="text-green-400">NOMINAL</span>`;
+            document.getElementById('connect-btn').innerText = 'REFRESH';
+        }
+
+        function renderDisconnected() {
+            const status = document.getElementById('connection-status');
+            status.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span><span class="text-red-500">DISCONNECTED</span>`;
+            document.getElementById('connect-btn').innerText = 'CONNECT';
+        }
+
+        async function refreshLore() {
+            if (!_state.connected) return;
+            
+            const feed = document.getElementById('lore-feed');
+            feed.innerHTML = `
+                <div class="glass-panel p-12 text-center rounded-lg border-dashed border-white/10">
+                    <div class="w-12 h-12 border-4 border-accent-lore/30 border-t-accent-lore rounded-full animate-spin mx-auto mb-4"></div>
+                    <p class="text-white/40 mono uppercase tracking-widest text-sm">Synchronizing Lore Archive...</p>
+                </div>
+            `;
+
+            try {
+                let url = `${API_BASE}/v1/lore/search?limit=50`;
+                if (_state.view === 'wisdom') url += '&type=WISDOM_NUGGET';
+                if (_state.view === 'canon') url += '&type=CANON_ENTRY';
+
+                const resp = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${_state.token}` }
+                });
+                
+                if (resp.status === 401) {
+                    const token = prompt("Enter Hapa Lore Node Bearer Token:");
+                    if (token) {
+                        _state.token = token;
+                        localStorage.setItem('hapa_lore_dev_token_v1', token);
+                        refreshLore();
+                    }
+                    return;
+                }
+
+                _state.entries = await resp.json();
+                renderFeed();
+                updateStats();
+            } catch (e) {
+                feed.innerHTML = `<div class="p-8 text-red-400 mono">Archive read failure: ${e.message}</div>`;
+            }
+        }
+
+        function renderFeed() {
+            const feed = document.getElementById('lore-feed');
+            if (_state.entries.length === 0) {
+                feed.innerHTML = `<div class="p-12 glass-panel text-center text-white/40 mono uppercase tracking-widest">No entries found in this chronicle sector.</div>`;
+                return;
+            }
+
+            feed.innerHTML = _state.entries.map(entry => `
+                <div onclick="openEntry('${entry.id}')" class="lore-card glass-panel p-6 rounded-lg cursor-pointer transition-all">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-[10px] font-bold text-accent-lore mono uppercase tracking-tighter">${entry.type}</span>
+                        <span class="text-xs text-white/30 mono">${new Date(entry.date_utc).toLocaleDateString()}</span>
+                    </div>
+                    <h3 class="text-lg font-bold mb-2">${entry.title}</h3>
+                    <p class="text-white/60 text-sm line-clamp-2">${entry.content.replace(/#.*$/gm, '').trim()}</p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        ${entry.tags.map(t => `<span class="px-2 py-0.5 bg-white/5 rounded text-[10px] text-white/40 mono">#${t}</span>`).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateStats() {
+            document.getElementById('stat-total').innerText = _state.entries.length;
+            document.getElementById('stat-daily').innerText = _state.entries.filter(e => e.type === 'DAILY_PROGRESS').length;
+            document.getElementById('stat-wisdom').innerText = _state.entries.filter(e => e.type === 'WISDOM_NUGGET').length;
+        }
+
+        function setView(view) {
+            _state.view = view;
+            document.getElementById('view-title').innerText = 
+                view === 'timeline' ? 'Chronicle Timeline' : 
+                view === 'wisdom' ? 'Nuggets of Wisdom' : 'Authoritative Canon';
+            
+            // Update nav active state
+            document.querySelectorAll('nav button').forEach(btn => {
+                if (btn.innerText.toLowerCase() === view.toLowerCase()) {
+                    btn.classList.add('bg-white/5', 'border-l-2', 'border-accent-lore');
+                    btn.classList.remove('text-white/60');
+                } else {
+                    btn.classList.remove('bg-white/5', 'border-l-2', 'border-accent-lore');
+                    btn.classList.add('text-white/60');
+                }
+            });
+
+            refreshLore();
+        }
+
+        function openEntry(id) {
+            const entry = _state.entries.find(e => e.id === id);
+            if (!entry) return;
+
+            document.getElementById('overlay-type').innerText = entry.type;
+            document.getElementById('overlay-date').innerText = new Date(entry.date_utc).toLocaleString();
+            
+            // Simple markdown-to-html (could use a lib for production)
+            let html = `<h1>${entry.title}</h1>`;
+            html += entry.content.split('\n').map(line => {
+                if (line.startsWith('# ')) return `<h1>${line.substring(2)}</h1>`;
+                if (line.startsWith('## ')) return `<h2>${line.substring(3)}</h2>`;
+                if (line.startsWith('- ')) return `<li>${line.substring(2)}</li>`;
+                return `<p>${line}</p>`;
+            }).join('');
+
+            document.getElementById('overlay-content').innerHTML = html;
+            document.getElementById('entry-overlay').classList.remove('hidden');
+            document.getElementById('entry-overlay').classList.add('flex');
+        }
+
+        function closeOverlay() {
+            document.getElementById('entry-overlay').classList.add('hidden');
+        }
+
+        function showRecordModal() {
+            document.getElementById('record-modal').classList.remove('hidden');
+            document.getElementById('record-modal').classList.add('flex');
+        }
+
+        function hideRecordModal() {
+            document.getElementById('record-modal').classList.add('hidden');
+        }
+
+        async function submitLore() {
+            const payload = {
+                type: document.getElementById('record-type').value,
+                title: document.getElementById('record-title').value,
+                content: document.getElementById('record-content').value,
+                author: 'human', // In a real app, this would be the logged in user
+                tags: []
+            };
+
+            if (!payload.title || !payload.content) {
+                alert("Lore requires both Title and Substance.");
+                return;
+            }
+
+            try {
+                const resp = await fetch(`${API_BASE}/v1/lore`, {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': `Bearer ${_state.token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (resp.ok) {
+                    hideRecordModal();
+                    refreshLore();
+                } else {
+                    alert(`Archive rejection: ${resp.status}`);
+                }
+            } catch (e) {
+                alert(`Network error: ${e.message}`);
+            }
+        }
+
+        // Search listener
+        document.getElementById('lore-search').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const q = e.target.value;
+                // Basic client side filter for now
+                if (!q) {
+                    refreshLore();
+                    return;
+                }
+                _state.entries = _state.entries.filter(entry => 
+                    entry.title.toLowerCase().includes(q.toLowerCase()) || 
+                    entry.content.toLowerCase().includes(q.toLowerCase()) ||
+                    entry.tags.some(t => t.toLowerCase().includes(q.toLowerCase()))
+                );
+                renderFeed();
+            }
+        });
+
+        document.getElementById('connect-btn').onclick = connect;
+
+        init();
+    </script>
+</body>
+</html>
