@@ -296,3 +296,13 @@ git lfs pull
 ```
 
 - Track work in `dev_journal.md` and keep the PRD updated as features evolve.
+
+<!-- HAPA_NODE_ATLAS_DEMO:START -->
+## See It In Action
+
+<a href="https://calderwong.github.io/hapa-node-atlas/">
+  <img src="https://calderwong.github.io/hapa-node-atlas/assets/atalas-hero-loop-poster.jpg" alt="Hapa Node Atlas live demo" width="360">
+</a>
+
+[Open the Hapa Node Atlas demo](https://calderwong.github.io/hapa-node-atlas/)
+<!-- HAPA_NODE_ATLAS_DEMO:END -->
